@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { KeyRound, User, Loader2, HeartPulse, Settings, ArrowRight } from 'lucide-react';
 
 export const Login = () => {
-  const { login, isDbConnected } = useData();
+  const { login, loginDemo, isDbConnected } = useData();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,6 +21,11 @@ export const Login = () => {
     if (success) {
       navigate('/');
     }
+  };
+
+  const handleDemoLogin = () => {
+      loginDemo();
+      navigate('/');
   };
 
   return (
@@ -113,7 +118,7 @@ export const Login = () => {
                 </div>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-3">
                 <button
                     type="submit"
                     disabled={loading}
@@ -124,6 +129,14 @@ export const Login = () => {
                             Sign In <ArrowRight className="w-4 h-4 ml-1" />
                         </>
                     )}
+                </button>
+
+                <button
+                    type="button"
+                    onClick={handleDemoLogin}
+                    className="w-full bg-white text-slate-500 font-bold py-3 rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-700 hover:border-slate-300 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wide"
+                >
+                    Enter Demo Mode (No DB)
                 </button>
               </div>
             </form>

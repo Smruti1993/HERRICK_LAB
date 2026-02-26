@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
-  DoctorAvailability, Appointment, ToastMessage, Bill, BillItem, Payment,
+  DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
   VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder
 } from '../types';
 import { 
@@ -14,6 +14,7 @@ import {
 interface DataContextType {
   user: AppUser | null;
   login: (u: string, p: string) => Promise<boolean>;
+  loginDemo: () => boolean;
   logout: () => void;
 
   patients: Patient[];
@@ -72,6 +73,7 @@ interface DataContextType {
   
   toasts: ToastMessage[];
   showToast: (type: 'success' | 'error' | 'info', message: string) => void;
+  addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   removeToast: (id: string) => void;
   
   isLoading: boolean;
@@ -371,6 +373,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTimeout(() => removeToast(id), 5000);
   };
 
+  const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+      showToast(type, message);
+  };
+
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
@@ -408,15 +414,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const supabase = getSupabase();
       
       try {
-          const { data, error } = await supabase
-              .from('app_users')
-              .select('*')
-              .eq('username', username)
-              .eq('password', password)
-              .single();
+          // Add 10s timeout to prevent infinite loading
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection timed out. Check your internet or DB URL.')), 10000)
+          );
+
+          const { data, error } = await Promise.race([
+              supabase
+                .from('app_users')
+                .select('*')
+                .eq('username', username)
+                .eq('password', password)
+                .single(),
+              timeoutPromise
+          ]) as any;
 
           if (error || !data) {
-              showToast('error', 'Invalid username or password');
+              console.error("Login error:", error);
+              showToast('error', error?.message || 'Invalid username or password');
               setIsLoading(false);
               return false;
           }
@@ -433,13 +448,27 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           localStorage.setItem('medicore_user', JSON.stringify(loggedUser));
           showToast('success', `Welcome back, ${loggedUser.fullName}`);
           return true;
-      } catch (e) {
-          console.error(e);
-          showToast('error', 'Login failed');
+      } catch (e: any) {
+          console.error("Login exception:", e);
+          showToast('error', e.message || 'Login failed');
           return false;
       } finally {
           setIsLoading(false);
       }
+  };
+
+  const loginDemo = () => {
+      const demoUser: AppUser = {
+          id: 'demo-user',
+          username: 'demo',
+          role: 'Administrator',
+          fullName: 'Demo Admin',
+          employeeId: 'DEMO-001'
+      };
+      setUser(demoUser);
+      localStorage.setItem('medicore_user', JSON.stringify(demoUser));
+      showToast('success', 'Logged in to Demo Mode');
+      return true;
   };
 
   const logout = () => {
@@ -903,7 +932,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   return (
     <DataContext.Provider value={{
-      user, login, logout,
+      user, login, loginDemo, logout,
       patients, addPatient, updatePatient,
       employees, addEmployee, updateEmployee,
       departments, addDepartment,
@@ -917,7 +946,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       vitals, diagnoses, narrativeDiagnoses, clinicalNotes, allergies, 
       saveVitalSign, saveDiagnosis, deleteDiagnosis, saveNarrativeDiagnosis, saveClinicalNote, saveAllergy,
       serviceOrders, saveServiceOrders,
-      toasts, showToast, removeToast,
+      toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
     }}>
       {children}
