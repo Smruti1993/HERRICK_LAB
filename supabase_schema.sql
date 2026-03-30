@@ -1,348 +1,267 @@
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
 
--- ==========================================
--- MIGRATION COMMANDS (Safe to run if tables exist)
--- ==========================================
-
--- 1. Fix for Clinical Diagnoses
-ALTER TABLE clinical_diagnoses ADD COLUMN IF NOT EXISTS icd_code TEXT;
-ALTER TABLE clinical_diagnoses ADD COLUMN IF NOT EXISTS is_poa BOOLEAN DEFAULT FALSE;
-
--- 2. Fix for Clinical Allergies
-ALTER TABLE clinical_allergies ADD COLUMN IF NOT EXISTS allergy_type TEXT;
-ALTER TABLE clinical_allergies ADD COLUMN IF NOT EXISTS onset_date DATE;
-ALTER TABLE clinical_allergies ADD COLUMN IF NOT EXISTS resolved_date DATE;
-ALTER TABLE clinical_allergies ADD COLUMN IF NOT EXISTS remarks TEXT;
-
--- 3. Fix for Appointments
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS check_in_time TIMESTAMP WITH TIME ZONE;
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS check_out_time TIMESTAMP WITH TIME ZONE;
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS visit_type TEXT DEFAULT 'New Visit';
-ALTER TABLE appointments ADD COLUMN IF NOT EXISTS payment_mode TEXT DEFAULT 'CASH';
-
--- 4. New Table: Service Definitions (Service Master)
-CREATE TABLE IF NOT EXISTS service_definitions (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    name TEXT NOT NULL,
-    alternate_name TEXT,
-    service_type TEXT,
-    service_category TEXT,
-    est_duration INTEGER,
-    status TEXT DEFAULT 'Active',
-    chargeable BOOLEAN DEFAULT TRUE,
-    applicable_visit_type TEXT DEFAULT 'Both',
-    applicable_gender TEXT DEFAULT 'Both',
-    re_order_duration INTEGER,
-    auto_cancellation_days INTEGER,
-    min_time_billing INTEGER,
-    max_time_billing INTEGER,
-    max_orderable_qty INTEGER,
-    cpt_code TEXT,
-    nphies_code TEXT,
-    nphies_desc TEXT,
-    schedulable BOOLEAN DEFAULT FALSE,
-    surgical_service BOOLEAN DEFAULT FALSE,
-    individually_orderable BOOLEAN DEFAULT TRUE,
-    auto_processable BOOLEAN DEFAULT FALSE,
-    consent_required BOOLEAN DEFAULT FALSE,
-    is_restricted BOOLEAN DEFAULT FALSE,
-    is_external BOOLEAN DEFAULT FALSE,
-    is_percentage_tariff BOOLEAN DEFAULT FALSE,
-    is_tooth_mandatory BOOLEAN DEFAULT FALSE,
-    is_auth_required BOOLEAN DEFAULT FALSE,
-    group_name TEXT,
-    billing_group_name TEXT,
-    financial_group TEXT,
-    cpt_description TEXT,
-    special_instructions TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 1. Departments
+create table if not exists departments (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  code text not null,
+  status text default 'Active'
 );
 
--- 5. New Table: App Users (Login)
-CREATE TABLE IF NOT EXISTS app_users (
-    id TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL,
-    employee_id TEXT REFERENCES employees(id) ON DELETE SET NULL,
-    full_name TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 2. Employees (Doctors & Staff)
+create table if not exists employees (
+  id uuid primary key default uuid_generate_v4(),
+  first_name text not null,
+  last_name text not null,
+  email text,
+  phone text,
+  role text not null, -- 'Doctor', 'Nurse', 'Admin', 'Receptionist'
+  department_id uuid references departments(id),
+  specialization text,
+  status text default 'Active'
 );
 
--- 6. New Table: Service Tariffs
-CREATE TABLE IF NOT EXISTS service_tariffs (
-    id TEXT PRIMARY KEY,
-    service_id TEXT REFERENCES service_definitions(id) ON DELETE CASCADE,
-    tariff_name TEXT NOT NULL,
-    price NUMERIC(10, 2) DEFAULT 0,
-    effective_date DATE DEFAULT CURRENT_DATE,
-    status TEXT DEFAULT 'Active',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 3. App Users (for Login)
+create table if not exists app_users (
+  id uuid primary key default uuid_generate_v4(),
+  username text unique not null,
+  password text not null, -- Plain text for demo simplicity, use hashing in prod
+  role text not null,
+  full_name text,
+  employee_id uuid references employees(id)
 );
 
--- 7. New Table: Service Orders (CPOE)
-CREATE TABLE IF NOT EXISTS service_orders (
-    id TEXT PRIMARY KEY,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE CASCADE,
-    service_id TEXT REFERENCES service_definitions(id) ON DELETE SET NULL,
-    service_name TEXT, -- Snapshot
-    cpt_code TEXT, -- Snapshot
-    quantity INTEGER DEFAULT 1,
-    unit_price NUMERIC(10, 2) DEFAULT 0,
-    discount_amount NUMERIC(10, 2) DEFAULT 0,
-    total_price NUMERIC(10, 2) DEFAULT 0,
-    order_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    status TEXT DEFAULT 'Ordered',
-    billing_status TEXT DEFAULT 'Pending',
-    priority TEXT DEFAULT 'Routine',
-    ordering_doctor_id TEXT REFERENCES employees(id) ON DELETE SET NULL,
-    instructions TEXT,
-    service_center TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 4. Patients
+create table if not exists patients (
+  id uuid primary key default uuid_generate_v4(),
+  first_name text not null,
+  last_name text not null,
+  dob date,
+  gender text,
+  phone text,
+  email text,
+  address text,
+  registration_date timestamp with time zone default now()
 );
 
--- Insert default admin user if not exists
-INSERT INTO app_users (username, password, role, full_name)
-SELECT 'admin', 'admin123', 'Admin', 'Dr. System Administrator'
-WHERE NOT EXISTS (SELECT 1 FROM app_users WHERE username = 'admin');
-
--- CRITICAL: Refresh the PostgREST schema cache
-NOTIFY pgrst, 'reload schema';
-
--- ==========================================
--- TABLE DEFINITIONS (If starting from scratch)
--- ==========================================
-
--- Master Data
-CREATE TABLE IF NOT EXISTS departments (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    code TEXT,
-    status TEXT DEFAULT 'Active'
+-- 5. Appointments
+create table if not exists appointments (
+  id uuid primary key default uuid_generate_v4(),
+  patient_id uuid references patients(id),
+  doctor_id uuid references employees(id),
+  department_id uuid references departments(id),
+  date text not null, -- YYYY-MM-DD
+  time text not null, -- HH:MM
+  status text default 'Scheduled', -- 'Scheduled', 'Completed', 'Cancelled', 'No Show'
+  symptoms text,
+  notes text,
+  visit_type text, -- 'New Visit', 'Follow-up'
+  payment_mode text,
+  check_in_time timestamp with time zone,
+  check_out_time timestamp with time zone
 );
 
-CREATE TABLE IF NOT EXISTS units (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    code TEXT,
-    status TEXT DEFAULT 'Active'
+-- 6. Doctor Availability
+create table if not exists doctor_availability (
+  id uuid primary key default uuid_generate_v4(),
+  doctor_id uuid references employees(id),
+  day_of_week text not null, -- 'Monday', etc.
+  start_time text not null,
+  end_time text not null,
+  slot_duration_minutes integer default 15
 );
 
-CREATE TABLE IF NOT EXISTS service_centres (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    code TEXT,
-    status TEXT DEFAULT 'Active'
+-- 7. Bills
+create table if not exists bills (
+  id uuid primary key default uuid_generate_v4(),
+  patient_id uuid references patients(id),
+  appointment_id uuid references appointments(id),
+  date timestamp with time zone default now(),
+  status text default 'Unpaid', -- 'Unpaid', 'Paid', 'Partial', 'Cancelled'
+  total_amount numeric(10,2) default 0,
+  paid_amount numeric(10,2) default 0
 );
 
-CREATE TABLE IF NOT EXISTS master_diagnoses (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    description TEXT NOT NULL,
-    status TEXT DEFAULT 'Active'
+-- 8. Bill Items
+create table if not exists bill_items (
+  id uuid primary key default uuid_generate_v4(),
+  bill_id uuid references bills(id) on delete cascade,
+  description text not null,
+  quantity numeric(10,2) default 1,
+  unit_price numeric(10,2) default 0,
+  total numeric(10,2) default 0
 );
 
--- Staff & Patients
-CREATE TABLE IF NOT EXISTS employees (
-    id TEXT PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    email TEXT,
-    phone TEXT,
-    role TEXT NOT NULL,
-    department_id TEXT REFERENCES departments(id) ON DELETE SET NULL,
-    specialization TEXT,
-    status TEXT DEFAULT 'Active'
+-- 9. Payments
+create table if not exists payments (
+  id uuid primary key default uuid_generate_v4(),
+  bill_id uuid references bills(id),
+  date timestamp with time zone default now(),
+  amount numeric(10,2) not null,
+  method text, -- 'Cash', 'Card', 'Insurance'
+  reference text
 );
 
-CREATE TABLE IF NOT EXISTS patients (
-    id TEXT PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    dob DATE,
-    gender TEXT,
-    phone TEXT,
-    email TEXT,
-    address TEXT,
-    registration_date TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 10. Clinical Vitals
+create table if not exists clinical_vitals (
+  id uuid primary key default uuid_generate_v4(),
+  appointment_id uuid references appointments(id),
+  recorded_at timestamp with time zone default now(),
+  bp_systolic integer,
+  bp_diastolic integer,
+  temperature numeric(5,2),
+  pulse integer,
+  respiratory_rate integer,
+  weight numeric(5,2),
+  height numeric(5,2),
+  bmi numeric(5,2),
+  spo2 integer,
+  map integer,
+  tobacco_use text,
+  row_remarks text
 );
 
-CREATE TABLE IF NOT EXISTS doctor_availability (
-    id TEXT PRIMARY KEY,
-    doctor_id TEXT REFERENCES employees(id) ON DELETE CASCADE,
-    day_of_week INTEGER NOT NULL,
-    start_time TEXT NOT NULL,
-    end_time TEXT NOT NULL,
-    slot_duration_minutes INTEGER DEFAULT 30
+-- 11. Clinical Diagnoses
+create table if not exists clinical_diagnoses (
+  id uuid primary key default uuid_generate_v4(),
+  appointment_id uuid references appointments(id),
+  code text,
+  icd_code text,
+  description text,
+  type text, -- 'Principal', 'Secondary'
+  is_poa boolean default false,
+  added_at timestamp with time zone default now()
 );
 
--- Appointments
-CREATE TABLE IF NOT EXISTS appointments (
-    id TEXT PRIMARY KEY,
-    patient_id TEXT REFERENCES patients(id) ON DELETE CASCADE,
-    doctor_id TEXT REFERENCES employees(id) ON DELETE SET NULL,
-    department_id TEXT REFERENCES departments(id) ON DELETE SET NULL,
-    date TEXT NOT NULL,
-    time TEXT NOT NULL,
-    status TEXT DEFAULT 'Scheduled',
-    visit_type TEXT DEFAULT 'New Visit',
-    payment_mode TEXT DEFAULT 'CASH',
-    symptoms TEXT,
-    notes TEXT,
-    check_in_time TIMESTAMP WITH TIME ZONE,
-    check_out_time TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 12. Clinical Notes
+create table if not exists clinical_notes (
+  id uuid primary key default uuid_generate_v4(),
+  appointment_id uuid references appointments(id),
+  note_type text, -- 'Chief Complaint', 'History', 'Examination', 'Plan'
+  description text,
+  recorded_at timestamp with time zone default now()
 );
 
--- Billing
-CREATE TABLE IF NOT EXISTS bills (
-    id TEXT PRIMARY KEY,
-    patient_id TEXT REFERENCES patients(id) ON DELETE CASCADE,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE SET NULL,
-    date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    status TEXT DEFAULT 'Unpaid',
-    total_amount NUMERIC(10, 2) DEFAULT 0,
-    paid_amount NUMERIC(10, 2) DEFAULT 0
+-- 13. Clinical Allergies
+create table if not exists clinical_allergies (
+  id uuid primary key default uuid_generate_v4(),
+  patient_id uuid references patients(id),
+  allergen text not null,
+  severity text, -- 'Mild', 'Moderate', 'Severe'
+  reaction text,
+  status text default 'Active',
+  allergy_type text,
+  onset_date date,
+  resolved_date date,
+  remarks text
 );
 
-CREATE TABLE IF NOT EXISTS bill_items (
-    id TEXT PRIMARY KEY,
-    bill_id TEXT REFERENCES bills(id) ON DELETE CASCADE,
-    description TEXT NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    unit_price NUMERIC(10, 2) DEFAULT 0,
-    total NUMERIC(10, 2) DEFAULT 0
+-- 14. Narrative Diagnoses
+create table if not exists clinical_narrative_diagnoses (
+  id uuid primary key default uuid_generate_v4(),
+  appointment_id uuid references appointments(id),
+  illness text,
+  illness_duration_value integer,
+  illness_duration_unit text,
+  behavioural_activity text,
+  narrative text,
+  recorded_at timestamp with time zone default now()
 );
 
-CREATE TABLE IF NOT EXISTS payments (
-    id TEXT PRIMARY KEY,
-    bill_id TEXT REFERENCES bills(id) ON DELETE CASCADE,
-    date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    amount NUMERIC(10, 2) DEFAULT 0,
-    method TEXT,
-    reference TEXT
+-- 15. Master Diagnoses (ICD-10 or similar)
+create table if not exists master_diagnoses (
+  id uuid primary key default uuid_generate_v4(),
+  code text unique not null,
+  description text not null,
+  status text default 'Active'
 );
 
--- Clinical Data
-CREATE TABLE IF NOT EXISTS clinical_vitals (
-    id TEXT PRIMARY KEY,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE CASCADE,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    bp_systolic INTEGER,
-    bp_diastolic INTEGER,
-    temperature NUMERIC(4, 1),
-    pulse INTEGER,
-    respiratory_rate INTEGER,
-    map NUMERIC(5, 2),
-    spo2 INTEGER,
-    height NUMERIC(5, 2),
-    weight NUMERIC(5, 2),
-    bmi NUMERIC(4, 1),
-    tobacco_use TEXT,
-    row_remarks JSONB
+-- 16. Service Definitions
+create table if not exists service_definitions (
+  id uuid primary key default uuid_generate_v4(),
+  code text unique not null,
+  name text not null,
+  alternate_name text,
+  service_type text,
+  service_category text,
+  est_duration integer,
+  status text default 'Active',
+  chargeable boolean default true,
+  applicable_visit_type text,
+  applicable_gender text,
+  re_order_duration integer,
+  auto_cancellation_days integer,
+  min_time_billing integer,
+  max_time_billing integer,
+  max_orderable_qty integer,
+  cpt_code text,
+  nphies_code text,
+  nphies_desc text,
+  schedulable boolean default false,
+  surgical_service boolean default false,
+  individually_orderable boolean default true,
+  auto_processable boolean default false,
+  consent_required boolean default false,
+  is_restricted boolean default false,
+  is_external boolean default false,
+  is_percentage_tariff boolean default false,
+  is_tooth_mandatory boolean default false,
+  is_auth_required boolean default false,
+  group_name text,
+  billing_group_name text,
+  financial_group text,
+  cpt_description text,
+  special_instructions text
 );
 
-CREATE TABLE IF NOT EXISTS clinical_diagnoses (
-    id TEXT PRIMARY KEY,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE CASCADE,
-    code TEXT,
-    icd_code TEXT,
-    description TEXT NOT NULL,
-    type TEXT DEFAULT 'Provisional',
-    is_poa BOOLEAN DEFAULT FALSE,
-    added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 17. Service Tariffs
+create table if not exists service_tariffs (
+  id uuid primary key default uuid_generate_v4(),
+  service_id uuid references service_definitions(id) on delete cascade,
+  tariff_name text not null,
+  price numeric(10,2) default 0,
+  effective_date date,
+  status text default 'Active'
 );
 
-CREATE TABLE IF NOT EXISTS clinical_narrative_diagnoses (
-    id TEXT PRIMARY KEY,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE CASCADE,
-    illness TEXT,
-    illness_duration_value INTEGER,
-    illness_duration_unit TEXT,
-    behavioural_activity TEXT,
-    narrative TEXT,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 18. Service Orders
+create table if not exists service_orders (
+  id uuid primary key default uuid_generate_v4(),
+  appointment_id uuid references appointments(id),
+  service_id uuid references service_definitions(id),
+  service_name text,
+  cpt_code text,
+  quantity numeric(10,2) default 1,
+  unit_price numeric(10,2) default 0,
+  discount_amount numeric(10,2) default 0,
+  total_price numeric(10,2) default 0,
+  order_date timestamp with time zone default now(),
+  status text default 'Ordered', -- 'Ordered', 'Completed', 'Cancelled'
+  billing_status text default 'Pending', -- 'Pending', 'Invoiced'
+  priority text,
+  ordering_doctor_id uuid references employees(id),
+  instructions text,
+  service_center text
 );
 
-CREATE TABLE IF NOT EXISTS clinical_allergies (
-    id TEXT PRIMARY KEY,
-    patient_id TEXT REFERENCES patients(id) ON DELETE CASCADE,
-    allergen TEXT NOT NULL,
-    allergy_type TEXT,
-    severity TEXT,
-    reaction TEXT,
-    status TEXT DEFAULT 'Active',
-    onset_date DATE,
-    resolved_date DATE,
-    remarks TEXT,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- 19. Units
+create table if not exists units (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  code text,
+  status text default 'Active'
 );
 
-CREATE TABLE IF NOT EXISTS clinical_notes (
-    id TEXT PRIMARY KEY,
-    appointment_id TEXT REFERENCES appointments(id) ON DELETE CASCADE,
-    note_type TEXT NOT NULL,
-    description TEXT,
-    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
+-- 20. Service Centres
+create table if not exists service_centres (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  code text,
+  status text default 'Active'
 );
 
--- Indexes
-CREATE INDEX IF NOT EXISTS idx_appointments_patient ON appointments(patient_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_doctor ON appointments(doctor_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
-CREATE INDEX IF NOT EXISTS idx_bills_patient ON bills(patient_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_notes_appt ON clinical_notes(appointment_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_vitals_appt ON clinical_vitals(appointment_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_diagnoses_appt ON clinical_diagnoses(appointment_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_narrative_appt ON clinical_narrative_diagnoses(appointment_id);
-CREATE INDEX IF NOT EXISTS idx_clinical_allergies_patient ON clinical_allergies(patient_id);
-CREATE INDEX IF NOT EXISTS idx_patients_name ON patients(last_name);
-CREATE INDEX IF NOT EXISTS idx_employees_dept ON employees(department_id);
-CREATE INDEX IF NOT EXISTS idx_master_diagnoses_desc ON master_diagnoses(description);
-CREATE INDEX IF NOT EXISTS idx_service_defs_code ON service_definitions(code);
-CREATE INDEX IF NOT EXISTS idx_service_tariffs_service ON service_tariffs(service_id);
-CREATE INDEX IF NOT EXISTS idx_service_orders_appt ON service_orders(appointment_id);
-
--- RLS (Open Access for Development)
-ALTER TABLE departments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE units ENABLE ROW LEVEL SECURITY;
-ALTER TABLE service_centres ENABLE ROW LEVEL SECURITY;
-ALTER TABLE master_diagnoses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE patients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE doctor_availability ENABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bills ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bill_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clinical_vitals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clinical_diagnoses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clinical_narrative_diagnoses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clinical_allergies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clinical_notes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE service_definitions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app_users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE service_tariffs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE service_orders ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Enable all access for all users" ON departments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON units FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON service_centres FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON master_diagnoses FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON employees FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON patients FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON doctor_availability FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON appointments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON bills FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON bill_items FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON payments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON clinical_vitals FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON clinical_diagnoses FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON clinical_narrative_diagnoses FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON clinical_allergies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON clinical_notes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON service_definitions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON app_users FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON service_tariffs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users" ON service_orders FOR ALL USING (true) WITH CHECK (true);
+-- Seed Initial Admin User
+insert into app_users (username, password, role, full_name)
+values ('admin', 'admin123', 'Administrator', 'System Admin')
+on conflict (username) do nothing;

@@ -292,7 +292,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       try {
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes] = await Promise.all([
+        // Create a timeout promise (15 seconds)
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Data sync timed out. Check your connection.')), 15000)
+        );
+
+        const fetchPromise = Promise.all([
           supabase.from('patients').select('*'),
           supabase.from('employees').select('*'),
           supabase.from('departments').select('*'),
@@ -313,6 +318,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('service_tariffs').select('*'),
           supabase.from('service_orders').select('*'),
         ]);
+
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes] = 
+            await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
 
@@ -338,9 +346,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const rawItems = biRes.data || [];
             const rawPayments = payRes.data || [];
 
-            const structuredBills = rawBills.map(b => {
-                const myItems = rawItems.filter(i => i.bill_id === b.id);
-                const myPayments = rawPayments.filter(p => p.bill_id === b.id);
+            const structuredBills = rawBills.map((b: any) => {
+                const myItems = rawItems.filter((i: any) => i.bill_id === b.id);
+                const myPayments = rawPayments.filter((p: any) => p.bill_id === b.id);
                 return mapBillFromDb(b, myItems, myPayments);
             });
             setBills(structuredBills);

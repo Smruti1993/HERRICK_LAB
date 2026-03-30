@@ -280,69 +280,166 @@ export const Billing = () => {
 
       const html = `
         <!DOCTYPE html>
-        <html>
+        <html dir="ltr">
         <head>
-          <title>Invoice #${bill.id.slice(-6)}</title>
+          <title>Invoice #${bill.id}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-            body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-            .header { display: flex; justify-content: space-between; margin-bottom: 50px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; }
-            .logo { font-size: 24px; font-weight: 800; color: #2563eb; letter-spacing: -0.5px; margin-bottom: 5px; }
-            .sub-logo { font-size: 13px; color: #64748b; }
-            .meta { text-align: right; }
-            .invoice-title { font-size: 32px; font-weight: 800; color: #0f172a; margin: 0 0 5px 0; }
-            .invoice-meta { font-size: 14px; color: #64748b; line-height: 1.6; }
-            .columns { display: flex; justify-content: space-between; margin-bottom: 40px; gap: 40px; }
-            .col-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; font-weight: 700; margin-bottom: 8px; }
-            .address { font-size: 15px; line-height: 1.6; color: #334155; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-            th { text-align: left; padding: 12px 0; border-bottom: 2px solid #e2e8f0; font-size: 12px; text-transform: uppercase; color: #64748b; font-weight: 600; }
-            td { padding: 16px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; color: #334155; }
+            @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+            body { 
+                font-family: 'Inter', 'Tajawal', sans-serif; 
+                padding: 10px; 
+                color: #3b42cc; 
+                max-width: 1000px; 
+                margin: 0 auto; 
+                font-size: 13px;
+            }
+            .border-box { border: 1px solid #a0a8e0; border-collapse: collapse; }
+            .header-info { display: flex; width: 100%; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+            .info-card { 
+                flex: 1; 
+                border: 1px solid #a0a8e0; 
+                padding: 10px 15px; 
+            }
+            .info-row { display: flex; justify-content: space-between; padding: 2px 0; font-weight: 500;}
+            .info-label { width: 140px; }
+            .info-value { flex: 1; }
+            .info-arabic { width: 140px; text-align: right; }
+            
+            table { width: 100%; border-collapse: collapse; border: 1px solid #a0a8e0; margin-bottom: 20px;}
+            th, td { border: 1px solid #a0a8e0; padding: 6px 4px; text-align: center; }
+            th { font-weight: 600; }
+            .text-left { text-align: left; }
             .text-right { text-align: right; }
-            .text-center { text-align: center; }
-            .totals-container { display: flex; justify-content: flex-end; margin-top: 20px; }
-            .totals { width: 300px; }
-            .row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; color: #64748b; }
-            .total-row { font-weight: 700; font-size: 18px; color: #0f172a; border-top: 2px solid #e2e8f0; padding-top: 15px; margin-top: 10px; }
-            .paid-row { color: #16a34a; font-weight: 500; }
-            .due-row { color: #dc2626; font-weight: 600; font-size: 16px; border-top: 1px dashed #e2e8f0; padding-top: 10px; margin-top: 5px; }
-            .status-badge { display: inline-block; padding: 6px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-top: 10px; }
-            .status-paid { background: #dcfce7; color: #166534; }
-            .status-partial { background: #ffedd5; color: #9a3412; }
-            .status-unpaid { background: #fee2e2; color: #991b1b; }
-            .status-cancelled { background: #f1f5f9; color: #64748b; text-decoration: line-through; }
-            .payment-history { margin-top: 60px; border-top: 1px solid #e2e8f0; padding-top: 20px; }
-            .payment-history h4 { font-size: 14px; font-weight: 700; margin-bottom: 15px; color: #0f172a; }
-            .payment-row { display: flex; justify-content: space-between; font-size: 13px; color: #64748b; padding: 8px 0; border-bottom: 1px dashed #f1f5f9; }
-            @media print { body { padding: 0; } .no-print { display: none; } }
+            
+            .summary-box { float: right; width: 400px; margin-top: 10px;}
+            .summary-row { display: flex; justify-content: flex-end; padding: 4px 0; font-weight: 600; gap: 20px; text-align: right;}
+            .summary-label { flex: 1; display: flex; justify-content: flex-end; gap: 20px;}
+            .summary-value { width: 100px; text-align: center; }
+            
+            .group-row { background-color: #f8fafc; text-align: left; font-weight: bold; }
+            .remarks { margin-top: 250px; text-align: center; font-weight: bold; font-size: 15px; }
+
+            @media print { body { padding: 0; } }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div><div class="logo">MediCore HMS</div><div class="sub-logo">Excellence in Healthcare Management</div></div>
-            <div class="meta">
-              <h1 class="invoice-title">INVOICE</h1>
-              <div class="invoice-meta">#${bill.id.slice(-6)}<br>${new Date(bill.date).toLocaleDateString()}</div>
-              <div class="status-badge status-${bill.status.toLowerCase()}">${bill.status}</div>
-            </div>
+          <div class="header-info">
+              <div class="info-card">
+                  <div class="info-row"><span class="info-label">MRN :</span><span class="info-value">\${patient?.id?.toUpperCase() || 'ALH0000030173'}</span><span class="info-arabic">: رقم السجل الطبي</span></div>
+                  <div class="info-row"><span class="info-label">Patient Name:</span><span class="info-value">\${patient?.firstName || ''} \${patient?.lastName || ''}</span><span class="info-arabic">: اسم المريض</span></div>
+                  <div class="info-row"><span class="info-label">Nationality:</span><span class="info-value">BAHRAINI</span><span class="info-arabic">: جنسية</span></div>
+                  <div class="info-row"><span class="info-label">Identification No:</span><span class="info-value">0000000000</span><span class="info-arabic">: رقم الهوية / الاقامة</span></div>
+                  <div class="info-row"><span class="info-label">Visit No:</span><span class="info-value">OP-001</span><span class="info-arabic">: عدد الزيارات</span></div>
+                  <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">14Yrs/\${patient?.gender?.toUpperCase() || 'MALE'}</span><span class="info-arabic">: العمر / الجنس</span></div>
+              </div>
+              <div class="info-card">
+                  <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">INV-O-ALH-\${bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
+                  <div class="info-row"><span class="info-label">Bill Date:</span><span class="info-value">\${new Date(bill.date).toLocaleString()}</span><span class="info-arabic">: تاريخ الفاتورة</span></div>
+                  <div class="info-row"><span class="info-label">Consultant :</span><span class="info-value">Dr Hebtulla Hajrs</span><span class="info-arabic">: الطبيب المعالج</span></div>
+                  <div class="info-row"><span class="info-label">Insurance Name :</span><span class="info-value">CASH</span><span class="info-value">VATNO-</span></div>
+                  <div class="info-row"><span class="info-label">City :</span><span class="info-value"></span><span class="info-value">Postal Code-</span></div>
+                  <div class="info-row"><span class="info-label">Policy No :</span><span class="info-value">C001</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Policy Name :</span><span class="info-value">Cash Plan</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Membership No.:</span><span class="info-value"></span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Address:</span><span class="info-value">Dammam</span><span class="info-arabic"></span></div>
+              </div>
           </div>
-          <div class="columns">
-            <div style="flex: 1;"><div class="col-title">From</div><div class="address"><strong>MediCore Hospital</strong><br>123 Health Avenue<br>Medical District, HC 90210<br>billing@medicore.com</div></div>
-            <div style="flex: 1;"><div class="col-title">Bill To</div><div class="address"><strong>${patient?.firstName} ${patient?.lastName}</strong><br>${patient?.address || 'No address provided'}<br>${patient?.phone || ''}<br>${patient?.email || ''}</div></div>
-          </div>
+          
           <table>
-            <thead><tr><th style="width: 50%;">Description</th><th class="text-center">Qty</th><th class="text-right">Unit Price</th><th class="text-right">Total</th></tr></thead>
+            <thead>
+                <tr>
+                    <th class="text-left">Particulars<br/>وصف الخدمات الطبية</th>
+                    <th>CPT / Tooth<br/>No<br/>كود الخدمة/رقم السن</th>
+                    <th>Qty<br/>العدد</th>
+                    <th>Gross<br/>Amt<br/>اجمالي القيمة</th>
+                    <th>Discount<br/>Amt<br/>الخصم</th>
+                    <th>Sub<br/>Total<br/>الاجمالي بعد<br/>الخصم</th>
+                    <th>Deduct.<br/>Amount<br/>قيمة التحمل</th>
+                    <th>Net Amount<br/>صافي القيمة</th>
+                    <th>Patient<br/>VAT<br/>ضريبة المراجع</th>
+                    <th>Company<br/>Vat<br/>ضريبة شركة<br/>التأمين</th>
+                    <th>Deduct<br/>With<br/>Patient VAT<br/>قيمة التحمل<br/>بالضريبة</th>
+                    <th>Net Amt<br/>With<br/>Company<br/>VAT<br/>الصافي بالضريبة</th>
+                </tr>
+            </thead>
             <tbody>
-              ${bill.items.map(item => `<tr><td><div style="font-weight: 500; color: #0f172a;">${item.description}</div></td><td class="text-center">${item.quantity}</td><td class="text-right">$${item.unitPrice.toFixed(2)}</td><td class="text-right" style="font-weight: 500;">$${item.total.toFixed(2)}</td></tr>`).join('')}
+                <tr class="group-row"><td colspan="12">GP</td></tr>
+                \${bill.items.map(item => \`
+                <tr>
+                    <td class="text-left">\${item.description}</td>
+                    <td>ALH-5888/0</td>
+                    <td>\${item.quantity}</td>
+                    <td>\${item.total.toFixed(2)}</td>
+                    <td>0.00</td>
+                    <td>\${item.total.toFixed(2)}</td>
+                    <td>\${item.total.toFixed(2)}</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>\${item.total.toFixed(2)}</td>
+                    <td>0.00</td>
+                </tr>
+                \`).join('')}
+                <tr class="group-row" style="font-weight: 700;">
+                    <td colspan="3" class="text-left">Sub Total:</td>
+                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>0.00</td>
+                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>0.00</td>
+                </tr>
+                <tr class="group-row"><td colspan="12">Others</td></tr>
+                <tr>
+                    <td class="text-left">Payment - 10%</td>
+                    <td>ALH-103/0</td>
+                    <td>1</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                </tr>
+                <tr class="group-row" style="font-weight: 700;">
+                    <td colspan="3" class="text-left">Sub Total:</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                    <td>0.00</td>
+                </tr>
             </tbody>
           </table>
-          <div class="totals-container"><div class="totals"><div class="row"><span>Subtotal</span><span>$${bill.totalAmount.toFixed(2)}</span></div><div class="row"><span>Tax (0%)</span><span>$0.00</span></div><div class="row total-row"><span>Total</span><span>$${bill.totalAmount.toFixed(2)}</span></div><div class="row paid-row"><span>Amount Paid</span><span>$${bill.paidAmount.toFixed(2)}</span></div><div class="row due-row"><span>Balance Due</span><span>$${(bill.totalAmount - bill.paidAmount).toFixed(2)}</span></div></div></div>
-          ${bill.payments && bill.payments.length > 0 ? `<div class="payment-history"><h4>Payment History</h4>${bill.payments.map(p => `<div class="payment-row"><span>${new Date(p.date).toLocaleDateString()} &mdash; ${p.method} ${p.reference ? `(${p.reference})` : ''}</span><span>$${p.amount.toFixed(2)}</span></div>`).join('')}</div>` : ''}
-          <div style="margin-top: 50px; text-align: center; color: #94a3b8; font-size: 12px;">Thank you for choosing MediCore HMS. Get well soon!</div>
+          
+          <div class="summary-box">
+              <div class="summary-row"><div class="summary-label"><span>اجمالي القيمة</span><span>Gross Total :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>الخصم</span><span>Discount :</span></div><div class="summary-value">0.00</div></div>
+              <div class="summary-row"><div class="summary-label"><span>ضريبة شركة التأمين</span><span>VAT :</span></div><div class="summary-value">0.00</div></div>
+              <div class="summary-row"><div class="summary-label"><span>الاجمالي بعد الخصم بالضريبة</span><span>Total Amount including VAT :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>التحمل المدفوع نقدا</span><span>Patient Net Amount :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Collected Amount :</span></div><div class="summary-value">\${(bill.paidAmount || bill.totalAmount).toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Balance Amount :</span></div><div class="summary-value">0.00</div></div>
+              <div class="summary-row"><div class="summary-label"><span>الصافي بالضريبة</span><span>Insurance Net Amount :</span></div><div class="summary-value">0.00</div></div>
+          </div>
+          
+          <div style="clear: both;"></div>
+          <div class="remarks">Remarks:</div>
           <script>setTimeout(() => { window.print(); }, 500);</script>
         </body>
         </html>
-      `;
+      \`;
       printWindow.document.write(html);
       printWindow.document.close();
   };
