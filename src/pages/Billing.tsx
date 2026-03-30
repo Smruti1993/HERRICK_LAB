@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Plus, Search, Printer, DollarSign, FileText, Trash2, X, History, CreditCard, Package, Pill, Stethoscope, Save, ArrowLeft, MoreHorizontal, CheckSquare, Square, Loader2, Ban, AlertTriangle, Filter, ChevronDown, Download } from 'lucide-react';
+import { Plus, Search, Printer, DollarSign, FileText, Trash2, X, History, CreditCard, Package, Pill, Stethoscope, Save, ArrowLeft, MoreHorizontal, CheckSquare, Square, Loader2, Ban, AlertTriangle, ChevronDown } from 'lucide-react';
 import { Bill, BillItem, Payment, ServiceDefinition } from '../types';
 
 export const Billing = () => {
@@ -45,8 +45,8 @@ export const Billing = () => {
   const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
 
   // Summary State (Mocked mostly as we build the UI)
-  const [deposits, setDeposits] = useState(0);
-  const [collectedAmount, setCollectedAmount] = useState(0);
+  const [deposits] = useState(0);
+  const [collectedAmount] = useState(0);
 
   // --- Payment Modal State ---
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -326,16 +326,16 @@ export const Billing = () => {
         <body>
           <div class="header-info">
               <div class="info-card">
-                  <div class="info-row"><span class="info-label">MRN :</span><span class="info-value">\${patient?.id?.toUpperCase() || 'ALH0000030173'}</span><span class="info-arabic">: رقم السجل الطبي</span></div>
-                  <div class="info-row"><span class="info-label">Patient Name:</span><span class="info-value">\${patient?.firstName || ''} \${patient?.lastName || ''}</span><span class="info-arabic">: اسم المريض</span></div>
+                  <div class="info-row"><span class="info-label">MRN :</span><span class="info-value">${patient?.id?.toUpperCase() || 'ALH0000030173'}</span><span class="info-arabic">: رقم السجل الطبي</span></div>
+                  <div class="info-row"><span class="info-label">Patient Name:</span><span class="info-value">${patient?.firstName || ''} ${patient?.lastName || ''}</span><span class="info-arabic">: اسم المريض</span></div>
                   <div class="info-row"><span class="info-label">Nationality:</span><span class="info-value">BAHRAINI</span><span class="info-arabic">: جنسية</span></div>
                   <div class="info-row"><span class="info-label">Identification No:</span><span class="info-value">0000000000</span><span class="info-arabic">: رقم الهوية / الاقامة</span></div>
                   <div class="info-row"><span class="info-label">Visit No:</span><span class="info-value">OP-001</span><span class="info-arabic">: عدد الزيارات</span></div>
-                  <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">14Yrs/\${patient?.gender?.toUpperCase() || 'MALE'}</span><span class="info-arabic">: العمر / الجنس</span></div>
+                  <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">14Yrs/${patient?.gender?.toUpperCase() || 'MALE'}</span><span class="info-arabic">: العمر / الجنس</span></div>
               </div>
               <div class="info-card">
-                  <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">INV-O-ALH-\${bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
-                  <div class="info-row"><span class="info-label">Bill Date:</span><span class="info-value">\${new Date(bill.date).toLocaleString()}</span><span class="info-arabic">: تاريخ الفاتورة</span></div>
+                  <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">INV-O-ALH-${bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
+                  <div class="info-row"><span class="info-label">Bill Date:</span><span class="info-value">${new Date(bill.date).toLocaleString()}</span><span class="info-arabic">: تاريخ الفاتورة</span></div>
                   <div class="info-row"><span class="info-label">Consultant :</span><span class="info-value">Dr Hebtulla Hajrs</span><span class="info-arabic">: الطبيب المعالج</span></div>
                   <div class="info-row"><span class="info-label">Insurance Name :</span><span class="info-value">CASH</span><span class="info-value">VATNO-</span></div>
                   <div class="info-row"><span class="info-label">City :</span><span class="info-value"></span><span class="info-value">Postal Code-</span></div>
@@ -365,32 +365,32 @@ export const Billing = () => {
             </thead>
             <tbody>
                 <tr class="group-row"><td colspan="12">GP</td></tr>
-                \${bill.items.map(item => \`
+                ${bill.items.map(item => `
                 <tr>
-                    <td class="text-left">\${item.description}</td>
+                    <td class="text-left">${item.description}</td>
                     <td>ALH-5888/0</td>
-                    <td>\${item.quantity}</td>
-                    <td>\${item.total.toFixed(2)}</td>
+                    <td>${item.quantity}</td>
+                    <td>${item.total.toFixed(2)}</td>
                     <td>0.00</td>
-                    <td>\${item.total.toFixed(2)}</td>
-                    <td>\${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(2)}</td>
                     <td>0.00</td>
                     <td>0.00</td>
                     <td>0.00</td>
-                    <td>\${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(2)}</td>
                     <td>0.00</td>
                 </tr>
-                \`).join('')}
+                `).join('')}
                 <tr class="group-row" style="font-weight: 700;">
                     <td colspan="3" class="text-left">Sub Total:</td>
-                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(2)}</td>
                     <td>0.00</td>
-                    <td>\${bill.totalAmount.toFixed(2)}</td>
-                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(2)}</td>
                     <td>0.00</td>
                     <td>0.00</td>
                     <td>0.00</td>
-                    <td>\${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(2)}</td>
                     <td>0.00</td>
                 </tr>
                 <tr class="group-row"><td colspan="12">Others</td></tr>
@@ -424,12 +424,12 @@ export const Billing = () => {
           </table>
           
           <div class="summary-box">
-              <div class="summary-row"><div class="summary-label"><span>اجمالي القيمة</span><span>Gross Total :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>اجمالي القيمة</span><span>Gross Total :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
               <div class="summary-row"><div class="summary-label"><span>الخصم</span><span>Discount :</span></div><div class="summary-value">0.00</div></div>
               <div class="summary-row"><div class="summary-label"><span>ضريبة شركة التأمين</span><span>VAT :</span></div><div class="summary-value">0.00</div></div>
-              <div class="summary-row"><div class="summary-label"><span>الاجمالي بعد الخصم بالضريبة</span><span>Total Amount including VAT :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
-              <div class="summary-row"><div class="summary-label"><span>التحمل المدفوع نقدا</span><span>Patient Net Amount :</span></div><div class="summary-value">\${bill.totalAmount.toFixed(2)}</div></div>
-              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Collected Amount :</span></div><div class="summary-value">\${(bill.paidAmount || bill.totalAmount).toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>الاجمالي بعد الخصم بالضريبة</span><span>Total Amount including VAT :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>التحمل المدفوع نقدا</span><span>Patient Net Amount :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Collected Amount :</span></div><div class="summary-value">${(bill.paidAmount || bill.totalAmount).toFixed(2)}</div></div>
               <div class="summary-row"><div class="summary-label"><span></span><span>Patient Balance Amount :</span></div><div class="summary-value">0.00</div></div>
               <div class="summary-row"><div class="summary-label"><span>الصافي بالضريبة</span><span>Insurance Net Amount :</span></div><div class="summary-value">0.00</div></div>
           </div>
@@ -439,7 +439,7 @@ export const Billing = () => {
           <script>setTimeout(() => { window.print(); }, 500);</script>
         </body>
         </html>
-      \`;
+      `;
       printWindow.document.write(html);
       printWindow.document.close();
   };
