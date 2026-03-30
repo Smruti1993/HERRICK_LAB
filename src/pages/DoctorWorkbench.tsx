@@ -280,9 +280,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
              </div>
         </div>
     );
-};
-
-export const DoctorWorkbench = () => {
+};export const DoctorWorkbench = () => {
   const { appointments, patients, vitals, diagnoses, allergies, saveVitalSign, updateAppointment, bills } = useData();
   const navigate = useNavigate();
 
@@ -373,278 +371,404 @@ export const DoctorWorkbench = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-100 -m-6 p-4 overflow-hidden">
+    <div className="flex flex-col h-full bg-[#f8fafc] -m-6 p-6 overflow-hidden">
       
-      {/* Top Tabs */}
-      <div className="flex bg-cyan-600 text-white rounded-t-lg overflow-hidden shrink-0">
-          {['Outpatient', 'Referral', 'My Appointments'].map(tab => (
-              <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab as any)}
-                  className={`flex-1 py-3 font-bold text-center border-r border-cyan-700 transition-colors ${activeTab === tab ? 'bg-cyan-800 shadow-inner' : 'hover:bg-cyan-700'}`}
-              >
-                  {tab}
-              </button>
-          ))}
-      </div>
-
-      {/* Filter Bar */}
-      <div className="bg-white border-x border-slate-300 p-3 flex items-end gap-4 shadow-sm shrink-0">
-          <div className="w-48">
-              <label className="block text-xs font-bold text-slate-600 mb-1">Search Criteria</label>
-              <div className="relative">
-                  <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-slate-50">
-                      <option>Visit Date</option>
-                  </select>
-              </div>
-          </div>
-          <div className="w-24">
-              <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-slate-50">
-                  <option>Equal to</option>
-              </select>
-          </div>
-          <div className="w-40">
-              <DatePicker value={visitDate} onChange={setVisitDate} />
-          </div>
-          <div className="flex gap-2">
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-bold shadow-sm">Search</button>
-              <button className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-1.5 rounded text-sm font-bold shadow-sm">Clear</button>
+      {/* Header Area */}
+      <div className="flex items-center justify-between mb-6 shrink-0">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Doctor Workbench</h1>
+            <p className="text-sm text-slate-500 font-medium">Manage patient appointments and clinical records</p>
           </div>
           
-          <div className="ml-auto flex items-center gap-2">
-              <label className="text-xs font-bold text-slate-600">Save Search as</label>
-              <input className="border border-slate-300 rounded px-2 py-1 text-sm w-32" />
-              <button className="bg-blue-600 text-white px-3 py-1 rounded text-sm">Save</button>
+          <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
+              {['Outpatient', 'Referral', 'My Appointments'].map(tab => (
+                  <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab as any)}
+                      className={`px-6 py-2 text-sm font-bold rounded-lg transition-all ${
+                          activeTab === tab 
+                          ? 'bg-indigo-600 text-white shadow-md' 
+                          : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'
+                      }`}
+                  >
+                      {tab}
+                  </button>
+              ))}
           </div>
       </div>
 
-      {/* Status Sub-Tabs */}
-      <div className="bg-blue-100/50 border-x border-slate-300 p-2 flex gap-1 shrink-0">
-          {['Checked-In', 'Checked-Out', 'All Patients'].map(st => {
-             const key = st.split(' ')[0] as any;
-             return (
-              <button 
-                  key={st} 
-                  onClick={() => setSubTab(key)}
-                  className={`px-4 py-1 text-sm font-bold rounded-t-lg border border-b-0 transition-all ${subTab === key ? 'bg-blue-200 border-blue-300 text-blue-900' : 'bg-slate-50 border-transparent text-slate-500 hover:bg-white'}`}
-              >
-                  {st.toUpperCase()}
-              </button>
-             );
-          })}
+      {/* Filter Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-6 shrink-0">
+          <div className="flex items-end gap-6">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Search Criteria</label>
+                      <select className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm bg-slate-50/50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all cursor-pointer">
+                          <option>Visit Date</option>
+                      </select>
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Condition</label>
+                      <select className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm bg-slate-50/50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all cursor-pointer">
+                          <option>Equal to</option>
+                      </select>
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Value</label>
+                      <DatePicker value={visitDate} onChange={setVisitDate} />
+                  </div>
+              </div>
+              
+              <div className="flex gap-3">
+                  <button className="h-10 bg-indigo-600 hover:bg-indigo-700 text-white px-6 rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2">
+                      <Activity className="w-4 h-4" /> Search
+                  </button>
+                  <button className="h-10 bg-slate-100 hover:bg-slate-200 text-slate-600 px-6 rounded-xl text-sm font-bold transition-all active:scale-95">
+                      Clear
+                  </button>
+              </div>
+
+              <div className="h-10 w-px bg-slate-200 mx-2"></div>
+              
+              <div className="flex items-end gap-3">
+                  <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 ml-1">Save Search</label>
+                        <input placeholder="Search Name..." className="h-10 border border-slate-200 rounded-xl px-4 text-sm w-40 bg-slate-50/50 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" />
+                  </div>
+                  <button className="h-10 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-4 rounded-xl text-sm font-bold transition-all">Save</button>
+              </div>
+          </div>
       </div>
 
-      {/* Info Bar */}
-      <div className="bg-blue-50 border border-blue-200 px-4 py-1 text-xs text-blue-800 font-medium italic shrink-0">
-          Appointment details from {new Date(visitDate).toLocaleDateString()} • [Checked-In: {filteredAppointments.filter(a => a.status === 'Checked-In').length}] • [Consultation: {filteredAppointments.filter(a => a.status === 'In-Consultation').length}]
+      {/* Stats Summary & Sub-Tabs */}
+      <div className="flex items-center justify-between mb-4 shrink-0">
+          <div className="flex gap-2">
+              {['Checked-In', 'Checked-Out', 'All'].map(st => (
+                  <button 
+                      key={st} 
+                      onClick={() => setSubTab(st as any)}
+                      className={`px-5 py-2 text-xs font-bold rounded-xl border transition-all ${
+                          subTab === st 
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm' 
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600'
+                      }`}
+                  >
+                      {st === 'All' ? 'ALL PATIENTS' : st.toUpperCase()}
+                  </button>
+              ))}
+          </div>
+
+          <div className="flex gap-4 items-center">
+              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-100 text-xs font-bold">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                  Checked-In: {filteredAppointments.filter(a => a.status === 'Checked-In').length}
+              </div>
+              <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100 text-xs font-bold">
+                  <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+                  In-Consultation: {filteredAppointments.filter(a => a.status === 'In-Consultation').length}
+              </div>
+              <div className="text-xs text-slate-400 font-medium">
+                  Date: <span className="text-slate-600 font-bold">{new Date(visitDate).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>
+              </div>
+          </div>
       </div>
 
-      {/* Patient List (The Grid) */}
-      <div className="flex-1 overflow-auto border border-slate-300 bg-white">
-          <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-200 text-slate-700 text-xs uppercase sticky top-0 z-10 shadow-sm">
-                  <tr>
-                      <th className="p-2 border-r border-slate-300 w-16 text-center">Photo</th>
-                      <th className="p-2 border-r border-slate-300 w-1/4">Patient Details</th>
-                      <th className="p-2 border-r border-slate-300 w-12 text-center">EMR</th>
-                      <th className="p-2 border-r border-slate-300 w-32">Remarks</th>
-                      <th className="p-2 border-r border-slate-300 w-16 text-center">Action</th>
-                      <th className="p-2 border-r border-slate-300 w-24 text-right">Balance</th>
-                      <th className="p-2 border-r border-slate-300">Diagnosis</th>
-                      <th className="p-2 border-r border-slate-300 w-24 text-center">Vital</th>
-                      <th className="p-2 border-r border-slate-300 w-12 text-center">LAB</th>
-                      <th className="p-2 border-r border-slate-300 w-12 text-center">RAD</th>
-                      <th className="p-2 w-12 text-center">Proc</th>
-                  </tr>
-              </thead>
-              <tbody className="text-sm">
-                  {filteredAppointments.length === 0 ? (
+      {/* Patient List (The Table) */}
+      <div className="flex-1 overflow-hidden bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col">
+          <div className="overflow-auto flex-1 custom-scrollbar">
+              <table className="w-full text-left border-collapse">
+                  <thead className="bg-slate-50/80 backdrop-blur-md sticky top-0 z-10 border-b border-slate-200">
                       <tr>
-                          <td colSpan={11} className="p-12 text-center text-slate-400 italic">No patients found for this criteria.</td>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">Photo</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Patient Details</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center whitespace-nowrap">EMR</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-48">Remarks</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-center">Status</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-28 text-right">Balance</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Diagnosis</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center whitespace-nowrap">Vitals</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">LAB</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">RAD</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">PROC</th>
+                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-center">Action</th>
                       </tr>
-                  ) : (
-                      filteredAppointments.map((apt, idx) => {
-                          const patient = patients.find(p => p.id === apt.patientId);
-                          const balance = getPatientBalance(apt.patientId);
-                          const latestVitals = getLatestVitals(apt.id);
-                          const diagnosisText = getDiagnoses(apt.id);
-                          const age = patient ? new Date().getFullYear() - new Date(patient.dob).getFullYear() : 0;
-                          const activeAllergies = allergies.filter(a => a.patientId === apt.patientId && a.status === 'Active');
-                          
-                          // Alternating row colors similar to screenshot (Greenish/Yellowish)
-                          const rowClass = idx % 2 === 0 ? 'bg-[#ebfadc]' : 'bg-[#eafaea]'; // Light green variants
-
-                          return (
-                              <tr key={apt.id} className={`${rowClass} border-b border-slate-200 hover:brightness-95 transition-all`}>
-                                  <td className="p-2 border-r border-slate-200 text-center align-top">
-                                      <div className="w-12 h-12 bg-amber-200 rounded-lg mx-auto overflow-hidden border border-amber-300 shadow-sm">
-                                          <User className="w-full h-full text-amber-600 p-1 opacity-50" />
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                      {filteredAppointments.length === 0 ? (
+                          <tr>
+                              <td colSpan={12} className="p-20 text-center">
+                                  <div className="flex flex-col items-center justify-center text-slate-400">
+                                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                                          <User className="w-8 h-8 opacity-20" />
                                       </div>
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 align-top">
-                                      <div className="font-bold text-slate-800 text-sm">{patient?.firstName} {patient?.lastName}</div>
-                                      <div className="text-xs text-slate-600 font-mono mt-0.5">ID: {patient?.id.slice(-8).toUpperCase()}</div>
-                                      <div className="text-xs text-slate-500 mt-1">
-                                          {patient?.gender.toUpperCase()} - {age} Yrs - {apt.paymentMode || 'CASH'}
-                                      </div>
-                                      <div className="text-[10px] text-slate-400 mt-1">
-                                          {apt.visitType || 'New Visit'} | Nurse: Pending
-                                      </div>
-                                      {activeAllergies.length > 0 && (
-                                          <div className="mt-2 inline-flex items-center gap-1.5 bg-slate-900 text-white text-[10px] px-2 py-1 rounded shadow-sm font-bold uppercase tracking-wide">
-                                              <Bell className="w-3 h-3 text-yellow-400 fill-yellow-400 animate-pulse" />
-                                              <span>Allergy Alert</span>
-                                          </div>
-                                      )}
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center align-middle">
-                                      <button 
-                                          onClick={() => handleOpenEMR(apt.patientId)}
-                                          className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-2 rounded-full transition-colors"
-                                          title="View EMR"
-                                      >
-                                          <FileText className="w-5 h-5 mx-auto" />
-                                      </button>
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 align-top text-xs text-slate-600 italic">
-                                      {apt.notes || '-'}
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center align-middle">
-                                      <button 
-                                          onClick={() => handleSelectPatient(apt)}
-                                          className="text-xs font-bold underline text-slate-800 hover:text-blue-700"
-                                      >
-                                          Select
-                                      </button>
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-right align-middle font-mono font-medium text-slate-700">
-                                      {balance > 0 ? <span className="text-red-600">{balance.toFixed(2)}</span> : <span className="text-green-600">0.00</span>}
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 align-top text-xs">
-                                      {diagnosisText || <span className="text-slate-400 italic">No diagnosis</span>}
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center align-middle">
-                                      <div className="flex flex-col items-center">
-                                          {latestVitals ? (
-                                              <div className="group relative">
-                                                  <div className="w-4 h-4 bg-green-500 rounded-full shadow-sm cursor-pointer border border-white"></div>
-                                                  <span className="text-[10px] mt-1 text-slate-500">{new Date(latestVitals.recordedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
-                                                  {/* Tooltip */}
-                                                  <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-800 text-white text-xs p-2 rounded z-50 whitespace-nowrap">
-                                                      BP: {latestVitals.bpSystolic}/{latestVitals.bpDiastolic} | T: {latestVitals.temperature}°C
-                                                  </div>
+                                      <p className="text-sm font-medium italic">No matches found for the current filters.</p>
+                                  </div>
+                              </td>
+                          </tr>
+                      ) : (
+                          filteredAppointments.map((apt) => {
+                              const patient = patients.find(p => p.id === apt.patientId);
+                              const balance = getPatientBalance(apt.patientId);
+                              const latestVitals = getLatestVitals(apt.id);
+                              const diagnosisText = getDiagnoses(apt.id);
+                              const age = patient ? new Date().getFullYear() - new Date(patient.dob).getFullYear() : 0;
+                              const activeAllergies = allergies.filter(a => a.patientId === apt.patientId && a.status === 'Active');
+                              
+                              return (
+                                  <tr key={apt.id} className="group hover:bg-slate-50/50 transition-all duration-200">
+                                      <td className="px-4 py-4 align-top">
+                                          <div className="relative group/photo">
+                                              <div className="w-12 h-12 bg-indigo-50 rounded-xl mx-auto flex items-center justify-center text-indigo-400 border border-indigo-100 shadow-sm overflow-hidden transition-transform group-hover/photo:scale-110">
+                                                  {patient?.gender === 'Female' ? <User className="w-6 h-6 opacity-60" /> : <User className="w-6 h-6 opacity-60" />}
                                               </div>
-                                          ) : (
-                                              <button 
-                                                  onClick={() => handleCaptureVitals(apt)}
-                                                  className="w-4 h-4 bg-red-500 rounded-full shadow-sm animate-pulse border border-white" 
-                                                  title="Capture Vitals"
-                                              />
+                                              {activeAllergies.length > 0 && (
+                                                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 border-2 border-white rounded-full animate-ping"></div>
+                                              )}
+                                              {activeAllergies.length > 0 && (
+                                                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 border-2 border-white rounded-full"></div>
+                                              )}
+                                          </div>
+                                      </td>
+                                      <td className="px-4 py-4 align-top">
+                                          <div className="font-bold text-slate-800 text-[14px] leading-tight group-hover:text-indigo-600 transition-colors">{patient?.firstName} {patient?.lastName}</div>
+                                          <div className="flex items-center gap-2 mt-1">
+                                              <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">ID: {patient?.id.slice(-6)}</span>
+                                              <span className="text-[11px] font-bold text-slate-500 uppercase">{patient?.gender.charAt(0)} • {age}Y</span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 mt-2">
+                                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${apt.paymentMode === 'CASH' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                  {apt.paymentMode || 'CASH'}
+                                              </span>
+                                              <span className="text-[10px] text-slate-400 font-medium">{apt.visitType || 'General'}</span>
+                                          </div>
+                                          
+                                          {activeAllergies.length > 0 && (
+                                              <div className="mt-2.5 flex items-center gap-1.5 bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded-lg border border-red-100 font-bold animate-pulse">
+                                                  <Bell className="w-3 h-3 fill-red-500" />
+                                                  <span>ALLERGY ALERT</span>
+                                              </div>
                                           )}
-                                      </div>
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center align-middle">
-                                      <FlaskConical className="w-5 h-5 text-blue-400 mx-auto opacity-50" />
-                                  </td>
-                                  <td className="p-2 border-r border-slate-200 text-center align-middle">
-                                      <Microscope className="w-5 h-5 text-purple-400 mx-auto opacity-50" />
-                                  </td>
-                                  <td className="p-2 text-center align-middle">
-                                      <Stethoscope className="w-5 h-5 text-teal-400 mx-auto opacity-50" />
-                                  </td>
-                              </tr>
-                          );
-                      })
-                  )}
-              </tbody>
-          </table>
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <button 
+                                              onClick={() => handleOpenEMR(apt.patientId)}
+                                              className="w-10 h-10 border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-all shadow-sm"
+                                              title="Open Electronic Medical Record"
+                                          >
+                                              <FileText className="w-5 h-5" />
+                                          </button>
+                                      </td>
+                                      <td className="px-4 py-4 align-top text-[12px] text-slate-500 font-medium italic leading-relaxed">
+                                          {apt.notes || '---'}
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                                              apt.status === 'In-Consultation' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                                              apt.status === 'Checked-In' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                                              apt.status === 'Completed' ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'
+                                          }`}>
+                                              {apt.status}
+                                          </span>
+                                      </td>
+                                      <td className="px-4 py-4 text-right align-middle font-mono font-bold text-sm">
+                                          {balance > 0 ? (
+                                              <span className="text-red-500 bg-red-50 px-2 py-1 rounded-lg">-{balance.toFixed(2)}</span>
+                                          ) : (
+                                              <span className="text-emerald-500 bg-emerald-50 px-2 py-1 rounded-lg">0.00</span>
+                                          )}
+                                      </td>
+                                      <td className="px-4 py-4 align-top text-[12px] max-w-[200px]">
+                                          {diagnosisText ? (
+                                              <div className="flex flex-wrap gap-1">
+                                                  {diagnosisText.split(',').map((d, i) => (
+                                                      <span key={i} className="bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md border border-slate-100 leading-tight block">{d.trim()}</span>
+                                                  ))}
+                                              </div>
+                                          ) : <span className="text-slate-300 italic">None recorded</span>}
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <div className="flex flex-col items-center gap-1.5">
+                                              {latestVitals ? (
+                                                  <div className="group/vitals relative">
+                                                      <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg border border-emerald-100 cursor-pointer shadow-sm hover:scale-105 transition-transform">
+                                                          <Activity className="w-3.5 h-3.5" />
+                                                          <span className="text-[10px] font-bold">STABLE</span>
+                                                      </div>
+                                                      <span className="text-[9px] text-slate-400 font-bold uppercase mt-1 block">
+                                                          {new Date(latestVitals.recordedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                                      </span>
+                                                      
+                                                      {/* Floating Tooltip Card */}
+                                                      <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 hidden group-hover/vitals:block w-48 bg-slate-900 text-white rounded-xl p-3 z-50 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+                                                          <div className="text-[10px] font-bold text-slate-400 uppercase mb-2 border-b border-white/10 pb-1">Latest Reading</div>
+                                                          <div className="space-y-1.5">
+                                                              <div className="flex justify-between text-xs font-bold">
+                                                                  <span className="text-slate-400">BP:</span>
+                                                                  <span>{latestVitals.bpSystolic}/{latestVitals.bpDiastolic}</span>
+                                                              </div>
+                                                              <div className="flex justify-between text-xs font-bold">
+                                                                  <span className="text-slate-400">Temp:</span>
+                                                                  <span>{latestVitals.temperature}°C</span>
+                                                              </div>
+                                                              <div className="flex justify-between text-xs font-bold">
+                                                                  <span className="text-slate-400">Pulse:</span>
+                                                                  <span>{latestVitals.pulse} bpm</span>
+                                                              </div>
+                                                              <div className="flex justify-between text-xs font-bold">
+                                                                  <span className="text-slate-400">SpO2:</span>
+                                                                  <span>{latestVitals.spo2}%</span>
+                                                              </div>
+                                                          </div>
+                                                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900"></div>
+                                                      </div>
+                                                  </div>
+                                              ) : (
+                                                  <button 
+                                                      onClick={() => handleCaptureVitals(apt)}
+                                                      className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all border border-red-100 group/capture animate-pulse shadow-sm"
+                                                      title="Capture Critical Vitals"
+                                                  >
+                                                      <Activity className="w-5 h-5" />
+                                                  </button>
+                                              )}
+                                          </div>
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-indigo-400 transition-colors flex items-center justify-center">
+                                              <FlaskConical className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                          </button>
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-purple-400 transition-colors flex items-center justify-center">
+                                              <Microscope className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                          </button>
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-teal-400 transition-colors flex items-center justify-center">
+                                              <Stethoscope className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                          </button>
+                                      </td>
+                                      <td className="px-4 py-4 text-center align-middle">
+                                          <button 
+                                              onClick={() => handleSelectPatient(apt)}
+                                              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale"
+                                          >
+                                              SELECT
+                                          </button>
+                                      </td>
+                                  </tr>
+                              );
+                          })
+                      )}
+                  </tbody>
+              </table>
+          </div>
+          
+          {/* Legend Footer */}
+          <div className="bg-slate-50/50 px-8 py-3 border-t border-slate-100 flex gap-6 text-[11px] shrink-0">
+              <div className="flex items-center gap-2 font-bold text-slate-600">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm"></div>
+                  <span>VITALS CAPTURED</span>
+              </div>
+              <div className="flex items-center gap-2 font-bold text-slate-600">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm animate-pulse"></div>
+                  <span>VITALS PENDING</span>
+              </div>
+              <div className="ml-auto text-slate-400 font-medium">
+                  Showing {filteredAppointments.length} patients for {visitDate}
+              </div>
+          </div>
       </div>
 
       {/* Vitals Modal */}
       {showVitalsModal && selectedAppointment && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 m-4 animate-in zoom-in-95">
-                  <div className="flex justify-between items-center mb-6 border-b pb-4">
-                      <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                          <Activity className="w-5 h-5 text-red-500" /> Capture Vitals
-                      </h3>
-                      <button onClick={() => setShowVitalsModal(false)}><X className="w-5 h-5 text-slate-400 hover:text-slate-600" /></button>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-200">
+                  <div className="bg-slate-50/50 px-8 py-6 border-b border-slate-100 flex justify-between items-center">
+                      <div>
+                          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2.5">
+                              <div className="p-2 bg-red-100 rounded-xl"><Activity className="w-5 h-5 text-red-600" /></div>
+                              Capture Vitals
+                          </h3>
+                          <p className="text-xs text-slate-500 font-bold uppercase mt-1.5 tracking-wider">Patient: {patients.find(p => p.id === selectedAppointment.patientId)?.firstName} {patients.find(p => p.id === selectedAppointment.patientId)?.lastName}</p>
+                      </div>
+                      <button onClick={() => setShowVitalsModal(false)} className="p-2 hover:bg-white hover:shadow-sm rounded-xl transition-all text-slate-400 hover:text-slate-600 border border-transparent hover:border-slate-100">
+                          <X className="w-6 h-6" />
+                      </button>
                   </div>
 
-                  <form onSubmit={submitVitals} className="grid grid-cols-2 gap-4">
-                      <div className="col-span-2 grid grid-cols-2 gap-4 bg-slate-50 p-3 rounded-lg border border-slate-200 mb-2">
+                  <form onSubmit={submitVitals} className="p-8">
+                      <div className="grid grid-cols-2 gap-6">
+                          <div className="col-span-2 grid grid-cols-2 gap-4 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 shadow-inner">
+                              <div>
+                                  <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest pl-1">BP Systolic</label>
+                                  <div className="flex items-center h-12 bg-white rounded-xl border border-indigo-200 mt-1 px-4 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-sm">
+                                    <input type="number" required className="w-full text-sm font-bold bg-transparent outline-none" placeholder="120"
+                                        value={vitalsForm.bpSystolic} onChange={e => setVitalsForm({...vitalsForm, bpSystolic: e.target.value})}
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-400 ml-2">mmHg</span>
+                                  </div>
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest pl-1">BP Diastolic</label>
+                                  <div className="flex items-center h-12 bg-white rounded-xl border border-indigo-200 mt-1 px-4 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all shadow-sm">
+                                    <input type="number" required className="w-full text-sm font-bold bg-transparent outline-none" placeholder="80"
+                                        value={vitalsForm.bpDiastolic} onChange={e => setVitalsForm({...vitalsForm, bpDiastolic: e.target.value})}
+                                    />
+                                    <span className="text-[10px] font-bold text-slate-400 ml-2">mmHg</span>
+                                  </div>
+                              </div>
+                          </div>
+
                           <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase">BP Systolic</label>
-                              <div className="flex items-center">
-                                <input type="number" required className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="120"
-                                    value={vitalsForm.bpSystolic} onChange={e => setVitalsForm({...vitalsForm, bpSystolic: e.target.value})}
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Temperature</label>
+                              <div className="flex items-center h-12 bg-slate-50 border border-slate-200 rounded-xl mt-1 px-4 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
+                                <input type="number" step="0.1" required className="w-full text-sm font-bold bg-transparent outline-none" placeholder="37.0"
+                                    value={vitalsForm.temperature} onChange={e => setVitalsForm({...vitalsForm, temperature: e.target.value})}
                                 />
-                                <span className="ml-1 text-xs text-slate-400">mmHg</span>
+                                <span className="text-[10px] font-bold text-slate-400 ml-2">°C</span>
                               </div>
                           </div>
+
                           <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase">BP Diastolic</label>
-                              <div className="flex items-center">
-                                <input type="number" required className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="80"
-                                    value={vitalsForm.bpDiastolic} onChange={e => setVitalsForm({...vitalsForm, bpDiastolic: e.target.value})}
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Pulse Rate</label>
+                              <div className="flex items-center h-12 bg-slate-50 border border-slate-200 rounded-xl mt-1 px-4 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
+                                <input type="number" required className="w-full text-sm font-bold bg-transparent outline-none" placeholder="72"
+                                    value={vitalsForm.pulse} onChange={e => setVitalsForm({...vitalsForm, pulse: e.target.value})}
                                 />
-                                <span className="ml-1 text-xs text-slate-400">mmHg</span>
+                                <span className="text-[10px] font-bold text-slate-400 ml-2">bpm</span>
                               </div>
                           </div>
-                      </div>
 
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 uppercase">Temperature</label>
-                          <div className="flex items-center">
-                            <input type="number" step="0.1" required className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="37.0"
-                                value={vitalsForm.temperature} onChange={e => setVitalsForm({...vitalsForm, temperature: e.target.value})}
-                            />
-                            <span className="ml-1 text-xs text-slate-400">°C</span>
-                          </div>
-                      </div>
-
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 uppercase">Pulse</label>
-                          <div className="flex items-center">
-                            <input type="number" required className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="72"
-                                value={vitalsForm.pulse} onChange={e => setVitalsForm({...vitalsForm, pulse: e.target.value})}
-                            />
-                            <span className="ml-1 text-xs text-slate-400">bpm</span>
-                          </div>
-                      </div>
-
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 uppercase">SpO2</label>
-                          <div className="flex items-center">
-                            <input type="number" required className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="98"
-                                value={vitalsForm.spo2} onChange={e => setVitalsForm({...vitalsForm, spo2: e.target.value})}
-                            />
-                            <span className="ml-1 text-xs text-slate-400">%</span>
-                          </div>
-                      </div>
-
-                      <div className="col-span-2 grid grid-cols-2 gap-4 mt-2">
-                           <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase">Height</label>
-                              <div className="flex items-center">
-                                <input type="number" className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="cm"
-                                    value={vitalsForm.height} onChange={e => setVitalsForm({...vitalsForm, height: e.target.value})}
-                                />
-                              </div>
-                          </div>
                           <div>
-                              <label className="text-xs font-bold text-slate-500 uppercase">Weight</label>
-                              <div className="flex items-center">
-                                <input type="number" className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm outline-none focus:border-blue-500" placeholder="kg"
-                                    value={vitalsForm.weight} onChange={e => setVitalsForm({...vitalsForm, weight: e.target.value})}
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">SpO2 Level</label>
+                              <div className="flex items-center h-12 bg-slate-50 border border-slate-200 rounded-xl mt-1 px-4 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all">
+                                <input type="number" required className="w-full text-sm font-bold bg-transparent outline-none" placeholder="98"
+                                    value={vitalsForm.spo2} onChange={e => setVitalsForm({...vitalsForm, spo2: e.target.value})}
                                 />
+                                <span className="text-[10px] font-bold text-slate-400 ml-2">%</span>
                               </div>
                           </div>
-                      </div>
 
-                      <div className="col-span-2 pt-4 flex gap-3">
-                          <button type="button" onClick={() => setShowVitalsModal(false)} className="flex-1 py-2 border border-slate-300 rounded-lg text-slate-600 font-bold hover:bg-slate-50">Cancel</button>
-                          <button type="submit" className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200">Save Vitals</button>
+                          <div className="col-span-1 grid grid-cols-2 gap-3">
+                               <div>
+                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Height</label>
+                                  <input type="number" className="w-full h-12 bg-slate-50 border border-slate-200 rounded-xl mt-1 px-4 text-sm font-bold outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 transition-all" placeholder="cm"
+                                      value={vitalsForm.height} onChange={e => setVitalsForm({...vitalsForm, height: e.target.value})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Weight</label>
+                                  <input type="number" className="w-full h-12 bg-slate-50 border border-slate-200 rounded-xl mt-1 px-4 text-sm font-bold outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500/20 transition-all" placeholder="kg"
+                                      value={vitalsForm.weight} onChange={e => setVitalsForm({...vitalsForm, weight: e.target.value})}
+                                  />
+                              </div>
+                          </div>
+
+                          <div className="col-span-2 pt-6 flex gap-4">
+                              <button type="button" onClick={() => setShowVitalsModal(false)} className="flex-1 h-12 rounded-2xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all active:scale-95">Discard</button>
+                              <button type="submit" className="flex-1 h-12 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all active:scale-95">Save Vitals</button>
+                          </div>
                       </div>
                   </form>
               </div>
@@ -655,12 +779,6 @@ export const DoctorWorkbench = () => {
       {showEMR && emrPatientId && (
           <EMRModal patientId={emrPatientId} onClose={() => setShowEMR(false)} />
       )}
-
-      {/* Footer Legend */}
-      <div className="mt-2 flex gap-4 text-[10px] text-slate-500 shrink-0">
-          <div className="flex items-center"><span className="w-2 h-2 rounded-full bg-green-500 mr-1"></span> Vitals Captured</div>
-          <div className="flex items-center"><span className="w-2 h-2 rounded-full bg-red-500 mr-1"></span> Vitals Pending</div>
-      </div>
     </div>
   );
 };
