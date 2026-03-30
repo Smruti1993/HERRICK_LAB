@@ -479,18 +479,18 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
               <table className="w-full text-left border-collapse">
                   <thead className="bg-slate-50/80 backdrop-blur-md sticky top-0 z-10 border-b border-slate-200">
                       <tr>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">Photo</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Patient Details</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center whitespace-nowrap">EMR</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-48">Remarks</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-center">Status</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-28 text-right">Balance</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Diagnosis</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center whitespace-nowrap">Vitals</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">LAB</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">RAD</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-12 text-center">PROC</th>
-                          <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-center">Action</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-14 text-center">Photo</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Patient Details</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10 text-center whitespace-nowrap">EMR</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-36">Remarks</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">Status</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-right">Balance</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[120px]">Diagnosis</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-16 text-center whitespace-nowrap">Vitals</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10 text-center">LAB</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10 text-center">RAD</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10 text-center">PROC</th>
+                          <th className="px-2 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">Action</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -515,86 +515,88 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                               const activeAllergies = allergies.filter(a => a.patientId === apt.patientId && a.status === 'Active');
                               
                               return (
-                                  <tr key={apt.id} className="group hover:bg-slate-50/50 transition-all duration-200">
-                                      <td className="px-4 py-4 align-top">
+                                  <tr key={apt.id} className="group hover:bg-slate-50/50 transition-all duration-200 border-b border-slate-50 last:border-0">
+                                      <td className="px-2 py-4 align-top">
                                           <div className="relative group/photo">
-                                              <div className="w-12 h-12 bg-indigo-50 rounded-xl mx-auto flex items-center justify-center text-indigo-400 border border-indigo-100 shadow-sm overflow-hidden transition-transform group-hover/photo:scale-110">
-                                                  {patient?.gender === 'Female' ? <User className="w-6 h-6 opacity-60" /> : <User className="w-6 h-6 opacity-60" />}
+                                              <div className="w-10 h-10 bg-indigo-50 rounded-xl mx-auto flex items-center justify-center text-indigo-400 border border-indigo-100 shadow-sm overflow-hidden transition-transform group-hover/photo:scale-110">
+                                                  {patient?.gender === 'Female' ? <User className="w-5 h-5 opacity-60" /> : <User className="w-5 h-5 opacity-60" />}
                                               </div>
                                               {activeAllergies.length > 0 && (
-                                                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 border-2 border-white rounded-full animate-ping"></div>
+                                                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 border-2 border-white rounded-full animate-ping"></div>
                                               )}
                                               {activeAllergies.length > 0 && (
-                                                  <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 border-2 border-white rounded-full"></div>
+                                                  <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-red-500 border-2 border-white rounded-full"></div>
                                               )}
                                           </div>
                                       </td>
-                                      <td className="px-4 py-4 align-top">
-                                          <div className="font-bold text-slate-800 text-[14px] leading-tight group-hover:text-indigo-600 transition-colors">{patient?.firstName} {patient?.lastName}</div>
-                                          <div className="flex items-center gap-2 mt-1">
-                                              <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">ID: {patient?.id.slice(-6)}</span>
-                                              <span className="text-[11px] font-bold text-slate-500 uppercase">{patient?.gender.charAt(0)} • {age}Y</span>
+                                      <td className="px-2 py-4 align-top">
+                                          <div className="font-bold text-slate-800 text-[13px] leading-tight group-hover:text-indigo-600 transition-colors truncate max-w-[120px]" title={`${patient?.firstName} ${patient?.lastName}`}>
+                                              {patient?.firstName} {patient?.lastName}
                                           </div>
-                                          <div className="flex items-center gap-1.5 mt-2">
-                                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${apt.paymentMode === 'CASH' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                          <div className="flex items-center gap-1.5 mt-1">
+                                              <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded uppercase">#{patient?.id.slice(-6)}</span>
+                                              <span className="text-[10px] font-bold text-slate-500 uppercase">{patient?.gender.charAt(0)} • {age}Y</span>
+                                          </div>
+                                          <div className="flex items-center gap-1 mt-1.5">
+                                              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${apt.paymentMode === 'CASH' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                                                   {apt.paymentMode || 'CASH'}
                                               </span>
-                                              <span className="text-[10px] text-slate-400 font-medium">{apt.visitType || 'General'}</span>
+                                              <span className="text-[9px] text-slate-400 font-medium truncate max-w-[50px]">{apt.visitType || 'Gen'}</span>
                                           </div>
                                           
                                           {activeAllergies.length > 0 && (
-                                              <div className="mt-2.5 flex items-center gap-1.5 bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded-lg border border-red-100 font-bold animate-pulse">
-                                                  <Bell className="w-3 h-3 fill-red-500" />
-                                                  <span>ALLERGY ALERT</span>
+                                              <div className="mt-1.5 flex items-center gap-1 bg-red-50 text-red-600 text-[8px] px-1.5 py-0.5 rounded-lg border border-red-100 font-bold">
+                                                  <Bell className="w-2.5 h-2.5 fill-red-500" />
+                                                  <span>ALLERGY</span>
                                               </div>
                                           )}
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
+                                      <td className="px-2 py-4 text-center align-middle">
                                           <button 
                                               onClick={() => handleOpenEMR(apt.patientId)}
-                                              className="w-10 h-10 border border-slate-200 rounded-xl flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-all shadow-sm"
-                                              title="Open Electronic Medical Record"
+                                              className="w-8 h-8 border border-slate-200 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 transition-all shadow-sm"
+                                              title="Open EMR"
                                           >
-                                              <FileText className="w-5 h-5" />
+                                              <FileText className="w-4 h-4" />
                                           </button>
                                       </td>
-                                      <td className="px-4 py-4 align-top text-[12px] text-slate-500 font-medium italic leading-relaxed">
+                                      <td className="px-2 py-4 align-top text-[11px] text-slate-500 font-medium italic leading-tight line-clamp-2">
                                           {apt.notes || '---'}
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
-                                          <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                                      <td className="px-2 py-4 text-center align-middle">
+                                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded-lg text-[9px] font-bold uppercase tracking-wider ${
                                               apt.status === 'In-Consultation' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
                                               apt.status === 'Checked-In' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
                                               apt.status === 'Completed' ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'
                                           }`}>
-                                              {apt.status}
+                                              {apt.status === 'In-Consultation' ? 'ACTIVE' : apt.status}
                                           </span>
                                       </td>
-                                      <td className="px-4 py-4 text-right align-middle font-mono font-bold text-sm">
+                                      <td className="px-2 py-4 text-right align-middle font-mono font-bold text-[12px]">
                                           {balance > 0 ? (
-                                              <span className="text-red-500 bg-red-50 px-2 py-1 rounded-lg">-{balance.toFixed(2)}</span>
+                                              <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg">-{balance.toFixed(2)}</span>
                                           ) : (
-                                              <span className="text-emerald-500 bg-emerald-50 px-2 py-1 rounded-lg">0.00</span>
+                                              <span className="text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-lg">0.00</span>
                                           )}
                                       </td>
-                                      <td className="px-4 py-4 align-top text-[12px] max-w-[200px]">
+                                      <td className="px-2 py-4 align-top text-[11px] max-w-[150px]">
                                           {diagnosisText ? (
                                               <div className="flex flex-wrap gap-1">
-                                                  {diagnosisText.split(',').map((d, i) => (
-                                                      <span key={i} className="bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md border border-slate-100 leading-tight block">{d.trim()}</span>
+                                                  {diagnosisText.split(',').slice(0, 2).map((d, i) => (
+                                                      <span key={i} className="bg-slate-50 text-slate-600 px-1.5 py-0.5 rounded border border-slate-100 leading-tight block truncate max-w-full">{d.trim()}</span>
                                                   ))}
+                                                  {diagnosisText.split(',').length > 2 && <span className="text-[9px] text-slate-400 text-center w-full">+ {diagnosisText.split(',').length - 2} more</span>}
                                               </div>
-                                          ) : <span className="text-slate-300 italic">None recorded</span>}
+                                          ) : <span className="text-slate-300 italic">None</span>}
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
-                                          <div className="flex flex-col items-center gap-1.5">
+                                      <td className="px-2 py-4 text-center align-middle">
+                                          <div className="flex flex-col items-center">
                                               {latestVitals ? (
                                                   <div className="group/vitals relative">
-                                                      <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2 py-1.5 rounded-lg border border-emerald-100 cursor-pointer shadow-sm hover:scale-105 transition-transform">
+                                                      <div className="flex items-center justify-center p-1.5 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100 cursor-pointer shadow-sm hover:scale-110 transition-transform">
                                                           <Activity className="w-3.5 h-3.5" />
-                                                          <span className="text-[10px] font-bold">STABLE</span>
                                                       </div>
-                                                      <span className="text-[9px] text-slate-400 font-bold uppercase mt-1 block">
+                                                      <span className="text-[8px] text-slate-400 font-bold uppercase mt-1 block">
                                                           {new Date(latestVitals.recordedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                                       </span>
                                                       
@@ -625,33 +627,33 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                               ) : (
                                                   <button 
                                                       onClick={() => handleCaptureVitals(apt)}
-                                                      className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all border border-red-100 group/capture animate-pulse shadow-sm"
-                                                      title="Capture Critical Vitals"
+                                                      className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all border border-red-100 group/capture animate-pulse shadow-sm"
+                                                      title="Capture Vitals"
                                                   >
-                                                      <Activity className="w-5 h-5" />
+                                                      <Activity className="w-4 h-4" />
                                                   </button>
                                               )}
                                           </div>
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
-                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-indigo-400 transition-colors flex items-center justify-center">
-                                              <FlaskConical className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                      <td className="px-2 py-4 text-center align-middle">
+                                          <button className="w-8 h-8 rounded-lg hover:bg-slate-50 text-slate-300 hover:text-indigo-400 transition-colors flex items-center justify-center">
+                                              <FlaskConical className="w-4 h-4 opacity-40 group-hover:opacity-100" />
                                           </button>
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
-                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-purple-400 transition-colors flex items-center justify-center">
-                                              <Microscope className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                      <td className="px-2 py-4 text-center align-middle">
+                                          <button className="w-8 h-8 rounded-lg hover:bg-slate-50 text-slate-300 hover:text-purple-400 transition-colors flex items-center justify-center">
+                                              <Microscope className="w-4 h-4 opacity-40 group-hover:opacity-100" />
                                           </button>
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
-                                          <button className="w-10 h-10 rounded-xl hover:bg-slate-50 text-slate-300 hover:text-teal-400 transition-colors flex items-center justify-center">
-                                              <Stethoscope className="w-5 h-5 opacity-40 group-hover:opacity-100" />
+                                      <td className="px-2 py-4 text-center align-middle">
+                                          <button className="w-8 h-8 rounded-lg hover:bg-slate-50 text-slate-300 hover:text-teal-400 transition-colors flex items-center justify-center">
+                                              <Stethoscope className="w-4 h-4 opacity-40 group-hover:opacity-100" />
                                           </button>
                                       </td>
-                                      <td className="px-4 py-4 text-center align-middle">
+                                      <td className="px-2 py-4 text-center align-middle">
                                           <button 
                                               onClick={() => handleSelectPatient(apt)}
-                                              className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale"
+                                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale"
                                           >
                                               SELECT
                                           </button>
