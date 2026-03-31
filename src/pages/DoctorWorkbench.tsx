@@ -5,8 +5,37 @@ import { User, Activity, FileText, FlaskConical, Stethoscope, Microscope, X, Cal
 import { Appointment } from '../types';
 import { useNavigate } from 'react-router-dom';
 
+const VitalIndicator = ({ value, paramName, unit, light, vitalSignParameters }: { 
+    value: number | string | undefined, 
+    paramName: string, 
+    unit?: string, 
+    light?: boolean,
+    vitalSignParameters: any[] 
+}) => {
+    const param = vitalSignParameters.find(p => p.name.toLowerCase() === paramName.toLowerCase());
+    if (!param || value === undefined || value === null || isNaN(Number(value))) {
+        return <span className={light ? "text-white" : ""}>{value ?? '-'} {unit}</span>;
+    }
+    
+    const val = Number(value);
+    const min = Number(param.referenceRangeMin);
+    const max = Number(param.referenceRangeMax);
+
+    if (val < min) return (
+        <span className="inline-flex items-center gap-1 text-red-500 font-bold" title={`Low (Ref: ${min}-${max})`}>
+            {val} <span className="text-[10px] animate-pulse">↓</span>
+        </span>
+    );
+    if (val > max) return (
+        <span className="inline-flex items-center gap-1 text-red-500 font-bold" title={`High (Ref: ${min}-${max})`}>
+            {val} <span className="text-[10px] animate-pulse">↑</span>
+        </span>
+    );
+    return <span className={light ? "text-white" : "text-slate-700 font-medium"}>{val} {unit}</span>;
+};
+
 const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => void }) => {
-    const { patients, appointments, vitals, diagnoses, clinicalNotes, allergies, employees, departments } = useData();
+    const { patients, appointments, vitals, diagnoses, clinicalNotes, allergies, employees, departments, vitalSignParameters } = useData();
     const [activeTab, setActiveTab] = useState('Overview');
 
     const patient = patients.find(p => p.id === patientId);
@@ -99,8 +128,14 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                     </div>
                                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
                                         <div className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Last BP</div>
-                                        <div className="font-bold text-slate-800 text-lg">
-                                            {patientVitals[0] ? `${patientVitals[0].bpSystolic}/${patientVitals[0].bpDiastolic}` : '-'}
+                                        <div className="font-bold text-slate-800 text-lg flex gap-1">
+                                            {patientVitals[0] ? (
+                                                <>
+                                                    <VitalIndicator value={patientVitals[0].bpSystolic} paramName="Intravascular systolic" vitalSignParameters={vitalSignParameters} />
+                                                    <span className="text-slate-300">/</span>
+                                                    <VitalIndicator value={patientVitals[0].bpDiastolic} paramName="Intravascular diastolic" vitalSignParameters={vitalSignParameters} />
+                                                </>
+                                            ) : '-'}
                                         </div>
                                     </div>
                                 </div>
@@ -115,7 +150,16 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                 {patientVitals.slice(0, 3).map((v, i) => (
                                                     <div key={i} className="flex justify-between items-center text-sm border-b border-slate-50 pb-2 last:border-0">
                                                         <span className="text-slate-500">{new Date(v.recordedAt).toLocaleDateString()}</span>
-                                                        <span className="font-medium">BP: {v.bpSystolic}/{v.bpDiastolic} &bull; HR: {v.pulse} &bull; T: {v.temperature}°C</span>
+                                                        <div className="font-medium flex items-center gap-2">
+                                                            <div className="flex gap-1">
+                                                                <VitalIndicator value={v.bpSystolic} paramName="Intravascular systolic" vitalSignParameters={vitalSignParameters} />/ 
+                                                                <VitalIndicator value={v.bpDiastolic} paramName="Intravascular diastolic" vitalSignParameters={vitalSignParameters} />
+                                                            </div>
+                                                            <span className="text-slate-300">|</span>
+                                                            <VitalIndicator value={v.pulse} paramName="Pulse" vitalSignParameters={vitalSignParameters} />
+                                                            <span className="text-slate-300">|</span>
+                                                            <VitalIndicator value={v.temperature} paramName="Temperature" unit="°C" vitalSignParameters={vitalSignParameters} />
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -189,13 +233,19 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                             <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No vitals recorded.</td></tr>
                                         ) : (
                                             patientVitals.map(v => (
-                                                <tr key={v.id} className="hover:bg-slate-50">
-                                                    <td className="px-6 py-4">{new Date(v.recordedAt).toLocaleString()}</td>
-                                                    <td className="px-6 py-4">{v.bpSystolic}/{v.bpDiastolic}</td>
-                                                    <td className="px-6 py-4">{v.pulse}</td>
-                                                    <td className="px-6 py-4">{v.temperature}</td>
-                                                    <td className="px-6 py-4">{v.spo2}%</td>
-                                                    <td className="px-6 py-4">{v.weight}</td>
+                                                <tr key={v.id} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="px-6 py-4 text-slate-500 font-medium">{new Date(v.recordedAt).toLocaleString()}</td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex gap-1">
+                                                            <VitalIndicator value={v.bpSystolic} paramName="Intravascular systolic" vitalSignParameters={vitalSignParameters} />
+                                                            <span className="text-slate-300">/</span>
+                                                            <VitalIndicator value={v.bpDiastolic} paramName="Intravascular diastolic" vitalSignParameters={vitalSignParameters} />
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4"><VitalIndicator value={v.pulse} paramName="Pulse" vitalSignParameters={vitalSignParameters} /></td>
+                                                    <td className="px-6 py-4"><VitalIndicator value={v.temperature} paramName="Temperature" unit="°C" vitalSignParameters={vitalSignParameters} /></td>
+                                                    <td className="px-6 py-4"><VitalIndicator value={v.spo2} paramName="Oxygen Saturation" unit="%" vitalSignParameters={vitalSignParameters} /></td>
+                                                    <td className="px-6 py-4"><VitalIndicator value={v.weight} paramName="Weight" unit="kg" vitalSignParameters={vitalSignParameters} /></td>
                                                 </tr>
                                             ))
                                         )}
@@ -281,7 +331,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
         </div>
     );
 };export const DoctorWorkbench = () => {
-  const { appointments, patients, vitals, diagnoses, allergies, saveVitalSign, updateAppointment, bills } = useData();
+  const { appointments, patients, vitals, diagnoses, allergies, saveVitalSign, updateAppointment, bills, vitalSignParameters } = useData();
   const navigate = useNavigate();
 
   // --- EMR State ---
@@ -606,19 +656,22 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                           <div className="space-y-1.5">
                                                               <div className="flex justify-between text-xs font-bold">
                                                                   <span className="text-slate-400">BP:</span>
-                                                                  <span>{latestVitals.bpSystolic}/{latestVitals.bpDiastolic}</span>
+                                                                  <div className="flex gap-1">
+                                                                        <VitalIndicator value={latestVitals.bpSystolic} paramName="Intravascular systolic" light vitalSignParameters={vitalSignParameters} /> / 
+                                                                        <VitalIndicator value={latestVitals.bpDiastolic} paramName="Intravascular diastolic" light vitalSignParameters={vitalSignParameters} />
+                                                                  </div>
                                                               </div>
                                                               <div className="flex justify-between text-xs font-bold">
                                                                   <span className="text-slate-400">Temp:</span>
-                                                                  <span>{latestVitals.temperature}°C</span>
+                                                                  <VitalIndicator value={latestVitals.temperature} paramName="Temperature" unit="°C" light vitalSignParameters={vitalSignParameters} />
                                                               </div>
                                                               <div className="flex justify-between text-xs font-bold">
                                                                   <span className="text-slate-400">Pulse:</span>
-                                                                  <span>{latestVitals.pulse} bpm</span>
+                                                                  <VitalIndicator value={latestVitals.pulse} paramName="Pulse" light vitalSignParameters={vitalSignParameters} />
                                                               </div>
                                                               <div className="flex justify-between text-xs font-bold">
                                                                   <span className="text-slate-400">SpO2:</span>
-                                                                  <span>{latestVitals.spo2}%</span>
+                                                                  <VitalIndicator value={latestVitals.spo2} paramName="Oxygen Saturation" unit="%" light vitalSignParameters={vitalSignParameters} />
                                                               </div>
                                                           </div>
                                                           <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900"></div>

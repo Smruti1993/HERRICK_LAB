@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter
 } from '../types';
 import { 
     getSupabase, 
@@ -62,6 +62,12 @@ interface DataContextType {
   clinicalNotes: ClinicalNote[];
   allergies: Allergy[];
   serviceOrders: ServiceOrder[]; // NEW
+  vitalSignGroups: VitalSignGroup[];
+  vitalSignParameters: VitalSignParameter[];
+
+  addVitalSignGroup: (group: VitalSignGroup) => void;
+  saveVitalSignParameter: (parameter: VitalSignParameter) => void;
+  deleteVitalSignParameter: (id: string) => void;
   
   saveVitalSign: (vital: VitalSign) => void;
   saveDiagnosis: (diagnosis: Diagnosis) => void;
@@ -108,6 +114,68 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [clinicalNotes, setClinicalNotes] = useState<ClinicalNote[]>([]);
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
+  const [vitalSignGroups, setVitalSignGroups] = useState<VitalSignGroup[]>([
+    { id: 'vsg-1', name: 'Vital Sign', status: 'Active' }
+  ]);
+  const [vitalSignParameters, setVitalSignParameters] = useState<VitalSignParameter[]>([
+    { id: 'vsp-1', groupId: 'vsg-1', name: 'Weight', controlType: 'Text', referenceRangeMin: '15.0', referenceRangeMax: '50.0', isActive: true },
+    { id: 'vsp-2', groupId: 'vsg-1', name: 'BMI', controlType: 'Formula', referenceRangeMin: '18.5', referenceRangeMax: '24.9', isActive: true },
+    { id: 'vsp-3', groupId: 'vsg-1', name: 'Pulse', controlType: 'Text', referenceRangeMin: '50.0', referenceRangeMax: '80.0', isActive: true },
+    { id: 'vsp-4', groupId: 'vsg-1', name: 'RR', controlType: 'Text', referenceRangeMin: '12.0', referenceRangeMax: '20.0', isActive: true },
+    { id: 'vsp-5', groupId: 'vsg-1', name: 'Intravascular diastolic', controlType: 'Text', referenceRangeMin: '60.0', referenceRangeMax: '90.0', isActive: true },
+    { id: 'vsp-6', groupId: 'vsg-1', name: 'MAP', controlType: 'Formula', referenceRangeMin: '60.0', referenceRangeMax: '110.0', isActive: true },
+    { id: 'vsp-7', groupId: 'vsg-1', name: 'Oxygen Saturation', controlType: 'Text', referenceRangeMin: '94.0', referenceRangeMax: '100.0', isActive: true },
+    { id: 'vsp-8', groupId: 'vsg-1', name: 'Height', controlType: 'Text', referenceRangeMin: '100.0', referenceRangeMax: '270.0', isActive: true },
+    { id: 'vsp-9', groupId: 'vsg-1', name: 'Temperature', controlType: 'Text', referenceRangeMin: '36.5', referenceRangeMax: '37.4', isActive: true },
+    { id: 'vsp-10', groupId: 'vsg-1', name: 'Intravascular systolic', controlType: 'Text', referenceRangeMin: '95.0', referenceRangeMax: '140.0', isActive: true },
+  ]);
+
+  const addVitalSignGroup = async (group: VitalSignGroup) => {
+    if (!requireDb()) return;
+    setVitalSignGroups(prev => [...prev, group]);
+    const { error } = await getSupabase().from('vital_sign_groups').insert(mapVitalSignGroupToDb(group));
+    if (error) {
+        showToast('error', `Failed to save group: ${error.message}`);
+        setVitalSignGroups(prev => prev.filter(g => g.id !== group.id));
+    } else {
+        showToast('success', 'Vital Sign Group added.');
+    }
+  };
+
+  const saveVitalSignParameter = async (parameter: VitalSignParameter) => {
+    if (!requireDb()) return;
+    const originalParameters = [...vitalSignParameters];
+    
+    setVitalSignParameters(prev => {
+        const exists = prev.find(p => p.id === parameter.id);
+        if (exists) return prev.map(p => p.id === parameter.id ? parameter : p);
+        return [...prev, parameter];
+    });
+
+    const { error } = await getSupabase().from('vital_sign_parameters').upsert(mapVitalSignParameterToDb(parameter));
+    
+    if (error) {
+        showToast('error', `Failed to save parameter: ${error.message}`);
+        setVitalSignParameters(originalParameters);
+    } else {
+        showToast('success', 'Vital Sign Parameter saved.');
+    }
+  };
+
+  const deleteVitalSignParameter = async (id: string) => {
+    if (!requireDb()) return;
+    const original = vitalSignParameters.find(p => p.id === id);
+    setVitalSignParameters(prev => prev.filter(p => p.id !== id));
+    
+    const { error } = await getSupabase().from('vital_sign_parameters').delete().eq('id', id);
+    
+    if (error) {
+        showToast('error', `Failed to remove parameter: ${error.message}`);
+        if (original) setVitalSignParameters(prev => [...prev, original]);
+    } else {
+        showToast('info', 'Vital Sign Parameter removed.');
+    }
+  };
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -266,6 +334,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
 
+  const mapVitalSignGroupFromDb = (g: any): VitalSignGroup => ({
+    id: g.id, name: g.name, status: g.status
+  });
+  const mapVitalSignGroupToDb = (g: VitalSignGroup) => ({
+    id: g.id, name: g.name, status: g.status
+  });
+
+  const mapVitalSignParameterFromDb = (p: any): VitalSignParameter => ({
+    id: p.id, groupId: p.group_id, name: p.name, controlType: p.control_type,
+    referenceRangeMin: p.reference_range_min, referenceRangeMax: p.reference_range_max,
+    unit: p.unit, isActive: p.is_active, formula: p.formula
+  });
+  const mapVitalSignParameterToDb = (p: VitalSignParameter) => ({
+    id: p.id, group_id: p.groupId, name: p.name, control_type: p.controlType,
+    reference_range_min: p.referenceRangeMin, reference_range_max: p.referenceRangeMax,
+    unit: p.unit, is_active: p.isActive, formula: p.formula
+  });
+
   // --- Initial Fetch ---
 
   useEffect(() => {
@@ -317,9 +403,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('service_definitions').select('*'),
           supabase.from('service_tariffs').select('*'),
           supabase.from('service_orders').select('*'),
+          supabase.from('vital_sign_groups').select('*'),
+          supabase.from('vital_sign_parameters').select('*'),
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -340,6 +428,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (sdRes.data) setServiceDefinitions(sdRes.data.map(mapServiceDefFromDb));
         if (stRes.data) setServiceTariffs(stRes.data.map(mapTariffFromDb));
         if (ordRes.data) setServiceOrders(ordRes.data.map(mapOrderFromDb));
+        if (vsgRes.data && vsgRes.data.length > 0) setVitalSignGroups(vsgRes.data.map(mapVitalSignGroupFromDb));
+        if (vspRes.data && vspRes.data.length > 0) setVitalSignParameters(vspRes.data.map(mapVitalSignParameterFromDb));
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -484,7 +574,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.removeItem('medicore_user');
       
       // Clear data states
-      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]);
+      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]);
   };
 
   // ... (Keep existing ADD/UPDATE functions - Ensure they check requireDb)
@@ -954,6 +1044,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       vitals, diagnoses, narrativeDiagnoses, clinicalNotes, allergies, 
       saveVitalSign, saveDiagnosis, deleteDiagnosis, saveNarrativeDiagnosis, saveClinicalNote, saveAllergy,
       serviceOrders, saveServiceOrders,
+      vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
     }}>

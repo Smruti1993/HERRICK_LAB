@@ -247,6 +247,27 @@ export interface Allergy {
   remarks?: string;
 }
 
+
+// --- Vital Sign Master Types ---
+
+export interface VitalSignGroup {
+  id: string;
+  name: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface VitalSignParameter {
+  id: string;
+  groupId: string;
+  name: string;
+  controlType: 'Text' | 'Formula' | 'Numeric' | 'Dropdown';
+  referenceRangeMin?: string;
+  referenceRangeMax?: string;
+  unit?: string;
+  isActive: boolean;
+  formula?: string; // If controlType is Formula
+}
+
 export interface ToastMessage {
   id: string;
   type: 'success' | 'error' | 'info';
