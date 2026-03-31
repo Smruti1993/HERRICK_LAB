@@ -5,10 +5,14 @@ import { Plus, Search, X, FileSpreadsheet, FileDown, Activity } from 'lucide-rea
 import * as XLSX from 'xlsx';
 
 // --- Helper for Downloads ---
-const downloadTemplate = (type: 'diagnosis' | 'service') => {
-    const data = type === 'diagnosis' 
-        ? [{ 'ICD Code': 'A00.0', 'Description': 'Cholera due to Vibrio cholerae 01, biovar cholerae' }]
-        : [{ 
+const downloadTemplate = (type: 'diagnosis' | 'service' | 'dental_icd') => {
+    let data: any[] = [];
+    if (type === 'diagnosis') {
+        data = [{ 'ICD Code': 'A00.0', 'Description': 'Cholera due to Vibrio cholerae 01, biovar cholerae' }];
+    } else if (type === 'dental_icd') {
+        data = [{ 'ICD Code': 'K02.0', 'Description': 'Caries limited to enamel' }];
+    } else {
+        data = [{ 
             'Code': 'SVC001', 
             'Name': 'General Consultation', 
             'Category': 'Consultation', 
@@ -16,7 +20,8 @@ const downloadTemplate = (type: 'diagnosis' | 'service') => {
             'Price': 50.00,
             'Schedulable': true,
             'Surgical': false 
-          }];
+        }];
+    }
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -42,7 +47,7 @@ const MasterList = <T extends MasterEntity>({
     if (!newItem.name || !newItem.code) return;
     
     onAdd({
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       ...newItem
     });
     setNewItem({ name: '', code: '', status: 'Active' });
@@ -128,7 +133,7 @@ const DiagnosisMaster = () => {
             const data = XLSX.utils.sheet_to_json(ws) as any[];
             
             const mapped = data.map((row: any) => ({
-                id: Date.now().toString() + Math.random(),
+                id: crypto.randomUUID(),
                 code: row['ICD Code'] || row['Code'] || '',
                 description: row['Description'] || row['Diagnosis'] || '',
                 status: 'Active' as const
@@ -232,6 +237,169 @@ const DiagnosisMaster = () => {
 };
 
 
+// --- Dental ICD Master Component ---
+const DentalICDMaster = () => {
+    const { dentalICDs, uploadDentalICDs, saveDentalICD, isLoading } = useData();
+    const [searchTerm, setSearchTerm] = useState('');
+    const [showAddForm, setShowAddForm] = useState(false);
+    const [newICD, setNewICD] = useState({ code: '', description: '', status: 'Active' as const });
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const bstr = evt.target?.result;
+            const wb = XLSX.read(bstr, { type: 'binary' });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const data = XLSX.utils.sheet_to_json(ws) as any[];
+            
+            const mapped = data.map((row: any) => ({
+                id: crypto.randomUUID(),
+                code: row['ICD Code'] || row['Code'] || '',
+                description: row['Description'] || row['Diagnosis'] || '',
+                status: 'Active' as const
+            })).filter(d => d.code && d.description);
+
+            if (mapped.length > 0) {
+                uploadDentalICDs(mapped);
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    const handleAddManual = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newICD.code || !newICD.description) return;
+        saveDentalICD({
+            id: crypto.randomUUID(),
+            ...newICD
+        });
+        setNewICD({ code: '', description: '', status: 'Active' });
+        setShowAddForm(false);
+    };
+
+    const filtered = dentalICDs.filter(d => 
+        d.description.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        d.code.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
+            {/* Action Bar */}
+            <div className="bg-gradient-to-r from-teal-700 to-teal-600 px-6 py-3 border-b border-teal-400 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md">
+                        <Activity className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-white text-md tracking-tight">Dental ICD Master</h3>
+                        <p className="text-teal-100 text-[10px] font-bold uppercase tracking-widest mt-0.5 opacity-80">Dental Diagnosis Codes</p>
+                    </div>
+                </div>
+                
+                <div className="flex items-center gap-3 w-full md:w-auto text-white">
+                    <div className="relative flex-1 md:w-64">
+                        <Search className="w-3.5 h-3.5 text-teal-200 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input 
+                            placeholder="Search code or diagnosis..." 
+                            className="w-full h-9 pl-9 pr-4 bg-white/10 text-white placeholder:text-teal-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    
+                    <button 
+                        onClick={() => setShowAddForm(!showAddForm)}
+                        className="bg-white text-teal-700 hover:bg-teal-50 px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap"
+                    >
+                        <Plus className="w-3.5 h-3.5" /> Add New
+                    </button>
+
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading}
+                        className="bg-teal-800/40 hover:bg-teal-800/60 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-white/20 shadow-md transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap"
+                    >
+                        {isLoading ? 'Uploading...' : <><FileSpreadsheet className="w-3.5 h-3.5" /> Import Excel</>}
+                    </button>
+                    <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileUpload} />
+                    
+                    <button 
+                        onClick={() => downloadTemplate('dental_icd')}
+                        className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-lg border border-white/20 transition-all active:scale-95 shadow-sm"
+                        title="Download Template"
+                    >
+                        <FileDown className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
+            {showAddForm && (
+                <form onSubmit={handleAddManual} className="p-4 bg-teal-50/50 border-b border-teal-100 grid grid-cols-1 md:grid-cols-3 gap-4 animate-in slide-in-from-top-2">
+                    <input 
+                        placeholder="ICD Code (e.g. K02.0)" 
+                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none"
+                        value={newICD.code}
+                        onChange={e => setNewICD({...newICD, code: e.target.value})}
+                    />
+                    <input 
+                        placeholder="Description / Diagnosis" 
+                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none"
+                        value={newICD.description}
+                        onChange={e => setNewICD({...newICD, description: e.target.value})}
+                    />
+                    <div className="flex gap-2">
+                        <button type="submit" className="flex-1 bg-teal-600 text-white rounded-lg text-sm font-bold shadow-sm shadow-teal-200">Save ICD</button>
+                        <button type="button" onClick={() => setShowAddForm(false)} className="px-3 bg-white border border-slate-200 text-slate-500 rounded-lg text-xs font-bold">Cancel</button>
+                    </div>
+                </form>
+            )}
+
+            {/* Scrollable Table Content */}
+            <div className="flex-1 overflow-auto bg-white scrollbar-thin">
+                <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider sticky top-0 z-10">
+                        <tr>
+                            <th className="px-6 py-3 border-r border-slate-100 w-32">ICD Code</th>
+                            <th className="px-6 py-3 border-r border-slate-100">Description</th>
+                            <th className="px-6 py-3 text-center w-32">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {filtered.length === 0 ? (
+                            <tr><td colSpan={3} className="px-6 py-12 text-center text-slate-400 italic">No dental codes found. Add manually or upload Excel.</td></tr>
+                        ) : (
+                            filtered.map((d) => (
+                                <tr key={d.id} className="hover:bg-teal-50/30 transition-colors group h-10">
+                                    <td className="px-6 py-2 font-mono font-bold text-teal-600 border-r border-slate-50">{d.code}</td>
+                                    <td className="px-6 py-2 font-medium text-slate-700 border-r border-slate-50">{d.description}</td>
+                                    <td className="px-6 py-2 text-center">
+                                        <span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-[10px] font-bold border border-green-100">Active</span>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* Compact Footer/Pagination */}
+            <div className="bg-slate-50 px-6 py-2 flex justify-center items-center gap-2 border-t border-slate-200">
+                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:bg-slate-50 transition-all text-xs">«</button>
+                <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
+                    <button className="w-7 h-6 text-[10px] font-bold text-white bg-teal-600 rounded-md">1</button>
+                </div>
+                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-all text-xs">»</button>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Service Master Component ---
 const ServiceMaster = () => {
     const { serviceDefinitions, serviceTariffs, saveServiceDefinition, uploadServiceDefinitions, isLoading } = useData();
@@ -282,11 +450,11 @@ const ServiceMaster = () => {
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
-        const newId = form.id || Date.now().toString();
+        const newId = form.id || crypto.randomUUID();
         
         // Handle basic tariff (Self Pay)
         const tariff: ServiceTariff = {
-            id: Date.now().toString() + '_t',
+            id: crypto.randomUUID(),
             serviceId: newId,
             tariffName: 'Self Pay',
             price: parseFloat(price) || 0,
@@ -319,7 +487,7 @@ const ServiceMaster = () => {
             const data = XLSX.utils.sheet_to_json(ws) as any[];
             
             const mapped: ServiceDefinition[] = data.map((row: any) => ({
-                id: Date.now().toString() + Math.random(),
+                id: crypto.randomUUID(),
                 code: row['Code'] || '',
                 name: row['Name'] || '',
                 serviceType: row['Type'] || 'Single service',
@@ -339,7 +507,7 @@ const ServiceMaster = () => {
                 isToothMandatory: false,
                 isAuthRequired: false,
                 tariffs: [{
-                    id: Date.now().toString() + Math.random(),
+                    id: crypto.randomUUID(),
                     serviceId: '', 
                     tariffName: 'Self Pay',
                     price: parseFloat(row['Price']) || 0,
@@ -831,13 +999,14 @@ export const Masters = () => {
     serviceCentres, addServiceCentre 
   } = useData();
 
-  const [activeTab, setActiveTab] = useState<'departments' | 'units' | 'services' | 'diagnosis' | 'service_defs' | 'vitals'>('departments');
+  const [activeTab, setActiveTab] = useState<'departments' | 'units' | 'services' | 'diagnosis' | 'dental_icd' | 'service_defs' | 'vitals'>('departments');
 
   const tabs = [
     { id: 'departments', label: 'Departments' },
     { id: 'units', label: 'Medical Units' },
     { id: 'services', label: 'Service Locations' }, // Renamed from Service Centres to clarify
     { id: 'diagnosis', label: 'Diagnosis (ICD)' },
+    { id: 'dental_icd', label: 'Dental ICD' },
     { id: 'service_defs', label: 'Service Master' }, // Renamed from Service Definitions to clarify
     { id: 'vitals', label: 'Vital Signs' },
   ];
@@ -872,6 +1041,9 @@ export const Masters = () => {
         )}
         {activeTab === 'diagnosis' && (
             <DiagnosisMaster />
+        )}
+        {activeTab === 'dental_icd' && (
+            <DentalICDMaster />
         )}
         {activeTab === 'service_defs' && (
             <ServiceMaster />

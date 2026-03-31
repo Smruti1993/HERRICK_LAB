@@ -69,7 +69,7 @@ export const Billing = () => {
 
   // --- Derived Data: Pending Invoices ---
   const pendingInvoices = serviceOrders.filter(order => {
-      if (order.billingStatus !== 'Pending') return false;
+      if (order.billingStatus !== 'Pending' || order.status === 'Cancelled') return false;
       
       const apt = appointments.find(a => a.id === order.appointmentId);
       const patient = patients.find(p => p.id === apt?.patientId);

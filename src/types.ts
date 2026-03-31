@@ -20,6 +20,13 @@ export interface MasterDiagnosis {
   status: 'Active' | 'Inactive';
 }
 
+export interface DentalICD {
+  id: string;
+  code: string;
+  description: string;
+  status: 'Active' | 'Inactive';
+}
+
 export interface ServiceTariff {
   id: string;
   serviceId: string;
@@ -88,6 +95,7 @@ export interface ServiceOrder {
   instructions?: string;
   serviceCenter?: string;
   toothNumbers?: string; // New field for Dental
+  dentalSelections?: { tooth: string, icd: string }[]; // Mapping ICD to each tooth
 }
 
 export enum EmployeeRole {
@@ -247,6 +255,18 @@ export interface Allergy {
   remarks?: string;
 }
 
+
+export interface PatientDocument {
+  id: string;
+  patientId: string;
+  appointmentId?: string;
+  name: string;
+  fileType: string; // 'application/pdf', 'image/jpeg', etc.
+  fileData: string; // BLOB format (Base64 string)
+  uploadedAt: string;
+  uploadedBy: string; // Doctor/Staff ID
+  size: number; // Bytes
+}
 
 // --- Vital Sign Master Types ---
 

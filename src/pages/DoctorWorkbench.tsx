@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { DatePicker } from '../components/DatePicker';
-import { User, Activity, FileText, FlaskConical, Stethoscope, Microscope, X, Calendar, AlertTriangle, ChevronRight, Bell } from 'lucide-react';
+import { User, Activity, FileText, FlaskConical, Stethoscope, Microscope, X, Calendar, AlertTriangle, ChevronRight, Bell, Save } from 'lucide-react';
 import { Appointment } from '../types';
 import { useNavigate } from 'react-router-dom';
 
@@ -35,7 +35,7 @@ const VitalIndicator = ({ value, paramName, unit, light, vitalSignParameters }: 
 };
 
 const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => void }) => {
-    const { patients, appointments, vitals, diagnoses, clinicalNotes, allergies, employees, departments, vitalSignParameters } = useData();
+    const { patients, appointments, vitals, diagnoses, clinicalNotes, allergies, employees, departments, vitalSignParameters, patientDocuments } = useData();
     const [activeTab, setActiveTab] = useState('Overview');
 
     const patient = patients.find(p => p.id === patientId);
@@ -78,7 +78,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                     </div>
                     {/* Nav */}
                     <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-                        {['Overview', 'Clinical Notes', 'Vitals History', 'Visit History', 'Allergies'].map(t => (
+                        {['Overview', 'Clinical Notes', 'Vitals History', 'Visit History', 'Allergies', 'Documents'].map(t => (
                             <button 
                                 key={t} 
                                 onClick={() => setActiveTab(t)}
@@ -320,6 +320,71 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                     <td className="px-6 py-4 text-slate-500">{al.status}</td>
                                                 </tr>
                                             ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* DOCUMENTS TAB */}
+                        {activeTab === 'Documents' && (
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-slate-50 text-slate-500">
+                                        <tr>
+                                            <th className="px-6 py-3 font-semibold">Document Name</th>
+                                            <th className="px-6 py-3 font-semibold">Type</th>
+                                            <th className="px-6 py-3 font-semibold">Upload Date</th>
+                                            <th className="px-6 py-3 font-semibold">Size</th>
+                                            <th className="px-6 py-3 font-semibold text-center">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {patientDocuments.filter(d => d.patientId === patientId).length === 0 ? (
+                                            <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No documents uploaded for this patient.</td></tr>
+                                        ) : (
+                                            patientDocuments
+                                                .filter(d => d.patientId === patientId)
+                                                .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime())
+                                                .map(doc => (
+                                                    <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-2 font-medium text-slate-700">
+                                                                <FileText className="w-4 h-4 text-blue-400" />
+                                                                {doc.name}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-slate-500 text-xs lowercase">
+                                                            {doc.fileType.split('/')[1] || 'File'}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-slate-500">{new Date(doc.uploadedAt).toLocaleDateString()}</td>
+                                                        <td className="px-6 py-4 text-slate-500 text-xs">
+                                                            {(doc.size / 1024).toFixed(1)} KB
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex justify-center gap-3">
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const win = window.open();
+                                                                        if (win) {
+                                                                            win.document.write(`<iframe src="${doc.fileData}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                                                                        }
+                                                                    }}
+                                                                    className="text-indigo-600 hover:text-indigo-800 font-bold transition-colors"
+                                                                >
+                                                                    View
+                                                                </button>
+                                                                <a 
+                                                                    href={doc.fileData} 
+                                                                    download={doc.name}
+                                                                    className="text-emerald-600 hover:text-emerald-800 font-bold transition-colors flex items-center gap-1"
+                                                                >
+                                                                    <Save className="w-3.5 h-3.5" /> Download
+                                                                </a>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))
                                         )}
                                     </tbody>
                                 </table>
@@ -651,7 +716,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                       </span>
                                                       
                                                       {/* Floating Tooltip Card */}
-                                                      <div className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 hidden group-hover/vitals:block w-48 bg-slate-900 text-white rounded-xl p-3 z-50 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
+                                                      <div className="absolute right-full mr-3 top-1/2 -translate-y-1/2 hidden group-hover/vitals:block w-48 bg-slate-900 text-white rounded-xl p-3 z-50 shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-right-2 duration-200">
                                                           <div className="text-[10px] font-bold text-slate-400 uppercase mb-2 border-b border-white/10 pb-1">Latest Reading</div>
                                                           <div className="space-y-1.5">
                                                               <div className="flex justify-between text-xs font-bold">
@@ -674,7 +739,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                                   <VitalIndicator value={latestVitals.spo2} paramName="Oxygen Saturation" unit="%" light vitalSignParameters={vitalSignParameters} />
                                                               </div>
                                                           </div>
-                                                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900"></div>
+                                                          <div className="absolute top-1/2 -translate-y-1/2 -right-1 border-8 border-transparent border-l-slate-900"></div>
                                                       </div>
                                                   </div>
                                               ) : (

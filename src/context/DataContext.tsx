@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument
 } from '../types';
 import { 
     getSupabase, 
@@ -41,6 +41,11 @@ interface DataContextType {
   serviceTariffs: ServiceTariff[];
   saveServiceDefinition: (service: ServiceDefinition) => void;
   uploadServiceDefinitions: (services: ServiceDefinition[]) => Promise<void>;
+
+  dentalICDs: DentalICD[];
+  saveDentalICD: (icd: DentalICD) => void;
+  uploadDentalICDs: (icds: DentalICD[]) => Promise<void>;
+  deleteDentalICD: (id: string) => void;
   
   availabilities: DoctorAvailability[];
   saveAvailability: (avail: DoctorAvailability) => void;
@@ -64,6 +69,7 @@ interface DataContextType {
   serviceOrders: ServiceOrder[]; // NEW
   vitalSignGroups: VitalSignGroup[];
   vitalSignParameters: VitalSignParameter[];
+  patientDocuments: PatientDocument[];
 
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
@@ -75,7 +81,10 @@ interface DataContextType {
   saveNarrativeDiagnosis: (nd: NarrativeDiagnosis) => void;
   saveClinicalNote: (note: ClinicalNote) => void;
   saveAllergy: (allergy: Allergy) => void;
-  saveServiceOrders: (orders: ServiceOrder[]) => void; // NEW
+  saveServiceOrders: (orders: ServiceOrder[]) => void;
+  cancelServiceOrder: (orderId: string) => Promise<void>;
+  savePatientDocument: (doc: PatientDocument) => Promise<void>;
+  deletePatientDocument: (id: string) => Promise<void>;
   
   toasts: ToastMessage[];
   showToast: (type: 'success' | 'error' | 'info', message: string) => void;
@@ -108,12 +117,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [availabilities, setAvailabilities] = useState<DoctorAvailability[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
+  const [dentalICDs, setDentalICDs] = useState<DentalICD[]>([]);
   const [vitals, setVitals] = useState<VitalSign[]>([]);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [narrativeDiagnoses, setNarrativeDiagnoses] = useState<NarrativeDiagnosis[]>([]);
   const [clinicalNotes, setClinicalNotes] = useState<ClinicalNote[]>([]);
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
+  const [patientDocuments, setPatientDocuments] = useState<PatientDocument[]>([]);
   const [vitalSignGroups, setVitalSignGroups] = useState<VitalSignGroup[]>([
     { id: 'vsg-1', name: 'Vital Sign', status: 'Active' }
   ]);
@@ -324,13 +335,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       id: o.id, appointmentId: o.appointment_id, serviceId: o.service_id, serviceName: o.service_name,
       cptCode: o.cpt_code, quantity: o.quantity, unitPrice: o.unit_price, discountAmount: o.discount_amount,
       totalPrice: o.total_price, orderDate: o.order_date, status: o.status, billingStatus: o.billing_status,
-      priority: o.priority, orderingDoctorId: o.ordering_doctor_id, instructions: o.instructions, serviceCenter: o.service_center
+      priority: o.priority, orderingDoctorId: o.ordering_doctor_id, instructions: o.instructions, serviceCenter: o.service_center,
+      toothNumbers: o.tooth_numbers, dentalSelections: o.dental_selections || []
   });
   const mapOrderToDb = (o: any) => ({
       id: o.id, appointment_id: o.appointmentId, service_id: o.serviceId, service_name: o.serviceName,
       cpt_code: o.cptCode, quantity: o.quantity, unit_price: o.unitPrice, discount_amount: o.discountAmount,
       total_price: o.totalPrice, order_date: o.orderDate, status: o.status, billing_status: o.billingStatus,
-      priority: o.priority, ordering_doctor_id: o.orderingDoctorId, instructions: o.instructions, service_center: o.serviceCenter
+      priority: o.priority, ordering_doctor_id: o.orderingDoctorId, instructions: o.instructions, service_center: o.serviceCenter,
+      tooth_numbers: o.toothNumbers, dental_selections: o.dentalSelections || []
   });
 
 
@@ -350,6 +363,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     id: p.id, group_id: p.groupId, name: p.name, control_type: p.controlType,
     reference_range_min: p.referenceRangeMin, reference_range_max: p.referenceRangeMax,
     unit: p.unit, is_active: p.isActive, formula: p.formula
+  });
+
+  const mapDocumentFromDb = (d: any): PatientDocument => ({
+    id: d.id, patientId: d.patient_id, appointmentId: d.appointment_id, name: d.name,
+    fileType: d.file_type, fileData: d.file_data, uploadedAt: d.uploaded_at,
+    uploadedBy: d.uploaded_by, size: d.size
+  });
+  const mapDocumentToDb = (d: PatientDocument) => ({
+    id: d.id, patient_id: d.patientId, appointment_id: d.appointmentId, name: d.name,
+    file_type: d.fileType, file_data: d.fileData, uploaded_at: d.uploadedAt,
+    uploaded_by: d.uploadedBy, size: d.size
   });
 
   // --- Initial Fetch ---
@@ -405,9 +429,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('service_orders').select('*'),
           supabase.from('vital_sign_groups').select('*'),
           supabase.from('vital_sign_parameters').select('*'),
+          supabase.from('patient_documents').select('*'),
+          supabase.from('dental_icd_master').select('*'),
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -430,6 +456,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (ordRes.data) setServiceOrders(ordRes.data.map(mapOrderFromDb));
         if (vsgRes.data && vsgRes.data.length > 0) setVitalSignGroups(vsgRes.data.map(mapVitalSignGroupFromDb));
         if (vspRes.data && vspRes.data.length > 0) setVitalSignParameters(vspRes.data.map(mapVitalSignParameterFromDb));
+        if (docRes.data) setPatientDocuments(docRes.data.map(mapDocumentFromDb));
+        if (denRes.data) setDentalICDs(denRes.data.map(mapMasterDiagFromDb)); // Re-using mapper as structure is identical
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -574,7 +602,59 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.removeItem('medicore_user');
       
       // Clear data states
-      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]);
+      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]); setDentalICDs([]);
+  };
+
+  const saveDentalICD = async (icd: DentalICD) => {
+    if (!requireDb()) return;
+    setDentalICDs(prev => {
+        const exists = prev.find(item => item.id === icd.id);
+        if (exists) return prev.map(item => item.id === icd.id ? icd : item);
+        return [...prev, icd];
+    });
+    const { error } = await getSupabase().from('dental_icd_master').upsert({
+        id: icd.id,
+        code: icd.code,
+        description: icd.description,
+        status: icd.status
+    });
+    if (error) { 
+        showToast('error', `Failed to save Dental ICD: ${error.message}`);
+        setRefreshTrigger(prev => prev + 1);
+    } else {
+        showToast('success', 'Dental ICD saved.');
+    }
+  };
+
+  const uploadDentalICDs = async (data: DentalICD[]) => {
+      if (!requireDb()) return;
+      setDentalICDs(prev => [...prev, ...data]);
+      const dbData = data.map(icd => ({
+          id: icd.id,
+          code: icd.code,
+          description: icd.description,
+          status: icd.status
+      }));
+      const { error } = await getSupabase().from('dental_icd_master').insert(dbData);
+      if (error) {
+          showToast('error', `Bulk upload failed: ${error.message}`);
+          setRefreshTrigger(prev => prev + 1);
+      } else {
+          showToast('success', `${data.length} Dental ICDs imported.`);
+      }
+  };
+
+  const deleteDentalICD = async (id: string) => {
+      if (!requireDb()) return;
+      const original = dentalICDs.find(icd => icd.id === id);
+      setDentalICDs(prev => prev.filter(icd => icd.id !== id));
+      const { error } = await getSupabase().from('dental_icd_master').delete().eq('id', id);
+      if (error) {
+          showToast('error', 'Failed to delete Dental ICD.');
+          if (original) setDentalICDs(prev => [...prev, original]);
+      } else {
+          showToast('info', 'Dental ICD removed.');
+      }
   };
 
   // ... (Keep existing ADD/UPDATE functions - Ensure they check requireDb)
@@ -1020,12 +1100,59 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { error } = await getSupabase().from('service_orders').insert(dbPayload);
       if (error) {
           showToast('error', `Failed to save orders: ${error.message}`);
-          // Fix: use Set to safely check IDs and avoid type errors
           const orderIds = new Set(orders.map(o => o.id));
           setServiceOrders(prev => prev.filter(p => !orderIds.has(p.id))); 
       } else {
           showToast('success', `${orders.length} service(s) ordered.`);
       }
+  };
+
+  const cancelServiceOrder = async (orderId: string) => {
+      if (!requireDb()) return;
+      
+      const original = serviceOrders.find(o => o.id === orderId);
+      setServiceOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'Cancelled' } : o));
+      
+      const { error } = await getSupabase()
+          .from('service_orders')
+          .update({ status: 'Cancelled' })
+          .eq('id', orderId);
+          
+      if (error) {
+          showToast('error', `Failed to cancel order: ${error.message}`);
+          if (original) setServiceOrders(prev => prev.map(o => o.id === orderId ? original : o));
+      } else {
+          showToast('success', 'Service order cancelled.');
+      }
+  };
+
+  const savePatientDocument = async (doc: PatientDocument) => {
+    if (!requireDb()) return;
+    setPatientDocuments(prev => {
+        const exists = prev.find(d => d.id === doc.id);
+        if (exists) return prev.map(d => d.id === doc.id ? doc : d);
+        return [...prev, doc];
+    });
+    const { error } = await getSupabase().from('patient_documents').upsert(mapDocumentToDb(doc));
+    if (error) {
+        showToast('error', `Failed to save document: ${error.message}`);
+        setPatientDocuments(prev => prev.filter(d => d.id !== doc.id));
+    } else {
+        showToast('success', 'Document uploaded successfully.');
+    }
+  };
+
+  const deletePatientDocument = async (id: string) => {
+    if (!requireDb()) return;
+    const original = patientDocuments.find(d => d.id === id);
+    setPatientDocuments(prev => prev.filter(d => d.id !== id));
+    const { error } = await getSupabase().from('patient_documents').delete().eq('id', id);
+    if (error) {
+        showToast('error', 'Failed to delete document.');
+        if (original) setPatientDocuments(prev => [...prev, original]);
+    } else {
+        showToast('info', 'Document removed.');
+    }
   };
 
   return (
@@ -1038,12 +1165,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       serviceCentres, addServiceCentre,
       masterDiagnoses, uploadMasterDiagnoses,
       serviceDefinitions, serviceTariffs, saveServiceDefinition, uploadServiceDefinitions,
+      dentalICDs, saveDentalICD, uploadDentalICDs, deleteDentalICD,
       availabilities, saveAvailability, deleteAvailability,
       appointments, bookAppointment, updateAppointment, cancelAppointment,
       bills, createBill, cancelBill, addPayment,
-      vitals, diagnoses, narrativeDiagnoses, clinicalNotes, allergies, 
+      vitals, diagnoses, narrativeDiagnoses, clinicalNotes, allergies, patientDocuments,
       saveVitalSign, saveDiagnosis, deleteDiagnosis, saveNarrativeDiagnosis, saveClinicalNote, saveAllergy,
-      serviceOrders, saveServiceOrders,
+      savePatientDocument, deletePatientDocument,
+      serviceOrders, saveServiceOrders, cancelServiceOrder,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb

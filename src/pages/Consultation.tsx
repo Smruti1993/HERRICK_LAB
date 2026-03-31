@@ -6,7 +6,7 @@ import {
   User, Info, Save, FileText, Bell, Activity, Briefcase, 
   Pill, Clock, XCircle, CheckCircle, Trash2, Search, AlertTriangle, ArrowLeft, Calendar, Edit, X
 } from 'lucide-react';
-import { ServiceDefinition, ServiceOrder } from '../types';
+import { ServiceDefinition, ServiceOrder, PatientDocument } from '../types';
 import { DentalChart } from '../components/DentalChart';
 
 // --- Static Configs ---
@@ -106,10 +106,10 @@ const ServiceOrderingModal = ({
         }
     };
 
-    const addService = (s: ServiceDefinition, toothNumbers: string) => {
+    const addService = (s: ServiceDefinition, toothNumbers: string, dentalSelections?: { tooth: string, icd: string }[]) => {
         const price = getPrice(s.id);
         const newOrder: ServiceOrder = {
-            id: Date.now().toString() + Math.random().toString().slice(2,5),
+            id: crypto.randomUUID(),
             appointmentId,
             serviceId: s.id,
             serviceName: s.name,
@@ -125,14 +125,16 @@ const ServiceOrderingModal = ({
             orderingDoctorId: doctorId,
             instructions: '',
             serviceCenter: 'General',
-            toothNumbers: toothNumbers
+            toothNumbers: toothNumbers,
+            dentalSelections: dentalSelections
         };
         setSelectedServices(prev => [...prev, newOrder]);
     };
 
-    const handleToothSelection = (teeth: string[]) => {
+    const handleToothSelection = (selections: { tooth: string, icd: string }[]) => {
         if (pendingDentalService) {
-            addService(pendingDentalService, teeth.join(', '));
+            const toothNums = selections.map(s => s.tooth).join(', ');
+            addService(pendingDentalService, toothNums, selections);
             setPendingDentalService(null);
             setShowToothModal(false);
         }
@@ -300,8 +302,19 @@ const ServiceOrderingModal = ({
                                         <td className="p-1 border-r border-slate-200 text-center">No</td>
                                         <td className="p-1 border-r border-slate-200">{order.serviceCenter || 'General'}</td>
                                         <td className="p-1 border-r border-slate-200"></td>
-                                        <td className="p-1 border-r border-slate-200 text-center font-mono font-bold text-red-600">
-                                            {order.toothNumbers || '-'}
+                                        <td className="p-1 border-r border-slate-200 text-center font-mono text-[10px] leading-tight">
+                                            {order.dentalSelections && order.dentalSelections.length > 0 ? (
+                                                <div className="flex flex-col gap-0.5">
+                                                    {order.dentalSelections.map((ds, idx) => (
+                                                        <div key={idx} className="bg-blue-50 px-1 rounded border border-blue-100 flex justify-between gap-1">
+                                                            <span className="font-bold text-blue-800">T{ds.tooth}:</span>
+                                                            <span className="text-red-600 font-bold">{ds.icd || '?'}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300">-</span>
+                                            )}
                                         </td>
                                         <td className="p-1 border-r border-slate-200">
                                             <input 
@@ -341,7 +354,7 @@ const CPOEView = ({
     doctorId: string,
     onClose: () => void 
 }) => {
-    const { serviceOrders, employees } = useData();
+    const { serviceOrders, employees, cancelServiceOrder } = useData();
     const [showNewOrder, setShowNewOrder] = useState(false);
     
     // Filters
@@ -499,8 +512,18 @@ const CPOEView = ({
                                         <td className="p-2 border-r border-slate-200">C001/Cash</td>
                                         <td className="p-2 border-r border-slate-200"></td>
                                         <td className="p-2 border-r border-slate-200"></td>
-                                        <td className="p-2 border-r border-slate-200 text-center font-bold text-blue-700">
-                                            {order.toothNumbers || '-'}
+                                        <td className="p-2 border-r border-slate-200 text-center font-mono text-[10px]">
+                                            {order.dentalSelections && order.dentalSelections.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1 justify-center">
+                                                    {order.dentalSelections.map((ds, idx) => (
+                                                        <span key={idx} className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200" title={`Tooth ${ds.tooth}: ${ds.icd}`}>
+                                                            <b className="text-blue-700">T{ds.tooth}</b>:<b className="text-red-600">{ds.icd}</b>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-400">{order.toothNumbers || '-'}</span>
+                                            )}
                                         </td>
                                         <td className="p-2 border-r border-slate-200">
                                             <select className="border border-slate-300 rounded text-[10px]">
@@ -510,8 +533,23 @@ const CPOEView = ({
                                             <button className="bg-blue-500 text-white px-1 ml-1 rounded text-[10px]">Update</button>
                                         </td>
                                         <td className="p-2 text-center flex items-center justify-center gap-1">
-                                            <button className="text-blue-600"><Edit className="w-3 h-3" /></button>
-                                            <button className="text-red-500"><Trash2 className="w-3 h-3" /></button>
+                                            <button className="text-blue-600" title="Edit Order"><Edit className="w-3 h-3" /></button>
+                                            
+                                            {order.billingStatus === 'Pending' && order.status !== 'Cancelled' && (
+                                                <button 
+                                                    className="text-orange-500 hover:text-orange-700" 
+                                                    title="Cancel Order"
+                                                    onClick={() => {
+                                                        if (confirm('Are you sure you want to cancel this service order?')) {
+                                                            cancelServiceOrder(order.id);
+                                                        }
+                                                    }}
+                                                >
+                                                    <XCircle className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+
+                                            <button className="text-red-500" title="Delete Order"><Trash2 className="w-3 h-3" /></button>
                                         </td>
                                     </tr>
                                 ))
@@ -745,6 +783,161 @@ const DiagnosisEntryModal = ({ appointmentId, onClose }: { appointmentId: string
     );
 };
 
+// DocumentsModal
+const DocumentsModal = ({ 
+    patientId, 
+    appointmentId,
+    onClose 
+}: { 
+    patientId: string, 
+    appointmentId?: string,
+    onClose: () => void 
+}) => {
+    const { patientDocuments, savePatientDocument, deletePatientDocument, user, showToast } = useData();
+    const [uploading, setUploading] = useState(false);
+    
+    const myDocs = patientDocuments.filter(d => d.patientId === patientId);
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        setUploading(true);
+        try {
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const reader = new FileReader();
+
+                const fileData = await new Promise<string>((resolve) => {
+                    reader.onload = (ev) => resolve(ev.target?.result as string);
+                    reader.readAsDataURL(file);
+                });
+
+                const newDoc: PatientDocument = {
+                    id: Date.now().toString() + '-' + i,
+                    patientId,
+                    appointmentId,
+                    name: file.name,
+                    fileType: file.type,
+                    fileData,
+                    uploadedAt: new Date().toISOString(),
+                    uploadedBy: user?.id || 'unknown',
+                    size: file.size
+                };
+
+                await savePatientDocument(newDoc);
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('error', 'Failed to upload one or more files.');
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const formatSize = (bytes: number) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                <div className="flex justify-between items-center p-4 border-b shrink-0 bg-slate-50">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-slate-600" /> Patient Documents
+                    </h3>
+                    <button onClick={onClose}><X className="w-5 h-5 text-slate-400 hover:text-slate-600" /></button>
+                </div>
+
+                <div className="flex-1 overflow-hidden flex flex-col p-6 gap-6">
+                    {/* Upload Area */}
+                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center bg-slate-50/50 hover:bg-slate-50 hover:border-blue-300 transition-all group shrink-0">
+                        <div className="bg-white p-4 rounded-full shadow-sm mb-4 group-hover:scale-110 transition-transform">
+                            <Save className="w-8 h-8 text-blue-500" />
+                        </div>
+                        <h4 className="font-bold text-slate-700 mb-1">Click to upload or drag and drop</h4>
+                        <p className="text-xs text-slate-500 mb-4">PDF, JPG, PNG (Max. 10MB per file)</p>
+                        <label className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm cursor-pointer transition-colors shadow-md shadow-blue-200">
+                            Select Files
+                            <input type="file" multiple className="hidden" onChange={handleFileUpload} accept="application/pdf,image/*" />
+                        </label>
+                        {uploading && <div className="mt-4 text-sm text-blue-600 font-medium animate-pulse">Uploading...</div>}
+                    </div>
+
+                    {/* Document List */}
+                    <div className="flex-1 flex flex-col min-h-0">
+                        <h4 className="font-bold text-slate-700 text-sm mb-3 px-1">Recent Documents</h4>
+                        <div className="flex-1 overflow-y-auto border border-slate-100 rounded-lg bg-white">
+                            {myDocs.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                                    <FileText className="w-12 h-12 mb-2" />
+                                    <p className="text-sm">No documents found for this patient.</p>
+                                </div>
+                            ) : (
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 border-b">
+                                        <tr>
+                                            <th className="p-3">File Name</th>
+                                            <th className="p-3">Type</th>
+                                            <th className="p-3">Size</th>
+                                            <th className="p-3">Date</th>
+                                            <th className="p-3 text-center">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {myDocs.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()).map(doc => (
+                                            <tr key={doc.id} className="hover:bg-blue-50/30 transition-colors">
+                                                <td className="p-3 font-medium text-slate-700">
+                                                    <div className="flex items-center gap-2">
+                                                        <FileText className="w-4 h-4 text-blue-400" />
+                                                        <span className="truncate max-w-[200px]">{doc.name}</span>
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-slate-500 text-xs">
+                                                    {doc.fileType.split('/')[1]?.toUpperCase() || 'FILE'}
+                                                </td>
+                                                <td className="p-3 text-slate-500 text-xs">{formatSize(doc.size)}</td>
+                                                <td className="p-3 text-slate-500 text-xs">{new Date(doc.uploadedAt).toLocaleDateString()}</td>
+                                                <td className="p-3">
+                                                    <div className="flex justify-center gap-2">
+                                                        <a 
+                                                            href={doc.fileData} 
+                                                            download={doc.name}
+                                                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
+                                                            title="Download"
+                                                        >
+                                                            <Save className="w-4 h-4" />
+                                                        </a>
+                                                        <button 
+                                                            onClick={() => deletePatientDocument(doc.id)}
+                                                            className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="p-4 border-t bg-slate-50 flex justify-end shrink-0">
+                    <button onClick={onClose} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-6 py-2 rounded-lg font-bold text-sm transition-colors">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export const Consultation = () => {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
@@ -757,6 +950,7 @@ export const Consultation = () => {
   const [showAllergy, setShowAllergy] = useState(false);
   const [showDiagnosis, setShowDiagnosis] = useState(false);
   const [showCPOE, setShowCPOE] = useState(false);
+  const [showDocuments, setShowDocuments] = useState(false);
   
   const appointment = appointments.find(a => a.id === appointmentId);
   const patient = patients.find(p => p.id === appointment?.patientId);
@@ -869,6 +1063,7 @@ export const Consultation = () => {
         {showAllergy && <AllergyEntryModal patientId={patient.id} onClose={() => setShowAllergy(false)} />}
         {showDiagnosis && <DiagnosisEntryModal appointmentId={appointment.id} onClose={() => setShowDiagnosis(false)} />}
         {showCPOE && <CPOEView appointmentId={appointment.id} doctorId={employee?.id || ''} onClose={() => setShowCPOE(false)} />}
+        {showDocuments && <DocumentsModal patientId={patient.id} appointmentId={appointment.id} onClose={() => setShowDocuments(false)} />}
 
         {/* 1. Sub-Header (White) */}
         <div className="bg-white px-6 py-2 border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm z-20 h-14">
@@ -952,6 +1147,7 @@ export const Consultation = () => {
                                 if(tool.id === 'Allergy') setShowAllergy(true);
                                 if(tool.id === 'Diagnosis') setShowDiagnosis(true);
                                 if(tool.id === 'Orders') setShowCPOE(true);
+                                if(tool.id === 'Documents') setShowDocuments(true);
                             }}
                             className="flex flex-col items-center justify-center min-w-[70px] p-2 hover:bg-slate-50 rounded-lg transition-all group"
                         >
