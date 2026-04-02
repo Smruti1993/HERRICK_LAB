@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch
 } from '../types';
 import { 
     getSupabase, 
@@ -70,11 +70,18 @@ interface DataContextType {
   vitalSignGroups: VitalSignGroup[];
   vitalSignParameters: VitalSignParameter[];
   patientDocuments: PatientDocument[];
+  inventoryItems: InventoryItem[];
+  branches: Branch[];
+  saveBranch: (branch: Branch) => void;
+  deleteBranch: (id: string) => void;
 
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
   deleteVitalSignParameter: (id: string) => void;
   
+  saveInventoryItem: (item: InventoryItem) => Promise<void>;
+  uploadInventoryItems: (items: InventoryItem[]) => Promise<void>;
+
   saveVitalSign: (vital: VitalSign) => void;
   saveDiagnosis: (diagnosis: Diagnosis) => void;
   deleteDiagnosis: (id: string) => void;
@@ -140,6 +147,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     { id: 'vsp-9', groupId: 'vsg-1', name: 'Temperature', controlType: 'Text', referenceRangeMin: '36.5', referenceRangeMax: '37.4', isActive: true },
     { id: 'vsp-10', groupId: 'vsg-1', name: 'Intravascular systolic', controlType: 'Text', referenceRangeMin: '95.0', referenceRangeMax: '140.0', isActive: true },
   ]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
     if (!requireDb()) return;
@@ -195,6 +204,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- Mappers ---
   const mapDeptFromDb = (d: any): Department => ({ id: d.id, name: d.name, code: d.code, status: d.status });
+  const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status });
+  const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status });
   
   const mapEmpFromDb = (e: any): Employee => ({
     id: e.id, firstName: e.first_name, lastName: e.last_name, email: e.email, phone: e.phone,
@@ -376,6 +387,136 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     uploaded_by: d.uploadedBy, size: d.size
   });
 
+  const mapInventoryStockFromDb = (s: any): InventoryItemStock => ({
+    id: s.id,
+    itemId: s.item_id,
+    vedCategory: s.ved_category,
+    isReusable: s.is_reusable,
+    itemRate: s.item_rate,
+    fsnType: s.fsn_type,
+    isBulky: s.is_bulky,
+    cycleCountFrequency: s.cycle_count_frequency,
+    reusableCount: s.reusable_count,
+    reservedQty: s.reserved_qty,
+    manufacturerName: s.manufacturer_name
+  });
+
+  const mapInventoryStockToDb = (s: InventoryItemStock) => ({
+    id: s.id,
+    item_id: s.itemId,
+    ved_category: s.vedCategory,
+    is_reusable: s.isReusable,
+    item_rate: s.itemRate,
+    fsn_type: s.fsnType,
+    is_bulky: s.isBulky,
+    cycle_count_frequency: s.cycleCountFrequency,
+    reusable_count: s.reusableCount,
+    reserved_qty: s.reservedQty,
+    manufacturer_name: s.manufacturerName
+  });
+
+  const mapInventoryPricingFromDb = (p: any): InventoryItemPricing => ({
+    id: p.id,
+    itemId: p.item_id,
+    branchId: p.branch_id,
+    branchName: p.branch_name,
+    pricingMethod: p.pricing_method,
+    price: p.price,
+    markupPercentage: p.markup_percentage
+  });
+
+  const mapInventoryPricingToDb = (p: InventoryItemPricing) => ({
+    id: p.id,
+    item_id: p.itemId,
+    branch_id: p.branchId,
+    branch_name: p.branchName,
+    pricing_method: p.pricingMethod,
+    price: p.price,
+    markup_percentage: p.markupPercentage
+  });
+
+  const mapInventoryItemFromDb = (i: any): InventoryItem => ({
+    id: i.id,
+    itemCode: i.item_code,
+    itemName: i.item_name,
+    itemDescription: i.item_description,
+    arabicName: i.arabic_name,
+    itemType: i.item_type,
+    itemCategory: i.item_category,
+    itemGroup: i.item_group,
+    itemClass: i.item_class,
+    stockType: i.stock_type,
+    procurementType: i.procurement_type,
+    baseUom: i.base_uom,
+    trackUom: i.track_uom,
+    distributionCategory: i.distribution_category,
+    purchaseOrganisation: i.purchase_organisation,
+    shelfLifeLimit: i.shelf_life_limit,
+    itemSpecification: i.item_specification,
+    sfda: i.sfda,
+    gtin: i.gtin,
+    nphiesDrugType: i.nphies_drug_type,
+    isInventorised: i.is_inventorised,
+    isBatchTracked: i.is_batch_tracked,
+    isExpiryDateRequired: i.is_expiry_date_required,
+    isSerialized: i.is_serialized,
+    isActive: i.is_active,
+    isApprovalRequired: i.is_approval_required,
+    isInsuranceCover: i.is_insurance_cover,
+    drugSubGroups: i.drug_sub_groups,
+    purchaseUom: i.purchase_uom,
+    salesUom: i.sales_uom,
+    defaultPricingMethod: i.default_pricing_method,
+    defaultMarkupPercentage: i.default_markup_percentage,
+    branch: i.branch,
+    purchaseInventoryAcc: i.purchase_inventory_acc,
+    costOfSalesAcc: i.cost_of_sales_acc,
+    saleAccount: i.sale_account,
+    createdAt: i.created_at,
+    updatedAt: i.updated_at,
+    stock: (i.stock && i.stock.length > 0) ? mapInventoryStockFromDb(i.stock[0]) : (i.stock && !Array.isArray(i.stock) ? mapInventoryStockFromDb(i.stock) : undefined),
+    pricing: i.pricing ? (Array.isArray(i.pricing) ? i.pricing.map(mapInventoryPricingFromDb) : [mapInventoryPricingFromDb(i.pricing)]) : []
+  });
+
+  const mapInventoryItemToDb = (i: InventoryItem) => ({
+    id: i.id,
+    item_code: i.itemCode,
+    item_name: i.itemName,
+    item_description: i.itemDescription,
+    arabic_name: i.arabicName,
+    item_type: i.itemType,
+    item_category: i.itemCategory,
+    item_group: i.itemGroup,
+    item_class: i.itemClass,
+    stock_type: i.stockType,
+    procurement_type: i.procurementType,
+    base_uom: i.baseUom,
+    track_uom: i.trackUom,
+    distribution_category: i.distributionCategory,
+    purchase_organisation: i.purchaseOrganisation,
+    shelf_life_limit: i.shelfLifeLimit,
+    item_specification: i.itemSpecification,
+    sfda: i.sfda,
+    gtin: i.gtin,
+    nphies_drug_type: i.nphiesDrugType,
+    is_inventorised: i.isInventorised,
+    is_batch_tracked: i.isBatchTracked,
+    is_expiry_date_required: i.isExpiryDateRequired,
+    is_serialized: i.isSerialized,
+    is_active: i.isActive,
+    is_approval_required: i.isApprovalRequired,
+    is_insurance_cover: i.isInsuranceCover,
+    drug_sub_groups: i.drugSubGroups,
+    purchase_uom: i.purchaseUom,
+    sales_uom: i.salesUom,
+    default_pricing_method: i.defaultPricingMethod,
+    default_markup_percentage: i.defaultMarkupPercentage,
+    branch: i.branch,
+    purchase_inventory_acc: i.purchaseInventoryAcc,
+    cost_of_sales_acc: i.costOfSalesAcc,
+    sale_account: i.saleAccount
+  });
+
   // --- Initial Fetch ---
 
   useEffect(() => {
@@ -431,9 +572,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('vital_sign_parameters').select('*'),
           supabase.from('patient_documents').select('*'),
           supabase.from('dental_icd_master').select('*'),
+          supabase.from('inventory_items').select('*, stock:inventory_item_stocks(*), pricing:inventory_item_pricing(*)'),
+          supabase.from('branches').select('*'),
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -458,6 +601,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (vspRes.data && vspRes.data.length > 0) setVitalSignParameters(vspRes.data.map(mapVitalSignParameterFromDb));
         if (docRes.data) setPatientDocuments(docRes.data.map(mapDocumentFromDb));
         if (denRes.data) setDentalICDs(denRes.data.map(mapMasterDiagFromDb)); // Re-using mapper as structure is identical
+        if (invRes.data) setInventoryItems(invRes.data.map(mapInventoryItemFromDb));
+        if (brRes.data) setBranches(brRes.data.map(mapBranchFromDb));
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -595,6 +740,34 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('medicore_user', JSON.stringify(demoUser));
       showToast('success', 'Logged in to Demo Mode');
       return true;
+  };
+
+  const saveBranch = async (branch: Branch) => {
+    if (!requireDb()) return;
+    try {
+      const { error } = await getSupabase().from('branches').upsert(mapBranchToDb(branch));
+      if (error) throw error;
+      setBranches(prev => {
+          const exists = prev.find(b => b.id === branch.id);
+          if (exists) return prev.map(b => b.id === branch.id ? branch : b);
+          return [...prev, branch];
+      });
+      showToast('success', 'Hospital details saved!');
+    } catch (err: any) {
+      showToast('error', `Failed to save hospital: ${err.message}`);
+    }
+  };
+
+  const deleteBranch = async (id: string) => {
+    if (!requireDb()) return;
+    try {
+      const { error } = await getSupabase().from('branches').delete().eq('id', id);
+      if (error) throw error;
+      setBranches(prev => prev.filter(b => b.id !== id));
+      showToast('success', 'Hospital removed.');
+    } catch (err: any) {
+      showToast('error', `Failed to delete hospital: ${err.message}`);
+    }
   };
 
   const logout = () => {
@@ -1155,6 +1328,68 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const saveInventoryItem = async (item: InventoryItem) => {
+    if (!requireDb()) return;
+    const supabase = getSupabase();
+    
+    // Optimistic Update: Update local state immediately
+    setInventoryItems(prev => {
+        const index = prev.findIndex(i => i.id === item.id);
+        if (index > -1) {
+            const updated = [...prev];
+            updated[index] = item;
+            return updated;
+        }
+        return [item, ...prev];
+    });
+
+    // Save base item
+    const { error: itemError } = await supabase.from('inventory_items').upsert(mapInventoryItemToDb(item));
+    if (itemError) {
+        showToast('error', `Failed to save item: ${itemError.message}`);
+        setRefreshTrigger(prev => prev + 1); // Revert on error
+        return;
+    }
+
+    // Save stock if present
+    if (item.stock) {
+        const { error: stockError } = await supabase.from('inventory_item_stocks').upsert(mapInventoryStockToDb(item.stock), { onConflict: 'item_id' });
+        if (stockError) {
+            showToast('error', `Item saved, but stock details failed: ${stockError.message}`);
+        }
+    }
+
+    // Save pricing methods if present
+    if (item.pricing && item.pricing.length > 0) {
+        const pricingData = item.pricing.map(mapInventoryPricingToDb);
+        const { error: pricingError } = await supabase.from('inventory_item_pricing').upsert(pricingData, { onConflict: 'item_id,branch_id' });
+        if (pricingError) {
+            showToast('error', `Item saved, but pricing methods failed: ${pricingError.message}`);
+        }
+    }
+
+    showToast('success', `Inventory item ${item.itemName} saved.`);
+  };
+
+  const uploadInventoryItems = async (items: InventoryItem[]) => {
+    if (!requireDb()) return;
+    setInventoryItems(prev => [...prev, ...items]);
+    const dbData = items.map(i => mapInventoryItemToDb(i));
+    const { error } = await getSupabase().from('inventory_items').insert(dbData);
+    if (error) {
+        showToast('error', `Bulk upload failed: ${error.message}`);
+        setRefreshTrigger(prev => prev + 1);
+    } else {
+        // Handle bulk stock upload if present
+        const stockData = items.filter(i => i.stock).map(i => mapInventoryStockToDb(i.stock!));
+        if (stockData.length > 0) {
+            const { error: stockBulkError } = await getSupabase().from('inventory_item_stocks').insert(stockData);
+            if (stockBulkError) console.error("Stock bulk upload failed", stockBulkError);
+        }
+        showToast('success', `${items.length} items imported successfully.`);
+    }
+  };
+
   return (
     <DataContext.Provider value={{
       user, login, loginDemo, logout,
@@ -1173,6 +1408,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       saveVitalSign, saveDiagnosis, deleteDiagnosis, saveNarrativeDiagnosis, saveClinicalNote, saveAllergy,
       savePatientDocument, deletePatientDocument,
       serviceOrders, saveServiceOrders, cancelServiceOrder,
+      inventoryItems, saveInventoryItem, uploadInventoryItems, branches, saveBranch, deleteBranch,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb

@@ -996,12 +996,14 @@ export const Masters = () => {
   const { 
     departments, addDepartment, 
     units, addUnit, 
-    serviceCentres, addServiceCentre 
+    serviceCentres, addServiceCentre,
+    branches, saveBranch
   } = useData();
 
-  const [activeTab, setActiveTab] = useState<'departments' | 'units' | 'services' | 'diagnosis' | 'dental_icd' | 'service_defs' | 'vitals'>('departments');
+  const [activeTab, setActiveTab] = useState<'hospitals' | 'departments' | 'units' | 'services' | 'diagnosis' | 'dental_icd' | 'service_defs' | 'vitals'>('hospitals');
 
   const tabs = [
+    { id: 'hospitals', label: 'Hospitals' },
     { id: 'departments', label: 'Departments' },
     { id: 'units', label: 'Medical Units' },
     { id: 'services', label: 'Service Locations' }, // Renamed from Service Centres to clarify
@@ -1030,6 +1032,9 @@ export const Masters = () => {
       </div>
 
       <div className="animate-in fade-in duration-500">
+        {activeTab === 'hospitals' && (
+          <MasterList title="Hospital" data={branches} onAdd={saveBranch} />
+        )}
         {activeTab === 'departments' && (
           <MasterList title="Department" data={departments} onAdd={addDepartment} />
         )}

@@ -11,6 +11,7 @@ export interface MasterEntity {
 export interface Department extends MasterEntity {}
 export interface Unit extends MasterEntity {}
 export interface ServiceCentre extends MasterEntity {}
+export interface Branch extends MasterEntity {}
 
 // New Interface for Master Diagnosis List
 export interface MasterDiagnosis {
@@ -292,4 +293,74 @@ export interface ToastMessage {
   id: string;
   type: 'success' | 'error' | 'info';
   message: string;
+}
+
+export interface InventoryItemStock {
+  id: string;
+  itemId: string;
+  vedCategory: string;
+  isReusable: boolean;
+  itemRate: number;
+  fsnType: string;
+  isBulky: boolean;
+  cycleCountFrequency: string;
+  reusableCount: number;
+  reservedQty: number;
+  manufacturerName: string;
+}
+
+export interface InventoryItemPricing {
+  id: string;
+  itemId: string;
+  branchId: string;
+  branchName: string;
+  pricingMethod: string;
+  price: number;
+  markupPercentage: number;
+}
+
+export interface InventoryItem {
+  id: string;
+  itemCode: string;
+  itemName: string;
+  itemDescription: string;
+  arabicName: string;
+  itemType: string;
+  itemCategory: string;
+  itemGroup: string;
+  itemClass?: string;
+  stockType: string;
+  procurementType: string;
+  baseUom: string;
+  trackUom: string;
+  distributionCategory: string;
+  purchaseOrganisation: string;
+  shelfLifeLimit?: number;
+  itemSpecification?: string;
+  sfda?: string;
+  gtin?: string;
+  nphiesDrugType?: string;
+  isInventorised: boolean;
+  isBatchTracked: boolean;
+  isExpiryDateRequired: boolean;
+  isSerialized: boolean;
+  isActive: boolean;
+  isApprovalRequired: boolean;
+  isInsuranceCover: boolean;
+  drugSubGroups?: string;
+  
+  // Accounts and Sales Info
+  purchaseUom: string;
+  salesUom: string;
+  defaultPricingMethod: string;
+  defaultMarkupPercentage: number;
+  branch?: string;
+  purchaseInventoryAcc: string;
+  costOfSalesAcc: string;
+  saleAccount: string;
+  
+  createdAt?: string;
+  updatedAt?: string;
+  stock?: InventoryItemStock;
+  pricing?: InventoryItemPricing[];
 }

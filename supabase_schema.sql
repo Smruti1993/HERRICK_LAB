@@ -265,3 +265,85 @@ create table if not exists service_centres (
 insert into app_users (username, password, role, full_name)
 values ('admin', 'admin123', 'Administrator', 'System Admin')
 on conflict (username) do nothing;
+
+-- 21. Branches (Hospital/Organization Level)
+create table if not exists branches (
+  id uuid primary key default uuid_generate_v4(),
+  name text not null,
+  code text unique,
+  status text default 'Active'
+);
+
+-- Seed Initial Branches
+insert into branches (name, code)
+values ('Main Hospital', 'HOSP-001'), ('District Branch', 'HOSP-002')
+on conflict (code) do nothing;
+
+-- 22. Inventory Items
+create table if not exists inventory_items (
+  id uuid primary key default uuid_generate_v4(),
+  item_code text unique not null,
+  item_name text not null,
+  item_description text,
+  arabic_name text,
+  item_type text,
+  item_category text,
+  item_group text,
+  item_class text,
+  stock_type text default 'Stock',
+  procurement_type text default 'Local',
+  base_uom text default 'EACH',
+  track_uom text default 'EACH',
+  distribution_category text default 'Unit',
+  purchase_organisation text,
+  shelf_life_limit numeric(10,2),
+  item_specification text,
+  sfda text,
+  gtin text,
+  nphies_drug_type text,
+  is_inventorised boolean default true,
+  is_batch_tracked boolean default true,
+  is_expiry_date_required boolean default true,
+  is_serialized boolean default false,
+  is_active boolean default true,
+  is_approval_required boolean default true,
+  is_insurance_cover boolean default true,
+  drug_sub_groups text,
+  purchase_uom text default 'EACH',
+  sales_uom text default 'EACH',
+  default_pricing_method text default 'MRP',
+  default_markup_percentage numeric(10,2) default 0,
+  branch text, -- Optional singluar branch reference
+  purchase_inventory_acc text,
+  cost_of_sales_acc text,
+  sale_account text,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+-- 23. Inventory Item Stocks (Sub-tab: Stock)
+create table if not exists inventory_item_stocks (
+  id uuid primary key default uuid_generate_v4(),
+  item_id uuid references inventory_items(id) on delete cascade,
+  ved_category text,
+  is_reusable boolean default false,
+  item_rate numeric(10,2) default 1.0,
+  fsn_type text,
+  is_bulky boolean default false,
+  cycle_count_frequency text,
+  reusable_count integer default 0,
+  reserved_qty numeric(10,2) default 0,
+  manufacturer_name text
+);
+
+-- 24. Inventory Item Pricing (Sub-tab: Pricing Method)
+create table if not exists inventory_item_pricing (
+  id uuid primary key default uuid_generate_v4(),
+  item_id uuid references inventory_items(id) on delete cascade,
+  branch_id uuid references branches(id) on delete cascade,
+  branch_name text,
+  pricing_method text default 'MRP',
+  price numeric(15,2) default 0,
+  markup_percentage numeric(5,2) default 0,
+  unique(item_id, branch_id)
+);

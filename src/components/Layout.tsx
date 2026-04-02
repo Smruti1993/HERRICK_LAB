@@ -1,13 +1,12 @@
-import React from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { APP_NAME, NAV_ITEMS, NavItem } from '../constants';
+import { NAV_ITEMS, NavItem } from '../constants';
 import { useData } from '../context/DataContext';
 import { Bell, Search, UserCircle, X, LogOut } from 'lucide-react';
 
 export const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { toasts, removeToast, user, logout } = useData();
+  const { toasts, removeToast, user, logout, branches } = useData();
 
   const getPageTitle = () => {
     const item = NAV_ITEMS.find(n => n.path === location.pathname);
@@ -27,7 +26,7 @@ export const Layout = () => {
     return acc;
   }, {} as Record<string, NavItem[]>);
 
-  const categories = ['Main', 'Patient Care', 'Administration', 'System'];
+  const categories = ['Main', 'Patient Care', 'Administration', 'Inventory', 'System'];
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -37,7 +36,7 @@ export const Layout = () => {
           <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-blue-200">
             <span className="text-white font-bold text-lg">M</span>
           </div>
-          <span className="text-xl font-bold text-slate-800 tracking-tight">MediCore</span>
+          <span className="text-xl font-bold text-slate-800 tracking-tight truncate">{branches[0]?.name || 'MediCore'}</span>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-6">
