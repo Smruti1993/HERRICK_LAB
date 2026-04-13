@@ -1,4 +1,4 @@
-import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package } from 'lucide-react';
+import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill } from 'lucide-react';
 
 export const APP_NAME = "MediCore HMS";
 
@@ -11,6 +11,12 @@ export interface NavItem {
   path: string;
   icon: any;
   category?: string; // Optional grouping
+  subItems?: { 
+    label: string; 
+    path?: string; 
+    icon?: any;
+    subItems?: { label: string; path: string; icon?: any }[];
+  }[];
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -28,7 +34,55 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Masters', path: '/masters', icon: Settings, category: 'Administration' },
   
   // Inventory Section
-  { label: 'Inventory', path: '/inventory', icon: Package, category: 'Inventory' },
+  { 
+    label: 'Inventory', 
+    path: '/inventory', 
+    icon: Package, 
+    category: 'Inventory',
+    subItems: [
+      { label: 'Dashboard / Overview', path: '/inventory/dashboard' },
+      { label: 'Opening Stock', path: '/inventory/opening-stock' },
+      { 
+        label: 'Reports', 
+        path: '/inventory/reports',
+        subItems: [
+          { label: 'Stock Ledger', path: '/inventory/reports/stock-ledger' }
+        ]
+      },
+      { 
+        label: 'Masters',
+        path: '/inventory/masters',
+        subItems: [
+          { label: 'Item Master', path: '/inventory/item-master' },
+          { label: 'Store Master', path: '/inventory/store-master' },
+          { label: 'Item-Store Map', path: '/inventory/item-store-map' }
+        ]
+      }
+    ]
+  },
+
+  // Pharmacy Section
+  {
+    label: 'Pharmacy',
+    path: '/pharmacy',
+    icon: Pill,
+    category: 'Pharmacy',
+    subItems: [
+      {
+        label: 'Masters',
+        path: '/pharmacy/masters',
+        subItems: [
+          { label: 'Drug Generic Master', path: '/pharmacy/masters/drug-generic' },
+          { label: 'Drug Master', path: '/pharmacy/masters/drug-master' }
+        ]
+      },
+      {
+        label: 'Pharmacy Sale',
+        path: '/pharmacy/direct-sale',
+        icon: 'ShoppingCart'
+      }
+    ]
+  },
 
   { label: 'Connection', path: '/connection', icon: Database, category: 'System' },
 ];

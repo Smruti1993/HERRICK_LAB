@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, DirectSaleItem
 } from '../types';
 import { 
     getSupabase, 
@@ -74,6 +74,23 @@ interface DataContextType {
   branches: Branch[];
   saveBranch: (branch: Branch) => void;
   deleteBranch: (id: string) => void;
+
+  stores: Store[];
+  saveStore: (store: Store) => Promise<void>;
+  deleteStore: (id: string) => Promise<void>;
+
+  storeItemMappings: StoreItemMapping[];
+  saveStoreItemMapping: (mapping: StoreItemMapping) => Promise<void>;
+  deleteStoreItemMapping: (id: string) => Promise<void>;
+
+  openingStocks: OpeningStock[];
+  saveOpeningStock: (stock: OpeningStock) => Promise<void>;
+  
+  saveDirectSale: (sale: DirectSale) => Promise<boolean>;
+  fetchBatchDetails: (storeId: string, itemId: string) => Promise<Array<{ batchNo: string, currentStock: number, mrp: number, expiryDate?: string }>>;
+  
+  fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
+  fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
 
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
@@ -149,6 +166,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [storeItemMappings, setStoreItemMappings] = useState<StoreItemMapping[]>([]);
+  const [openingStocks, setOpeningStocks] = useState<OpeningStock[]>([]);
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
     if (!requireDb()) return;
@@ -472,10 +492,44 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     purchaseInventoryAcc: i.purchase_inventory_acc,
     costOfSalesAcc: i.cost_of_sales_acc,
     saleAccount: i.sale_account,
+    reorderLevel: i.reorder_level ?? undefined,
+    minStockLevel: i.min_stock_level ?? undefined,
     createdAt: i.created_at,
     updatedAt: i.updated_at,
     stock: (i.stock && i.stock.length > 0) ? mapInventoryStockFromDb(i.stock[0]) : (i.stock && !Array.isArray(i.stock) ? mapInventoryStockFromDb(i.stock) : undefined),
     pricing: i.pricing ? (Array.isArray(i.pricing) ? i.pricing.map(mapInventoryPricingFromDb) : [mapInventoryPricingFromDb(i.pricing)]) : []
+  });
+
+  const mapStoreFromDb = (s: any): Store => ({
+    id: s.id,
+    storeCode: s.store_code,
+    storeName: s.store_name,
+    branchId: s.branch_id,
+    branchName: s.branches?.name || s.branch_name, // Support join or denormalized
+    status: s.status,
+    isActive: s.is_active,
+    createdAt: s.created_at
+  });
+
+  const mapStoreToDb = (s: Store) => ({
+    id: s.id,
+    store_code: s.storeCode,
+    store_name: s.storeName,
+    branch_id: s.branchId,
+    status: s.status,
+    is_active: s.isActive
+  });
+
+  const mapStoreMappingFromDb = (m: any): StoreItemMapping => ({
+    id: m.id,
+    storeId: m.store_id,
+    itemId: m.item_id
+  });
+
+  const mapStoreMappingToDb = (m: StoreItemMapping) => ({
+    id: m.id,
+    store_id: m.storeId,
+    item_id: m.itemId
   });
 
   const mapInventoryItemToDb = (i: InventoryItem) => ({
@@ -514,7 +568,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     branch: i.branch,
     purchase_inventory_acc: i.purchaseInventoryAcc,
     cost_of_sales_acc: i.costOfSalesAcc,
-    sale_account: i.saleAccount
+    sale_account: i.saleAccount,
+    reorder_level: i.reorderLevel,
+    min_stock_level: i.minStockLevel
   });
 
   // --- Initial Fetch ---
@@ -574,9 +630,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('dental_icd_master').select('*'),
           supabase.from('inventory_items').select('*, stock:inventory_item_stocks(*), pricing:inventory_item_pricing(*)'),
           supabase.from('branches').select('*'),
+          supabase.from('stores').select('*, branches(name)'),
+          supabase.from('store_item_mappings').select('*'),
+          supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'),
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -603,6 +662,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (denRes.data) setDentalICDs(denRes.data.map(mapMasterDiagFromDb)); // Re-using mapper as structure is identical
         if (invRes.data) setInventoryItems(invRes.data.map(mapInventoryItemFromDb));
         if (brRes.data) setBranches(brRes.data.map(mapBranchFromDb));
+        if (stRes2.data) setStores(stRes2.data.map(mapStoreFromDb));
+        if (mRes.data) setStoreItemMappings(mRes.data.map(mapStoreMappingFromDb));
+        if (osRes && osRes.data) {
+           const mappedOS = osRes.data.map((os: any) => ({
+             id: os.id, storeId: os.store_id, entryDate: os.entry_date, status: os.status,
+             items: os.items ? os.items.map((i: any) => ({
+               id: i.id, openingStockId: i.opening_stock_id, itemId: i.item_id, itemCode: i.item_code, itemName: i.item_name, itemCategory: i.item_category,
+               batchNo: i.batch_no, batchStartDate: i.batch_start_date, batchEndDate: i.batch_end_date, quantity: i.quantity, rate: i.rate, amount: i.amount, mrp: i.mrp
+             })) : []
+           }));
+           setOpeningStocks(mappedOS);
+        }
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -642,6 +713,373 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const id = Date.now().toString();
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => removeToast(id), 5000);
+  };
+
+  const saveOpeningStock = async (stock: OpeningStock) => {
+    if (!requireDb()) return;
+    try {
+      const dbStock: any = {
+        store_id: stock.storeId,
+        entry_date: stock.entryDate,
+        status: stock.status
+      };
+      if (stock.id) dbStock.id = stock.id;
+      
+      const { data, error } = await getSupabase().from('inventory_opening_stocks').upsert(dbStock).select().single();
+      if (error) throw error;
+      
+      const savedStockId = data.id;
+      
+      if (stock.items && stock.items.length > 0) {
+          const dbItems = stock.items.map(i => {
+             const rowInfo: any = {
+                 opening_stock_id: savedStockId,
+                 item_id: i.itemId,
+                 item_code: i.itemCode,
+                 item_name: i.itemName,
+                 item_category: i.itemCategory,
+                 batch_no: i.batchNo,
+                 batch_start_date: i.batchStartDate || null,
+                 batch_end_date: i.batchEndDate || null,
+                 quantity: i.quantity,
+                 rate: i.rate,
+                 amount: i.amount,
+                 mrp: i.mrp
+             };
+             if (i.id && i.id.length > 20) rowInfo.id = i.id; // Basic UUID length check
+             return rowInfo;
+          });
+          const { error: itemsError } = await getSupabase().from('inventory_opening_stock_items').upsert(dbItems);
+          if (itemsError) throw itemsError;
+
+          // Write to Stock Ledger
+          const ledgerEntries = stock.items.map(i => ({
+             store_id: stock.storeId,
+             item_id: i.itemId,
+             transaction_type: 'STOCKIN',
+             ref_type: 'OPENING STOCK',
+             ref_doc_no: savedStockId,
+             ref_doc_date: stock.entryDate,
+             stock_in_quantity: i.quantity,
+             stock_out_quantity: 0,
+             closing_stock: i.quantity, // Normally calculated, but OS is usually starting stock
+             closing_stock_rate: i.rate,
+             closing_stock_value: i.amount,
+             currency: 'SAR',
+             batch_no: i.batchNo,
+             batch_date: i.batchStartDate,
+             expiry_date: i.batchEndDate
+          }));
+          
+          const { error: ledgerError } = await getSupabase().from('inventory_stock_ledger').insert(ledgerEntries);
+          if (ledgerError) console.error("Error writing to ledger:", ledgerError);
+      }
+      
+      // Update local state by forcing a refresh or manually mapping
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', 'Opening Stock saved successfully');
+    } catch (error: any) {
+      console.error('Error saving opening stock:', error);
+      showToast('error', `Failed to save Opening Stock: ${error.message}`);
+      throw error;
+    }
+  };
+
+  const fetchStockLedger = async (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => {
+     if (!requireDb()) return [];
+     try {
+         let query = getSupabase().from('inventory_stock_ledger')
+            .select(`
+               *,
+               store:stores(*),
+               item:inventory_items(*)
+            `)
+            .eq('store_id', filters.storeId);
+            
+         if (filters.fromDate) {
+             query = query.gte('ref_doc_date', filters.fromDate);
+         }
+         
+         if (filters.toDate) {
+             query = query.lte('ref_doc_date', filters.toDate);
+         }
+         
+         const { data, error } = await query;
+         if (error) throw error;
+         
+         let result = data;
+         
+         // In-memory filters for nested jsonb relations if needed, else we rely on JS
+         if (filters.itemCategory && filters.itemCategory !== '') {
+             result = result.filter((r: any) => r.item && r.item.item_category === filters.itemCategory);
+         }
+         
+         if (filters.searchQuery && filters.searchQuery !== '') {
+             const lower = filters.searchQuery.toLowerCase();
+             result = result.filter((r: any) => 
+                 (r.item && r.item.item_name && r.item.item_name.toLowerCase().includes(lower)) ||
+                 (r.item && r.item.item_code && r.item.item_code.toLowerCase().includes(lower))
+             );
+         }
+         
+         return result.map((r: any) => ({
+             id: r.id,
+             storeId: r.store_id,
+             itemId: r.item_id,
+             transactionType: r.transaction_type,
+             refType: r.ref_type,
+             refDocNo: r.ref_doc_no,
+             refDocDate: r.ref_doc_date,
+             stockInQuantity: r.stock_in_quantity,
+             stockOutQuantity: r.stock_out_quantity,
+             closingStock: r.closing_stock,
+             closingStockRate: r.closing_stock_rate,
+             closingStockValue: r.closing_stock_value,
+             currency: r.currency,
+             batchNo: r.batch_no,
+             batchDate: r.batch_date,
+             expiryDate: r.expiry_date,
+             createdAt: r.created_at,
+             store: r.store ? mapStoreFromDb(r.store) : undefined,
+             item: r.item ? mapInventoryItemFromDb(r.item) : undefined
+         })) as StockLedgerEntry[];
+         
+     } catch (error: any) {
+         console.error('Error fetching stock ledger:', error);
+         showToast('error', 'Failed to generate stock ledger');
+         return [];
+     }
+  };
+
+  const fetchDashboardMetrics = async (storeId: string): Promise<DashboardMetrics | null> => {
+      if (!requireDb()) return null;
+      try {
+          // Fetch all items to cross check base data
+          // Actually, we already have inventoryItems context state. We will use that!
+          // We just need the ledger sum for the store.
+          const { data, error } = await getSupabase().from('inventory_stock_ledger')
+             .select('item_id, stock_in_quantity, stock_out_quantity, closing_stock_value')
+             .eq('store_id', storeId);
+             
+          if (error) throw error;
+          
+          type ItemAgg = { stockIn: number, stockOut: number, lastValue: number };
+          const aggregations: Record<string, ItemAgg> = {};
+          
+          data.forEach(row => {
+              if (!aggregations[row.item_id]) {
+                  aggregations[row.item_id] = { stockIn: 0, stockOut: 0, lastValue: 0 };
+              }
+              aggregations[row.item_id].stockIn += Number(row.stock_in_quantity || 0);
+              aggregations[row.item_id].stockOut += Number(row.stock_out_quantity || 0);
+              // Take latest closing stock value based on the way it's queried or just sum values roughly.
+              // For prototype we sum or take simple average if needed. For accuracy closing_stock_value is tracked.
+              // Since it's a rough sum:
+              aggregations[row.item_id].lastValue += Number(row.closing_stock_value || 0);
+          });
+          
+          let totalValue = 0;
+          let lowStockItems = 0;
+          let outOfStock = 0;
+          
+          const itemsDetails: Array<any> = [];
+          
+          // Cross-reference with `inventoryItems` memory state
+          // Only process items that actually have entries in the store OR mapping
+          Object.keys(aggregations).forEach(itemId => {
+             const agg = aggregations[itemId];
+             const currentStock = agg.stockIn - agg.stockOut;
+             totalValue += (agg.lastValue); // Roughly. Note: In real scenarios value is QTY * avg rate.
+             
+             const info = inventoryItems.find(i => i.id === itemId);
+             // Use reorder_level stored in the item master — no hardcoded fallback
+             const restockLevel = info?.reorderLevel ?? 0;
+             
+             if (currentStock <= 0) outOfStock++;
+             else if (restockLevel > 0 && currentStock < restockLevel) lowStockItems++;
+             
+             itemsDetails.push({
+                 itemId,
+                 itemCode: info?.itemCode || 'UNK',
+                 itemCategory: info?.itemCategory || 'General',
+                 itemName: info?.itemName || 'Unknown Item',
+                 currentStock,
+                 restockLevel
+             });
+          });
+          
+          return {
+              totalProducts: itemsDetails.length,
+              lowStockItems,
+              outOfStock,
+              totalValue,
+              itemsDetails
+          };
+      } catch (err: any) {
+          console.error("Failed to fetch dashboard metrics", err);
+          return null;
+      }
+  };
+
+  const fetchBatchDetails = async (storeId: string, itemId: string) => {
+    if (!requireDb()) return [];
+    try {
+      // 1. Get MRP and Batch Date from opening stock
+      const { data: openingData } = await getSupabase()
+        .from('inventory_opening_stock_items')
+        .select('batch_no, mrp, rate, batch_start_date, batch_end_date')
+        .eq('item_id', itemId);
+        
+      const mrpMap = new Map();
+      const rateMap = new Map();
+      const expiryMap = new Map();
+      const batchDateMap = new Map();
+      openingData?.forEach(i => {
+        mrpMap.set(i.batch_no, i.mrp);
+        rateMap.set(i.batch_no, i.rate);
+        expiryMap.set(i.batch_no, i.batch_end_date);
+        batchDateMap.set(i.batch_no, i.batch_start_date);
+      });
+
+      // 2. Aggregate current stock from ledger
+      const { data: ledgerData } = await getSupabase()
+        .from('inventory_stock_ledger')
+        .select('batch_no, stock_in_quantity, stock_out_quantity')
+        .eq('store_id', storeId)
+        .eq('item_id', itemId);
+
+      const stockMap = new Map();
+      ledgerData?.forEach(row => {
+        const current = stockMap.get(row.batch_no) || 0;
+        stockMap.set(row.batch_no, current + Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+      });
+
+      return Array.from(stockMap.entries()).map(([batchNo, currentStock]) => ({
+        batchNo,
+        currentStock,
+        mrp: mrpMap.get(batchNo) || 0,
+        rate: rateMap.get(batchNo) || 0,
+        batchDate: batchDateMap.get(batchNo),
+        expiryDate: expiryMap.get(batchNo)
+      })).filter(b => b.currentStock > 0);
+
+    } catch (error) {
+      console.error('Error fetching batch details:', error);
+      return [];
+    }
+  };
+
+  const saveDirectSale = async (sale: DirectSale): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // 1. Save Sale Header
+      const dbSale = {
+        sale_no: sale.saleNo, // Correct property name
+        sale_date: sale.saleDate,
+        store_id: sale.storeId,
+        first_name: sale.firstName,
+        middle_name: sale.middleName || null,
+        last_name: sale.lastName || null,
+        phone_no: sale.phoneNo || null,
+        external_no: sale.externalNo || null,
+        dob: sale.dob || null, // Convert "" to null
+        age: sale.age || null,
+        age_unit: sale.ageUnit,
+        gender: sale.gender || null,
+        referred_doctor: sale.referredDoctor || null,
+        license_no: sale.licenseNo || null,
+        nationality: sale.nationality,
+        is_insured: sale.isInsured,
+        is_new_external_patient: sale.isNewExternalPatient,
+        total_amount: sale.totalAmount
+      };
+
+      const { data: savedSale, error: saleError } = await supabase
+        .from('pharmacy_direct_sales')
+        .insert(dbSale)
+        .select()
+        .single();
+
+      if (saleError) throw saleError;
+      const saleId = savedSale.id;
+
+      // 2. Save Sale Items
+      const dbItems = sale.items.map(i => ({
+        sale_id: saleId,
+        item_id: i.itemId,
+        batch_no: i.batchNo,
+        quantity: i.quantity,
+        unit_price: i.unitPrice,
+        total_price: i.totalPrice,
+        expiry_date: i.expiryDate || null // Convert "" to null
+      }));
+
+      const { error: itemsError } = await supabase.from('pharmacy_direct_sale_items').insert(dbItems);
+      if (itemsError) throw itemsError;
+
+      // 3. Update Stock Ledger (STOCKOUT)
+      const ledgerEntries = [];
+      const localBalances = new Map<string, number>();
+
+      for (const i of sale.items) {
+        const balanceKey = `${sale.storeId}-${i.itemId}-${i.batchNo}`;
+        let currentBalance = 0;
+
+        if (localBalances.has(balanceKey)) {
+          currentBalance = localBalances.get(balanceKey)!;
+        } else {
+          // Calculate point-in-time from DB
+          const { data: ledgerData } = await supabase
+            .from('inventory_stock_ledger')
+            .select('stock_in_quantity, stock_out_quantity')
+            .eq('store_id', sale.storeId)
+            .eq('item_id', i.itemId)
+            .eq('batch_no', i.batchNo);
+            
+          ledgerData?.forEach(row => {
+             currentBalance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+          });
+        }
+
+        const newBalance = currentBalance - i.quantity;
+        localBalances.set(balanceKey, newBalance);
+
+        // Use costRate if available, fallback to unitPrice (sale price) only if absolutely necessary
+        const valuationRate = i.costRate || 0;
+
+        ledgerEntries.push({
+          store_id: sale.storeId,
+          item_id: i.itemId,
+          transaction_type: 'STOCKOUT',
+          ref_type: 'DIRECT SALE',
+          ref_doc_no: sale.saleNo,
+          ref_doc_date: sale.saleDate,
+          stock_in_quantity: 0,
+          stock_out_quantity: i.quantity,
+          closing_stock: newBalance,
+          closing_stock_rate: valuationRate,
+          closing_stock_value: newBalance * valuationRate,
+          batch_no: i.batchNo,
+          batch_date: i.batchDate || null,
+          expiry_date: i.expiryDate || null,
+          currency: 'SAR'
+        });
+      }
+
+      const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
+      if (ledgerError) throw ledgerError;
+
+      showToast('success', 'Pharmacy Sale completed successfully.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+
+    } catch (error: any) {
+      console.error('Error saving direct sale:', error);
+      showToast('error', `Sale failed: ${error.message}`);
+      return false;
+    }
   };
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -1371,6 +1809,65 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     showToast('success', `Inventory item ${item.itemName} saved.`);
   };
 
+  const saveStore = async (store: Store) => {
+    if (!requireDb()) return;
+    const supabase = getSupabase();
+    
+    // Optimistic Update
+    setStores(prev => {
+        const index = prev.findIndex(s => s.id === store.id);
+        if (index > -1) {
+            const updated = [...prev];
+            updated[index] = store;
+            return updated;
+        }
+        return [store, ...prev];
+    });
+
+    const { error } = await supabase.from('stores').upsert(mapStoreToDb(store));
+    if (error) {
+        showToast('error', `Failed to save store: ${error.message}`);
+        setRefreshTrigger(prev => prev + 1);
+    } else {
+        showToast('success', `Store ${store.storeName} saved.`);
+    }
+  };
+
+  const deleteStore = async (id: string) => {
+    if (!requireDb()) return;
+    const original = stores.find(s => s.id === id);
+    setStores(prev => prev.filter(s => s.id !== id));
+    
+    const { error } = await getSupabase().from('stores').delete().eq('id', id);
+    if (error) {
+        showToast('error', `Failed to delete store: ${error.message}`);
+        if (original) setStores(prev => [...prev, original]);
+    } else {
+        showToast('info', 'Store record removed.');
+    }
+  };
+
+  const saveStoreItemMapping = async (mapping: StoreItemMapping) => {
+    if (!requireDb()) return;
+    setStoreItemMappings(prev => [...prev, mapping]);
+    const { error } = await getSupabase().from('store_item_mappings').upsert(mapStoreMappingToDb(mapping));
+    if (error) {
+        showToast('error', `Mapping failed: ${error.message}`);
+        setRefreshTrigger(prev => prev + 1);
+    }
+  };
+
+  const deleteStoreItemMapping = async (id: string) => {
+    if (!requireDb()) return;
+    const original = storeItemMappings.find(m => m.id === id);
+    setStoreItemMappings(prev => prev.filter(m => m.id !== id));
+    const { error } = await getSupabase().from('store_item_mappings').delete().eq('id', id);
+    if (error) {
+        showToast('error', 'Failed to remove mapping.');
+        if (original) setStoreItemMappings(prev => [...prev, original]);
+    }
+  };
+
   const uploadInventoryItems = async (items: InventoryItem[]) => {
     if (!requireDb()) return;
     setInventoryItems(prev => [...prev, ...items]);
@@ -1409,6 +1906,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       savePatientDocument, deletePatientDocument,
       serviceOrders, saveServiceOrders, cancelServiceOrder,
       inventoryItems, saveInventoryItem, uploadInventoryItems, branches, saveBranch, deleteBranch,
+      stores, saveStore, deleteStore,
+      storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
+      openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
+      saveDirectSale, fetchBatchDetails,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb

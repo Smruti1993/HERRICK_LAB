@@ -319,6 +319,23 @@ export interface InventoryItemPricing {
   markupPercentage: number;
 }
 
+export interface Store {
+  id: string;
+  storeCode: string;
+  storeName: string;
+  branchId: string;
+  branchName?: string;
+  status: 'Active' | 'Inactive';
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface StoreItemMapping {
+  id: string;
+  storeId: string;
+  itemId: string;
+}
+
 export interface InventoryItem {
   id: string;
   itemCode: string;
@@ -363,4 +380,305 @@ export interface InventoryItem {
   updatedAt?: string;
   stock?: InventoryItemStock;
   pricing?: InventoryItemPricing[];
+}
+
+export interface OpeningStockItem {
+  id?: string;
+  openingStockId?: string;
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  itemCategory: string;
+  batchNo?: string;
+  batchStartDate?: string;
+  batchEndDate?: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  bpDiastolic?: number;
+  temperature?: number;
+  pulse?: number;
+  respiratoryRate?: number;
+  weight?: number;
+  height?: number;
+  bmi?: number;
+  spo2?: number;
+  map?: number; // Mean Arterial Pressure
+  tobaccoUse?: string;
+  rowRemarks?: Record<string, string>; // JSON object for per-row remarks
+}
+
+export interface Diagnosis {
+  id: string;
+  appointmentId: string;
+  code?: string;
+  icdCode?: string;
+  description: string;
+  type: 'Provisional' | 'Final' | 'Primary' | 'Secondary';
+  isPoa?: boolean; // Present On Admission
+  addedAt: string;
+}
+
+export interface NarrativeDiagnosis {
+  id: string;
+  appointmentId: string;
+  illness?: string;
+  illnessDurationValue?: number;
+  illnessDurationUnit?: string;
+  behaviouralActivity?: string;
+  narrative?: string;
+  recordedAt: string;
+}
+
+export interface ClinicalNote {
+  id: string;
+  appointmentId: string;
+  noteType: string; // 'Chief Complaint', 'Past History', etc.
+  description: string;
+  recordedAt: string;
+}
+
+export interface Allergy {
+  id: string;
+  patientId: string;
+  allergen: string;
+  allergyType: string; // 'Drug', 'Food', etc.
+  severity: string;
+  reaction?: string;
+  status: 'Active' | 'Resolved';
+  onsetDate?: string;
+  resolvedDate?: string;
+  remarks?: string;
+}
+
+
+export interface PatientDocument {
+  id: string;
+  patientId: string;
+  appointmentId?: string;
+  name: string;
+  fileType: string; // 'application/pdf', 'image/jpeg', etc.
+  fileData: string; // BLOB format (Base64 string)
+  uploadedAt: string;
+  uploadedBy: string; // Doctor/Staff ID
+  size: number; // Bytes
+}
+
+// --- Vital Sign Master Types ---
+
+export interface VitalSignGroup {
+  id: string;
+  name: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface VitalSignParameter {
+  id: string;
+  groupId: string;
+  name: string;
+  controlType: 'Text' | 'Formula' | 'Numeric' | 'Dropdown';
+  referenceRangeMin?: string;
+  referenceRangeMax?: string;
+  unit?: string;
+  isActive: boolean;
+  formula?: string; // If controlType is Formula
+}
+
+export interface ToastMessage {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+export interface InventoryItemStock {
+  id: string;
+  itemId: string;
+  vedCategory: string;
+  isReusable: boolean;
+  itemRate: number;
+  fsnType: string;
+  isBulky: boolean;
+  cycleCountFrequency: string;
+  reusableCount: number;
+  reservedQty: number;
+  manufacturerName: string;
+}
+
+export interface InventoryItemPricing {
+  id: string;
+  itemId: string;
+  branchId: string;
+  branchName: string;
+  pricingMethod: string;
+  price: number;
+  markupPercentage: number;
+}
+
+export interface Store {
+  id: string;
+  storeCode: string;
+  storeName: string;
+  branchId: string;
+  branchName?: string;
+  status: 'Active' | 'Inactive';
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface StoreItemMapping {
+  id: string;
+  storeId: string;
+  itemId: string;
+}
+
+export interface InventoryItem {
+  id: string;
+  itemCode: string;
+  itemName: string;
+  itemDescription: string;
+  arabicName: string;
+  itemType: string;
+  itemCategory: string;
+  itemGroup: string;
+  itemClass?: string;
+  stockType: string;
+  procurementType: string;
+  baseUom: string;
+  trackUom: string;
+  distributionCategory: string;
+  purchaseOrganisation: string;
+  shelfLifeLimit?: number;
+  itemSpecification?: string;
+  sfda?: string;
+  gtin?: string;
+  nphiesDrugType?: string;
+  isInventorised: boolean;
+  isBatchTracked: boolean;
+  isExpiryDateRequired: boolean;
+  isSerialized: boolean;
+  isActive: boolean;
+  isApprovalRequired: boolean;
+  isInsuranceCover: boolean;
+  drugSubGroups?: string;
+  
+  // Accounts and Sales Info
+  purchaseUom: string;
+  salesUom: string;
+  defaultPricingMethod: string;
+  defaultMarkupPercentage: number;
+  branch?: string;
+  purchaseInventoryAcc: string;
+  costOfSalesAcc: string;
+  saleAccount: string;
+  reorderLevel?: number;
+  minStockLevel?: number;
+  
+  createdAt?: string;
+  updatedAt?: string;
+  stock?: InventoryItemStock;
+  pricing?: InventoryItemPricing[];
+}
+
+export interface OpeningStockItem {
+  id?: string;
+  openingStockId?: string;
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  itemCategory: string;
+  batchNo?: string;
+  batchStartDate?: string;
+  batchEndDate?: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  mrp: number;
+}
+
+export interface OpeningStock {
+  id?: string;
+  storeId: string;
+  entryDate: string;
+  status: 'Draft' | 'Submitted';
+  items?: OpeningStockItem[];
+}
+
+export interface StockLedgerEntry {
+  id?: string;
+  storeId: string;
+  itemId: string;
+  transactionType: 'STOCKIN' | 'STOCKOUT';
+  refType: string;
+  refDocNo: string;
+  refDocDate: string;
+  stockInQuantity: number;
+  stockOutQuantity: number;
+  closingStock: number;
+  closingStockRate: number;
+  closingStockValue: number;
+  currency: string;
+  batchNo?: string;
+  batchDate?: string;
+  expiryDate?: string;
+  createdAt?: string;
+
+  // Joined fields for display
+  store?: Store;
+  item?: InventoryItem;
+}
+
+export interface DashboardMetrics {
+  totalProducts: number;
+  lowStockItems: number;
+  outOfStock: number;
+  totalValue: number;
+  itemsDetails: Array<{
+    itemId: string;
+    itemCode: string;
+    itemCategory: string;
+    itemName: string;
+    currentStock: number;
+    restockLevel: number;
+  }>;
+}
+
+export interface DirectSaleItem {
+  id?: string;
+  saleId?: string;
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  batchNo: string;
+  batchDate?: string;
+  quantity: number;
+  unitPrice: number;
+  costRate?: number;
+  totalPrice: number;
+  expiryDate?: string;
+}
+
+export interface DirectSale {
+  id?: string;
+  saleNo: string;
+  saleDate: string;
+  storeId: string;
+  
+  // Patient Information
+  firstName: string;
+  middleName?: string;
+  lastName?: string;
+  phoneNo?: string;
+  externalNo?: string;
+  dob?: string;
+  age?: number;
+  ageUnit: string;
+  gender?: string;
+  referredDoctor?: string;
+  licenseNo?: string;
+  nationality: string;
+  isInsured: boolean;
+  isNewExternalPatient: boolean;
+  
+  totalAmount: number;
+  items: DirectSaleItem[];
 }

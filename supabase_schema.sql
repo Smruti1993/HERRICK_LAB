@@ -317,6 +317,8 @@ create table if not exists inventory_items (
   purchase_inventory_acc text,
   cost_of_sales_acc text,
   sale_account text,
+  reorder_level numeric(10,2) default 50,
+  min_stock_level numeric(10,2) default 10,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
 );
@@ -346,4 +348,143 @@ create table if not exists inventory_item_pricing (
   price numeric(15,2) default 0,
   markup_percentage numeric(5,2) default 0,
   unique(item_id, branch_id)
+);
+
+-- 25. Stores Master
+create table if not exists stores (
+  id uuid primary key default uuid_generate_v4(),
+  store_code text unique not null,
+  store_name text not null,
+  branch_id uuid references branches(id) on delete cascade,
+  status text default 'Active',
+  is_active boolean default true,
+  created_at timestamp with time zone default now()
+);
+
+-- 26. Store Item Mappings
+create table if not exists store_item_mappings (
+  id uuid primary key default uuid_generate_v4(),
+  store_id uuid references stores(id) on delete cascade,
+  item_id uuid references inventory_items(id) on delete cascade,
+  unique(store_id, item_id)
+);
+
+-- 27. Inventory Opening Stocks
+create table if not exists inventory_opening_stocks (
+  id uuid primary key default uuid_generate_v4(),
+  store_id uuid references stores(id) on delete cascade,
+  entry_date date default CURRENT_DATE,
+  status text default 'Draft',
+  created_at timestamp with time zone default now()
+);
+
+-- 28. Inventory Opening Stock Items
+create table if not exists inventory_opening_stock_items (
+  id uuid primary key default uuid_generate_v4(),
+  opening_stock_id uuid references inventory_opening_stocks(id) on delete cascade,
+  item_id uuid references inventory_items(id) on delete cascade,
+  item_code text,
+  item_name text,
+  item_category text,
+  batch_no text,
+  batch_start_date date,
+  batch_end_date date,
+  quantity numeric(10,2) default 0,
+  rate numeric(15,2) default 0,
+  amount numeric(15,2) default 0,
+  mrp numeric(15,2) default 0,
+  created_at timestamp with time zone default now()
+);
+
+-- 29. Inventory Stock Ledger
+create table if not exists inventory_stock_ledger (
+  id uuid primary key default uuid_generate_v4(),
+  store_id uuid references stores(id) on delete cascade,
+  item_id uuid references inventory_items(id) on delete cascade,
+  transaction_type text not null, -- 'STOCKIN', 'STOCKOUT'
+  ref_type text, -- e.g., 'OPENING STOCK', 'GOOD RECEIPT NOTE'
+  ref_doc_no text, -- e.g., 'OPS-DMM...', 'GRN-DMM...'
+  ref_doc_date timestamp with time zone default now(),
+  stock_in_quantity numeric(10,2) default 0,
+  stock_out_quantity numeric(10,2) default 0,
+  closing_stock numeric(10,2) default 0,
+  closing_stock_rate numeric(15,2) default 0,
+  closing_stock_value numeric(15,2) default 0,
+  currency text default 'SAR',
+  batch_no text,
+  batch_date date,
+  expiry_date date,
+  created_at timestamp with time zone default now()
+);
+
+-- 30. Pharmacy: Drug Generic Master
+create table if not exists pharmacy_drug_generics (
+  id uuid primary key default uuid_generate_v4(),
+  generic_code text unique not null,
+  generic_name text not null,
+  group_name text,
+  available_forms text,       -- e.g. 'Tablet, Capsule, Syrup'
+  strength text,              -- e.g. '500mg', '250mg/5ml'
+  form_of_administration text,-- e.g. 'Oral', 'Topical'
+  route_of_administration text,-- e.g. 'PO', 'IV', 'IM'
+  is_drug_generic boolean default true,
+  is_antibiotic boolean default false,
+  is_narcotic boolean default false,
+  is_active boolean default true,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+-- 31. Pharmacy: Drug Master (links inventory items to drug generics)
+create table if not exists pharmacy_drug_master (
+  id uuid primary key default uuid_generate_v4(),
+  item_id uuid references inventory_items(id) on delete cascade,
+  item_code text not null,
+  drug_name text not null,
+  generic_id uuid references pharmacy_drug_generics(id) on delete set null,
+  is_active boolean default true,
+  created_at timestamp with time zone default now(),
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+-- 32. Pharmacy: Direct Sale
+create table if not exists pharmacy_direct_sales (
+  id uuid primary key default uuid_generate_v4(),
+  sale_no text unique not null,
+  sale_date timestamp with time zone default now(),
+  store_id uuid references stores(id) on delete restrict,
+  
+  -- Patient Information (Local for direct sale)
+  first_name text not null,
+  middle_name text,
+  last_name text,
+  phone_no text,
+  external_no text, -- External Patient ID
+  dob date,
+  age numeric,
+  age_unit text default 'Years',
+  gender text,
+  referred_doctor text,
+  license_no text,
+  nationality text default 'SAUDI',
+  is_insured boolean default false,
+  is_new_external_patient boolean default true,
+  
+  total_amount numeric(15,2) default 0,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now()
+);
+
+-- 33. Pharmacy: Direct Sale Items
+create table if not exists pharmacy_direct_sale_items (
+  id uuid primary key default uuid_generate_v4(),
+  sale_id uuid references pharmacy_direct_sales(id) on delete cascade,
+  item_id uuid references inventory_items(id) on delete restrict,
+  batch_no text not null,
+  quantity numeric(10,2) not null check (quantity > 0),
+  unit_price numeric(15,2) not null, -- MRP
+  total_price numeric(15,2) not null,
+  expiry_date date,
+  created_at timestamp with time zone default now()
 );

@@ -1,12 +1,34 @@
+import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { NAV_ITEMS, NavItem } from '../constants';
 import { useData } from '../context/DataContext';
-import { Bell, Search, UserCircle, X, LogOut } from 'lucide-react';
+import { Bell, Search, UserCircle, X, LogOut, ChevronDown, ChevronRight } from 'lucide-react';
 
 export const Layout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { toasts, removeToast, user, logout, branches } = useData();
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    NAV_ITEMS.forEach(item => {
+      if (item.subItems) {
+        if (location.pathname.startsWith(item.path)) {
+          setExpandedMenus(prev => ({ ...prev, [item.path]: true }));
+        }
+        item.subItems.forEach(sub => {
+            if (sub.subItems && sub.subItems.some(ss => location.pathname === ss.path)) {
+                const subKey = sub.path || sub.label;
+                setExpandedMenus(prev => ({ ...prev, [subKey]: true }));
+            }
+        });
+      }
+    });
+  }, [location.pathname]);
+
+  const toggleMenu = (path: string) => {
+    setExpandedMenus(prev => ({ ...prev, [path]: !prev[path] }));
+  };
 
   const getPageTitle = () => {
     const item = NAV_ITEMS.find(n => n.path === location.pathname);
@@ -26,7 +48,7 @@ export const Layout = () => {
     return acc;
   }, {} as Record<string, NavItem[]>);
 
-  const categories = ['Main', 'Patient Care', 'Administration', 'Inventory', 'System'];
+  const categories = ['Main', 'Patient Care', 'Administration', 'Inventory', 'Pharmacy', 'System'];
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -53,23 +75,106 @@ export const Layout = () => {
                         <ul className="space-y-1">
                             {items.map((item) => {
                               const Icon = item.icon;
+                              const hasSub = item.subItems && item.subItems.length > 0;
+                              const isExpanded = expandedMenus[item.path];
+                              
                               return (
-                                <li key={item.path}>
-                                  <NavLink
-                                    to={item.path}
-                                    className={({ isActive }) =>
-                                      `flex items-center px-3 py-2.5 rounded-xl transition-all duration-200 group ${
-                                        isActive
+                                <li key={item.path} className="flex flex-col">
+                                  {hasSub ? (
+                                    <button
+                                      onClick={() => toggleMenu(item.path)}
+                                      className={`flex items-center w-full justify-between px-3 py-2.5 rounded-xl transition-all duration-200 group ${
+                                        location.pathname.startsWith(item.path)
                                           ? 'bg-blue-50 text-blue-700 shadow-sm'
                                           : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                                      }`
-                                    }
-                                  >
-                                    <Icon className={`w-5 h-5 mr-3 transition-opacity ${
-                                        location.pathname === item.path ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'
-                                    }`} />
-                                    <span className="font-medium text-sm">{item.label}</span>
-                                  </NavLink>
+                                      }`}
+                                    >
+                                      <div className="flex items-center">
+                                        <Icon className={`w-5 h-5 mr-3 transition-opacity ${
+                                          location.pathname.startsWith(item.path) ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'
+                                        }`} />
+                                        <span className="font-medium text-sm">{item.label}</span>
+                                      </div>
+                                      {isExpanded ? <ChevronDown className="w-4 h-4 opacity-50" /> : <ChevronRight className="w-4 h-4 opacity-50" />}
+                                    </button>
+                                  ) : (
+                                    <NavLink
+                                      to={item.path}
+                                      className={({ isActive }) =>
+                                        `flex items-center px-3 py-2.5 rounded-xl transition-all duration-200 group ${
+                                          isActive
+                                            ? 'bg-blue-50 text-blue-700 shadow-sm'
+                                            : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                        }`
+                                      }
+                                    >
+                                      <Icon className={`w-5 h-5 mr-3 transition-opacity ${
+                                          location.pathname === item.path ? 'opacity-100' : 'opacity-70 group-hover:opacity-100'
+                                      }`} />
+                                      <span className="font-medium text-sm">{item.label}</span>
+                                    </NavLink>
+                                  )}
+                                  
+                                  {hasSub && isExpanded && (
+                                    <ul className="mt-1 space-y-1 pl-11 pr-2">
+                                      {item.subItems!.map(sub => {
+                                        const hasSubSub = sub.subItems && sub.subItems.length > 0;
+                                        if (hasSubSub) {
+                                            const subKey = sub.path || sub.label;
+                                            const isSubExpanded = expandedMenus[subKey];
+                                            return (
+                                              <li key={subKey} className="flex flex-col py-1">
+                                                  <button
+                                                    onClick={() => toggleMenu(subKey)}
+                                                    className={`flex items-center w-full justify-between px-3 py-1.5 rounded-lg text-sm transition-colors group ${
+                                                      isSubExpanded ? 'text-slate-700 font-medium' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+                                                    }`}
+                                                  >
+                                                    <span className="text-slate-500 group-hover:text-slate-800 transition-colors">{sub.label}</span>
+                                                    {isSubExpanded ? <ChevronDown className="w-3.5 h-3.5 opacity-50" /> : <ChevronRight className="w-3.5 h-3.5 opacity-50" />}
+                                                  </button>
+                                                  {isSubExpanded && (
+                                                    <ul className="mt-1 space-y-1 pl-3 border-l-2 border-slate-100 ml-3 py-0.5">
+                                                      {sub.subItems!.map(ss => (
+                                                        <li key={ss.path}>
+                                                          <NavLink
+                                                            to={ss.path}
+                                                            className={({ isActive }) =>
+                                                              `block w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                                                                isActive
+                                                                  ? 'bg-blue-600 text-white font-medium shadow-md shadow-blue-200'
+                                                                  : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
+                                                              }`
+                                                            }
+                                                          >
+                                                            {ss.label}
+                                                          </NavLink>
+                                                        </li>
+                                                      ))}
+                                                    </ul>
+                                                  )}
+                                              </li>
+                                            );
+                                        }
+
+                                        return (
+                                        <li key={sub.path}>
+                                          <NavLink
+                                            to={sub.path!}
+                                            className={({ isActive }) =>
+                                              `block w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                                                isActive
+                                                  ? 'bg-blue-600 text-white font-medium shadow-md shadow-blue-200'
+                                                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+                                              }`
+                                            }
+                                          >
+                                            {sub.label}
+                                          </NavLink>
+                                        </li>
+                                      )})}
+                                    </ul>
+                                  )}
                                 </li>
                               );
                             })}
