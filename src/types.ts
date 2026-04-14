@@ -682,3 +682,35 @@ export interface DirectSale {
   totalAmount: number;
   items: DirectSaleItem[];
 }
+
+export interface PrescriptionItem {
+  id: string;
+  prescriptionId: string;
+  genericName?: string;
+  itemId: string;
+  itemName?: string;
+  itemCode?: string;
+  frequency: string;
+  dose: string;
+  units: string;
+  intakeQty: number;
+  startDate: string;
+  noDays: number;
+  totalQty: number;
+  drugInstruction?: string;
+  remarks?: string;
+  status: 'Pending' | 'Dispensed';
+}
+
+export interface Prescription {
+  id: string;
+  appointmentId: string;
+  patientId: string;
+  doctorId: string;
+  doctorName?: string;
+  orderDate: string;
+  orderType: string;
+  status: 'Pending' | 'Partially Dispensed' | 'Dispensed' | 'Cancelled';
+  totalAmount: number;
+  items: PrescriptionItem[];
+}

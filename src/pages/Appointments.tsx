@@ -1,9 +1,8 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useData } from '../context/DataContext';
 import { analyzeSymptoms } from '../services/geminiService';
-import { Sparkles, Loader2, Calendar as CalendarIcon, Clock, AlertCircle, Filter, RefreshCw, XCircle, AlertTriangle, ChevronLeft, ChevronRight, User, Check, Search, X, Plus, Save, History, FileText } from 'lucide-react';
-import { Appointment } from '../types';
+import { Sparkles, Loader2, Calendar as CalendarIcon, Clock, Filter, RefreshCw, XCircle, AlertTriangle, ChevronLeft, ChevronRight, User, Search, X, Plus } from 'lucide-react';
 
 // --- Mini Calendar Component ---
 const MiniCalendar = ({ selectedDate, onDateSelect }: { selectedDate: Date, onDateSelect: (d: Date) => void }) => {
@@ -389,7 +388,7 @@ const BookingModal = ({
 export const Appointments = () => {
   const { 
     departments, employees, availabilities, appointments, 
-    cancelAppointment, patients, allergies, showToast
+    cancelAppointment, patients, showToast
   } = useData();
 
   // --- Booking State ---
@@ -400,9 +399,6 @@ export const Appointments = () => {
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [selectedDateObj, setSelectedDateObj] = useState(new Date()); // Using Date Object for calendar
-  const [selectedPatient, setSelectedPatient] = useState(''); // Kept for left panel fallback, though modal handles its own
-  const [visitType, setVisitType] = useState<'New Visit' | 'Follow-up'>('New Visit');
-  const [selectedSlot, setSelectedSlot] = useState('');
 
   // --- Modal Booking State ---
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
@@ -419,7 +415,6 @@ export const Appointments = () => {
   const [appointmentToCancel, setAppointmentToCancel] = useState<string | null>(null);
 
   // --- Derived Data ---
-  const currentPatient = patients.find(p => p.id === selectedPatient);
   const bookingDoctors = employees.filter(e => e.role === 'Doctor' && e.departmentId === selectedDept);
   const allDoctors = employees.filter(e => e.role === 'Doctor');
   
@@ -510,18 +505,7 @@ export const Appointments = () => {
     
     let patientContext: { age?: number; gender?: string; allergies?: string[] } = {};
     
-    if (currentPatient) {
-        const age = new Date().getFullYear() - new Date(currentPatient.dob).getFullYear();
-        const activeAllergies = allergies
-            .filter(a => a.patientId === currentPatient.id && a.status === 'Active')
-            .map(a => a.allergen);
-            
-        patientContext = {
-            age,
-            gender: currentPatient.gender,
-            allergies: activeAllergies
-        };
-    }
+    /* No patient context as selectedPatient was removed */
 
     try {
         const result = await analyzeSymptoms(symptoms, departments.map(d => d.name), patientContext);
@@ -713,7 +697,7 @@ export const Appointments = () => {
                     {/* Scrollable Slots */}
                     <div className="flex-1 overflow-y-auto bg-white custom-scrollbar">
                         {selectedDoctor && schedulerData ? (
-                            schedulerData.slots.map((slot, idx) => (
+                            schedulerData.slots.map((slot) => (
                                 <div key={slot.time} className="flex h-8 border-b border-slate-200 hover:bg-slate-50 transition-colors">
                                     <div className="w-16 border-r border-slate-300 bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-500 select-none shrink-0">
                                         {slot.time}
@@ -723,11 +707,7 @@ export const Appointments = () => {
                                         {slot.isWorkingHour && !slot.bookedApt && (
                                             <div 
                                                 onClick={() => handleSlotClick(slot.time)}
-                                                className={`w-full h-full border border-yellow-200/50 cursor-pointer transition-all ${
-                                                    selectedSlot === slot.time 
-                                                    ? 'bg-blue-200 border-blue-400 shadow-inner' 
-                                                    : 'bg-[#fffbeb] hover:bg-[#fef3c7]' 
-                                                }`}
+                                                className="w-full h-full border border-yellow-200/50 cursor-pointer transition-all bg-[#fffbeb] hover:bg-[#fef3c7]"
                                                 title="Click to Book"
                                             ></div>
                                         )}

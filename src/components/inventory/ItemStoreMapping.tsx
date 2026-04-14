@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useData } from '../../context/DataContext';
 import { StoreItemMapping } from '../../types';
 import { Search, Building2, Package, CheckCircle2, Circle, ArrowRight } from 'lucide-react';

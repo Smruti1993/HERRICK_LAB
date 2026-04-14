@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useData } from '../../context/DataContext';
 import { 
-  ShoppingCart, Plus, Trash2, Search, Save, X, 
-  User, Store, Pill, Calendar, Globe, Hash, Info,
-  CheckCircle2, AlertCircle, ChevronDown
+  ShoppingCart, Plus, Trash2, Search, Save, 
+  User, Store, Pill, Calendar, Globe, Hash,
+  AlertCircle
 } from 'lucide-react';
 import { DirectSale as DirectSaleType, DirectSaleItem } from '../../types';
 

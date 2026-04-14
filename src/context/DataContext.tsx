@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, DirectSaleItem
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem
 } from '../types';
 import { 
     getSupabase, 
@@ -66,7 +66,8 @@ interface DataContextType {
   narrativeDiagnoses: NarrativeDiagnosis[];
   clinicalNotes: ClinicalNote[];
   allergies: Allergy[];
-  serviceOrders: ServiceOrder[]; // NEW
+  prescriptions: Prescription[]; // NEW
+  serviceOrders: ServiceOrder[]; 
   vitalSignGroups: VitalSignGroup[];
   vitalSignParameters: VitalSignParameter[];
   patientDocuments: PatientDocument[];
@@ -105,6 +106,7 @@ interface DataContextType {
   saveNarrativeDiagnosis: (nd: NarrativeDiagnosis) => void;
   saveClinicalNote: (note: ClinicalNote) => void;
   saveAllergy: (allergy: Allergy) => void;
+  savePrescription: (prescription: Prescription) => Promise<boolean>; // NEW
   saveServiceOrders: (orders: ServiceOrder[]) => void;
   cancelServiceOrder: (orderId: string) => Promise<void>;
   savePatientDocument: (doc: PatientDocument) => Promise<void>;
@@ -148,6 +150,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [clinicalNotes, setClinicalNotes] = useState<ClinicalNote[]>([]);
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]); // NEW
   const [patientDocuments, setPatientDocuments] = useState<PatientDocument[]>([]);
   const [vitalSignGroups, setVitalSignGroups] = useState<VitalSignGroup[]>([
     { id: 'vsg-1', name: 'Vital Sign', status: 'Active' }
@@ -573,6 +576,66 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     min_stock_level: i.minStockLevel
   });
 
+  const mapPrescriptionItemFromDb = (i: any): PrescriptionItem => ({
+      id: i.id,
+      prescriptionId: i.prescription_id,
+      genericName: i.generic_name,
+      itemId: i.item_id,
+      itemName: i.inventory_items?.item_name || '',
+      itemCode: i.inventory_items?.item_code || '',
+      frequency: i.frequency,
+      dose: i.dose,
+      units: i.units,
+      intakeQty: Number(i.intake_qty),
+      startDate: i.start_date,
+      noDays: i.no_days,
+      totalQty: Number(i.total_qty),
+      drugInstruction: i.drug_instruction,
+      remarks: i.remarks,
+      status: i.status
+  });
+
+  const mapPrescriptionFromDb = (p: any): Prescription => ({
+      id: p.id,
+      appointmentId: p.appointment_id,
+      patientId: p.patient_id,
+      doctorId: p.doctor_id,
+      doctorName: p.employees ? `Dr. ${p.employees.first_name} ${p.employees.last_name}` : 'Unknown Doctor',
+      orderDate: p.order_date,
+      orderType: p.order_type,
+      status: p.status,
+      totalAmount: Number(p.total_amount),
+      items: p.prescription_items ? p.prescription_items.map(mapPrescriptionItemFromDb) : []
+  });
+
+  const mapPrescriptionToDb = (p: Prescription) => ({
+      id: p.id,
+      appointment_id: p.appointmentId,
+      patient_id: p.patientId,
+      doctor_id: p.doctorId,
+      order_date: p.orderDate,
+      order_type: p.orderType,
+      status: p.status,
+      total_amount: p.totalAmount
+  });
+
+  const mapPrescriptionItemToDb = (i: any) => ({
+      id: i.id,
+      prescription_id: i.prescriptionId,
+      generic_name: i.genericName,
+      item_id: i.itemId,
+      frequency: i.frequency,
+      dose: i.dose,
+      units: i.units,
+      intake_qty: i.intakeQty,
+      start_date: i.startDate,
+      no_days: i.noDays,
+      total_qty: i.totalQty,
+      drug_instruction: i.drugInstruction,
+      remarks: i.remarks,
+      status: i.status
+  });
+
   // --- Initial Fetch ---
 
   useEffect(() => {
@@ -633,9 +696,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('stores').select('*, branches(name)'),
           supabase.from('store_item_mappings').select('*'),
           supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'),
+          supabase.from('prescriptions').select(`
+              *,
+              employees (first_name, last_name),
+              prescription_items (*, inventory_items (item_name, item_code))
+          `)
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, prRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -674,6 +742,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
            }));
            setOpeningStocks(mappedOS);
         }
+        if (prRes && prRes.data) setPrescriptions(prRes.data.map(mapPrescriptionFromDb));
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -1213,7 +1282,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.removeItem('medicore_user');
       
       // Clear data states
-      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]); setDentalICDs([]);
+      setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]); setDentalICDs([]); setPrescriptions([]);
   };
 
   const saveDentalICD = async (icd: DentalICD) => {
@@ -1702,6 +1771,40 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       else showToast('success', 'Allergy recorded.');
   };
 
+  const savePrescription = async (prescription: Prescription): Promise<boolean> => {
+      if (!requireDb()) return false;
+      const supabase = getSupabase();
+      
+      // Optimistic update
+      setPrescriptions(prev => {
+          const exists = prev.find(p => p.id === prescription.id);
+          if (exists) return prev.map(p => p.id === prescription.id ? prescription : p);
+          return [prescription, ...prev];
+      });
+
+      try {
+          // 1. Save Prescription Header
+          const { error: hError } = await supabase.from('prescriptions').upsert(mapPrescriptionToDb(prescription));
+          if (hError) throw hError;
+
+          // 2. Clear old items (for updates) and insert new ones
+          await supabase.from('prescription_items').delete().eq('prescription_id', prescription.id);
+          
+          if (prescription.items.length > 0) {
+              const itemsPayload = prescription.items.map(mapPrescriptionItemToDb);
+              const { error: iError } = await supabase.from('prescription_items').insert(itemsPayload);
+              if (iError) throw iError;
+          }
+
+          showToast('success', 'Prescription saved and sent to pharmacy.');
+          return true;
+      } catch (err: any) {
+          showToast('error', `Failed to save prescription: ${err.message}`);
+          setRefreshTrigger(prev => prev + 1); // Revert local state
+          return false;
+      }
+  };
+
   const saveServiceOrders = async (orders: ServiceOrder[]) => {
       if (!requireDb()) return;
       
@@ -1910,6 +2013,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
       saveDirectSale, fetchBatchDetails,
+      prescriptions, savePrescription,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb

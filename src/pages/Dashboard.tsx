@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { useData } from '../context/DataContext';
 import { Users, Activity, Calendar, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -75,7 +75,7 @@ export const Dashboard = () => {
                   cursor={{fill: '#f8fafc'}}
                 />
                 <Bar dataKey="appointments" radius={[6, 6, 0, 0]} barSize={50}>
-                  {chartData.map((entry, index) => (
+                  {chartData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                   ))}
                 </Bar>

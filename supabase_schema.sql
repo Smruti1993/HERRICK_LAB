@@ -444,7 +444,6 @@ create table if not exists pharmacy_drug_master (
   generic_id uuid references pharmacy_drug_generics(id) on delete set null,
   is_active boolean default true,
   created_at timestamp with time zone default now(),
-  created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
 );
 
@@ -488,3 +487,41 @@ create table if not exists pharmacy_direct_sale_items (
   expiry_date date,
   created_at timestamp with time zone default now()
 );
+-- 34. Prescriptions and Dispensing
+CREATE TABLE IF NOT EXISTS prescriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    appointment_id TEXT REFERENCES appointments(id),
+    patient_id UUID REFERENCES patients(id),
+    doctor_id UUID REFERENCES employees(id),
+    order_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    order_type TEXT, -- Generic / Item, IV Fluid, TPN
+    status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Partially Dispensed', 'Dispensed', 'Cancelled')),
+    total_amount DECIMAL(12,2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 35. Prescription Items
+CREATE TABLE IF NOT EXISTS prescription_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    prescription_id UUID REFERENCES prescriptions(id) ON DELETE CASCADE,
+    generic_name TEXT,
+    item_id UUID REFERENCES inventory_items(id),
+    frequency TEXT,
+    dose TEXT,
+    units TEXT,
+    intake_qty DECIMAL(10,2),
+    start_date DATE,
+    no_days INTEGER,
+    total_qty DECIMAL(10,2),
+    drug_instruction TEXT,
+    remarks TEXT,
+    status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Dispensed')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for Prescriptions
+CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON prescriptions(patient_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_appointment ON prescriptions(appointment_id);
+CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
+CREATE INDEX IF NOT EXISTS idx_prescription_items_prescription ON prescription_items(prescription_id);

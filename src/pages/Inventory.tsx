@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ItemMaster } from '../components/inventory/ItemMaster';
 import { StoreMaster } from '../components/inventory/StoreMaster';
 import { ItemStoreMapping } from '../components/inventory/ItemStoreMapping';
