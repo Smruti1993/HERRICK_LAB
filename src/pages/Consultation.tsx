@@ -4,11 +4,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { 
   User, Info, Save, FileText, Bell, Activity, Briefcase, 
-  Pill, Clock, XCircle, CheckCircle, Trash2, Search, AlertTriangle, ArrowLeft, Calendar, Edit, X, Plus
+  Pill, Clock, XCircle, CheckCircle, Trash2, Search, AlertTriangle, ArrowLeft, Calendar, Edit, X, Plus, Printer
 } from 'lucide-react';
 import { ServiceDefinition, ServiceOrder, PatientDocument } from '../types';
 import { DentalChart } from '../components/DentalChart';
 import { PharmacyOrderingModal } from '../components/doctor/PharmacyOrderingModal';
+import { PrescriptionPrintout } from '../components/doctor/PrescriptionPrintout';
+import { Prescription } from '../types';
 
 // --- Static Configs ---
 const SIDEBAR_ITEMS = [
@@ -356,10 +358,11 @@ const CPOEView = ({
     doctorId: string,
     onClose: () => void 
 }) => {
-    const { serviceOrders, prescriptions, employees, cancelServiceOrder } = useData();
+    const { serviceOrders, prescriptions, employees, cancelServiceOrder, patients, vitals, diagnoses, allergies } = useData();
     const [activeTab, setActiveTab] = useState<'Services' | 'Pharmacy'>('Services');
     const [showNewOrder, setShowNewOrder] = useState(false);
     const [showNewPharmacyOrder, setShowNewPharmacyOrder] = useState(false);
+    const [printingPrescription, setPrintingPrescription] = useState<Prescription | null>(null);
     
     // Filters
     const [orderDateFrom, setOrderDateFrom] = useState(new Date().toISOString().split('T')[0]);
@@ -629,6 +632,13 @@ const CPOEView = ({
                                                 </td>
                                                 <td className="p-3 text-center flex items-center justify-center gap-2">
                                                     <button className="text-blue-500 hover:text-blue-700" title="View Details"><Search className="w-3.5 h-3.5" /></button>
+                                                    <button 
+                                                        onClick={() => setPrintingPrescription(p)}
+                                                        className="text-emerald-600 hover:text-emerald-800" 
+                                                        title="Print Prescription"
+                                                    >
+                                                        <Printer className="w-3.5 h-3.5" />
+                                                    </button>
                                                     <button className="text-slate-400 hover:text-red-500" title="Cancel"><XCircle className="w-3.5 h-3.5" /></button>
                                                 </td>
                                             </tr>
@@ -637,6 +647,18 @@ const CPOEView = ({
                                 </tbody>
                             </table>
                         </div>
+
+                        {printingPrescription && (
+                            <PrescriptionPrintout 
+                                prescription={printingPrescription}
+                                patient={patients.find(pt => pt.id === printingPrescription.patientId)!}
+                                doctor={employees.find(e => e.id === printingPrescription.doctorId)}
+                                diagnoses={diagnoses.filter(d => d.appointmentId === appointmentId)}
+                                allergies={allergies.filter(a => a.patientId === patientId)}
+                                vitals={vitals.find(v => v.appointmentId === appointmentId)}
+                                onClose={() => setPrintingPrescription(null)}
+                            />
+                        )}
                     </div>
                 )}
             </div>

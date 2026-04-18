@@ -1,23 +1,38 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, Clock, CheckCircle, AlertCircle, Pill, 
   Calendar, User, ShoppingBag,
   Printer, Package, History
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
+import { BatchSelectionModal } from '../components/pharmacy/BatchSelectionModal';
 
 export const OPPharmacy: React.FC = () => {
-    const { prescriptions, inventoryItems, patients, showToast } = useData();
+    const { prescriptions, inventoryItems, patients, showToast, stores, dispensePrescription } = useData();
     
+    const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+    useEffect(() => {
+        if (stores.length > 0 && !selectedStoreId) {
+            setSelectedStoreId(stores[0].id);
+        }
+    }, [stores, selectedStoreId]);
+
     const [selectedPrescriptionId, setSelectedPrescriptionId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<'All' | 'Pending' | 'Dispensed'>('Pending');
+    const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number }>>({});
+    const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number } | null>(null);
 
     const selectedPrescription = useMemo(() => 
         prescriptions.find(p => p.id === selectedPrescriptionId), 
     [prescriptions, selectedPrescriptionId]);
 
-    const patient = useMemo(() => 
+    useEffect(() => {
+        // Clear batches when prescription changes
+        setSelectedBatches({});
+    }, [selectedPrescriptionId]);
+
+    const patient = useMemo(() =>  
         selectedPrescription ? patients.find(pat => pat.id === selectedPrescription.patientId) : null,
     [selectedPrescription, patients]);
 
@@ -30,15 +45,35 @@ export const OPPharmacy: React.FC = () => {
         }).sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
     }, [prescriptions, searchQuery, statusFilter, patients]);
 
-    const handleDispenseItem = (_itemId: string) => {
-        // In a real app, this would open a batch selection modal or handle stock reduction logic
-        showToast('info', 'Batch selection and stock deduction logic triggered for item.');
+    const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number) => {
+        if (!selectedStoreId) {
+            showToast('error', 'Please select a store first.');
+            return;
+        }
+        setActiveBatchItem({ id: itemRecId, itemId, itemName, reqQty });
     };
 
-    const handleFinalDispense = () => {
-        if (!selectedPrescription) return;
-        showToast('success', `Prescription ${selectedPrescription.id.slice(-6)} successfully dispensed.`);
-        // Note: Real implementation would call a context function to update DB status and stock
+    const handleBatchSelected = (batchInfo: any) => {
+        if (activeBatchItem) {
+            setSelectedBatches(prev => ({ ...prev, [activeBatchItem.id]: batchInfo }));
+        }
+        setActiveBatchItem(null);
+    };
+
+    const handleFinalDispense = async () => {
+        if (!selectedPrescription || !selectedStoreId) return;
+        
+        // Ensure all pending items have a batch selected
+        const pendingItems = selectedPrescription.items.filter(i => i.status !== 'Dispensed');
+        if (pendingItems.length > 0 && Object.keys(selectedBatches).length === 0) {
+            showToast('error', 'Please select batches for the items before dispensing.');
+            return;
+        }
+
+        const success = await dispensePrescription(selectedPrescription.id, selectedStoreId, selectedBatches);
+        if (success) {
+            setSelectedBatches({});
+        }
     };
 
     return (
@@ -51,6 +86,17 @@ export const OPPharmacy: React.FC = () => {
                     </h2>
                     
                     <div className="space-y-3">
+                        <select 
+                            className="w-full p-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-500"
+                            value={selectedStoreId}
+                            onChange={(e) => setSelectedStoreId(e.target.value)}
+                        >
+                            <option value="">Select Dispensary Store...</option>
+                            {stores.map(s => (
+                                <option key={s.id} value={s.id}>{s.storeName}</option>
+                            ))}
+                        </select>
+
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <input 
@@ -135,7 +181,7 @@ export const OPPharmacy: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={handleFinalDispense}
-                                    disabled={selectedPrescription.status === 'Dispensed'}
+                                    disabled={selectedPrescription.status === 'Dispensed' || Object.keys(selectedBatches).length === 0}
                                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
                                 >
                                     <CheckCircle className="w-5 h-5" /> Confirm Dispensing
@@ -195,13 +241,20 @@ export const OPPharmacy: React.FC = () => {
                                                     </td>
                                                     <td className="p-4">
                                                         <div className="flex items-center justify-center gap-2">
-                                                            {selectedPrescription.status === 'Dispensed' ? (
+                                                            {selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' ? (
                                                                 <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
                                                                     <CheckCircle className="w-3.5 h-3.5" /> Dispensed
                                                                 </span>
+                                                            ) : selectedBatches[item.id] ? (
+                                                                <button 
+                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty)}
+                                                                    className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 hover:bg-blue-100 transition-colors border border-blue-200"
+                                                                >
+                                                                    <CheckCircle className="w-3.5 h-3.5" /> Batch {selectedBatches[item.id].batchNo}
+                                                                </button>
                                                             ) : (
                                                                 <button 
-                                                                    onClick={() => handleDispenseItem(item.itemId)}
+                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty)}
                                                                     className="px-4 py-2 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
                                                                 >
                                                                     <Package className="w-4 h-4" /> Select Batch
@@ -252,7 +305,9 @@ export const OPPharmacy: React.FC = () => {
                             <div className="flex items-center gap-12">
                                 <div className="flex flex-col">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Billable</span>
-                                    <span className="text-2xl font-black text-slate-800">SAR 0.00</span>
+                                    <span className="text-2xl font-black text-slate-800">
+                                        SAR {Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
+                                    </span>
                                 </div>
                                 <div className="flex flex-col">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Items Status</span>
@@ -268,7 +323,8 @@ export const OPPharmacy: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={handleFinalDispense}
-                                    className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-black rounded-xl text-sm shadow-xl shadow-blue-200 hover:shadow-blue-300 transition-all active:scale-95"
+                                    disabled={selectedPrescription.status === 'Dispensed' || Object.keys(selectedBatches).length === 0}
+                                    className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-black rounded-xl text-sm shadow-xl shadow-blue-200 hover:shadow-blue-300 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
                                 >
                                     Dispense & Print Label
                                 </button>
@@ -285,6 +341,17 @@ export const OPPharmacy: React.FC = () => {
                     </div>
                 )}
             </div>
+
+            {activeBatchItem && selectedStoreId && (
+                <BatchSelectionModal 
+                    storeId={selectedStoreId}
+                    itemId={activeBatchItem.itemId}
+                    itemName={activeBatchItem.itemName}
+                    requiredQty={activeBatchItem.reqQty}
+                    onClose={() => setActiveBatchItem(null)}
+                    onSelect={handleBatchSelected}
+                />
+            )}
         </div>
     );
 };

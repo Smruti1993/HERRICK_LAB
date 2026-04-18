@@ -702,6 +702,7 @@ export interface PrescriptionItem {
   status: 'Pending' | 'Dispensed';
 }
 
+
 export interface Prescription {
   id: string;
   appointmentId: string;
@@ -713,4 +714,30 @@ export interface Prescription {
   status: 'Pending' | 'Partially Dispensed' | 'Dispensed' | 'Cancelled';
   totalAmount: number;
   items: PrescriptionItem[];
+}
+
+// --- Pharmacy Master Types ---
+
+export interface DrugGeneric {
+  id: string;
+  genericCode: string;
+  genericName: string;
+  groupName?: string;
+  strength?: string;
+  availableForms?: string;
+  formOfAdministration?: string;
+  routeOfAdministration?: string;
+  isDrugGeneric: boolean;
+  isAntibiotic: boolean;
+  isNarcotic: boolean;
+  isActive: boolean;
+}
+
+export interface DrugMaster {
+  id: string;
+  itemId: string;
+  itemCode: string;
+  drugName: string;
+  genericId: string;
+  isActive: boolean;
 }

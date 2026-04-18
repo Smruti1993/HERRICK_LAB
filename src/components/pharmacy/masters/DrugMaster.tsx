@@ -23,7 +23,7 @@ interface DrugMasterRecord {
 const EMPTY: DrugMasterRecord = { itemId: '', itemCode: '', drugName: '', genericId: '', isActive: true };
 
 export const DrugMaster: React.FC = () => {
-  const { inventoryItems } = useData();
+  const { inventoryItems, saveDrugMaster, deleteDrugMaster } = useData();
   const supabase = getSupabase();
 
   const [records, setRecords] = useState<DrugMasterRecord[]>([]);
@@ -112,21 +112,22 @@ export const DrugMaster: React.FC = () => {
 
   const handleSave = async () => {
     if (!form.itemId || !form.drugName) { setError('Please select a drug from Item Master.'); return; }
-    if (!supabase) { setError('Database not connected.'); return; }
     setSaving(true);
     try {
-      const payload: any = {
-        item_id: form.itemId,
-        item_code: form.itemCode,
-        drug_name: form.drugName,
-        generic_id: form.genericId || null,
-        is_active: form.isActive,
-      };
-      if (form.id) payload.id = form.id;
-      const { error } = await supabase.from('pharmacy_drug_master').upsert(payload);
-      if (error) throw error;
-      await fetchRecords();
-      closeForm();
+      const success = await saveDrugMaster({
+        id: form.id || '',
+        itemId: form.itemId,
+        itemCode: form.itemCode,
+        drugName: form.drugName,
+        genericId: form.genericId || '',
+        isActive: form.isActive,
+      });
+      if (success) {
+          closeForm();
+          // We still fetch records to get the joined generic name for the table display
+          // since the local state in DataContext might not have the full joined object
+          await fetchRecords(); 
+      }
     } catch (e: any) {
       setError('Save failed: ' + e.message);
     } finally {
@@ -135,10 +136,11 @@ export const DrugMaster: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!supabase) return;
-    await supabase.from('pharmacy_drug_master').delete().eq('id', id);
-    setDeleteConfirm(null);
-    await fetchRecords();
+    const success = await deleteDrugMaster(id);
+    if (success) {
+        setDeleteConfirm(null);
+        await fetchRecords();
+    }
   };
 
   // Filtered item options

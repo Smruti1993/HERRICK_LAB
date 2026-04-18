@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster
 } from '../types';
 import { 
     getSupabase, 
@@ -107,8 +107,11 @@ interface DataContextType {
   saveClinicalNote: (note: ClinicalNote) => void;
   saveAllergy: (allergy: Allergy) => void;
   savePrescription: (prescription: Prescription) => Promise<boolean>; // NEW
-  saveServiceOrders: (orders: ServiceOrder[]) => void;
-  cancelServiceOrder: (orderId: string) => Promise<void>;
+  dispensePrescription: (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string }>) => Promise<boolean>;
+  drugGenerics: DrugGeneric[];
+  drugMasters: DrugMaster[];
+  saveDrugMaster: (mapping: DrugMaster) => Promise<boolean>;
+  deleteDrugMaster: (id: string) => Promise<boolean>;
   savePatientDocument: (doc: PatientDocument) => Promise<void>;
   deletePatientDocument: (id: string) => Promise<void>;
   
@@ -151,6 +154,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]); // NEW
+  const [drugGenerics, setDrugGenerics] = useState<DrugGeneric[]>([]);
+  const [drugMasters, setDrugMasters] = useState<DrugMaster[]>([]);
   const [patientDocuments, setPatientDocuments] = useState<PatientDocument[]>([]);
   const [vitalSignGroups, setVitalSignGroups] = useState<VitalSignGroup[]>([
     { id: 'vsg-1', name: 'Vital Sign', status: 'Active' }
@@ -612,7 +617,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       id: p.id,
       appointment_id: p.appointmentId,
       patient_id: p.patientId,
-      doctor_id: p.doctorId,
+      doctor_id: p.doctorId || null,
       order_date: p.orderDate,
       order_type: p.orderType,
       status: p.status,
@@ -634,6 +639,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       drug_instruction: i.drugInstruction,
       remarks: i.remarks,
       status: i.status
+  });
+
+  const mapDrugGenericFromDb = (r: any): DrugGeneric => ({
+    id: r.id,
+    genericCode: r.generic_code,
+    genericName: r.generic_name,
+    groupName: r.group_name,
+    strength: r.strength,
+    availableForms: r.available_forms,
+    formOfAdministration: r.form_of_administration,
+    routeOfAdministration: r.route_of_administration,
+    isDrugGeneric: r.is_drug_generic,
+    isAntibiotic: r.is_antibiotic,
+    isNarcotic: r.is_narcotic,
+    isActive: r.is_active,
+  });
+
+  const mapDrugMasterFromDb = (r: any): DrugMaster => ({
+    id: r.id,
+    itemId: r.item_id,
+    itemCode: r.item_code,
+    drugName: r.drug_name,
+    genericId: r.generic_id,
+    isActive: r.is_active,
   });
 
   // --- Initial Fetch ---
@@ -700,10 +729,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               *,
               employees (first_name, last_name),
               prescription_items (*, inventory_items (item_name, item_code))
-          `)
+          `),
+          supabase.from('pharmacy_drug_generics').select('*'),
+          supabase.from('pharmacy_drug_master').select('*')
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, prRes] = 
+        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, prRes, dgRes, dmRes] = 
             await Promise.race([fetchPromise, timeoutPromise]) as any[];
 
         if (pRes.error) throw pRes.error;
@@ -743,6 +774,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
            setOpeningStocks(mappedOS);
         }
         if (prRes && prRes.data) setPrescriptions(prRes.data.map(mapPrescriptionFromDb));
+        if (dgRes && dgRes.data) setDrugGenerics(dgRes.data.map(mapDrugGenericFromDb));
+        if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
 
         if (bRes.data) {
             const rawBills = bRes.data;
@@ -1105,7 +1138,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             .select('stock_in_quantity, stock_out_quantity')
             .eq('store_id', sale.storeId)
             .eq('item_id', i.itemId)
-            .eq('batch_no', i.batchNo);
+            .eq('batch_no', (i.batchNo || '').trim());
             
           ledgerData?.forEach(row => {
              currentBalance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
@@ -1805,6 +1838,152 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
+  const saveDrugMaster = async (mapping: DrugMaster): Promise<boolean> => {
+      if (!requireDb()) return false;
+      const supabase = getSupabase();
+      
+      // Optimistic update
+      setDrugMasters(prev => {
+          const exists = prev.find(dm => dm.id === mapping.id);
+          if (exists) return prev.map(dm => dm.id === mapping.id ? mapping : dm);
+          return [...prev, mapping];
+      });
+
+      try {
+          const payload: any = {
+              item_id: mapping.itemId,
+              item_code: mapping.itemCode,
+              drug_name: mapping.drugName,
+              generic_id: mapping.genericId || null,
+              is_active: mapping.isActive,
+          };
+          if (mapping.id) payload.id = mapping.id;
+
+          const { error } = await supabase.from('pharmacy_drug_master').upsert(payload);
+          if (error) throw error;
+          
+          showToast('success', `Drug mapping for ${mapping.drugName} saved.`);
+          return true;
+      } catch (err: any) {
+          showToast('error', `Failed to save drug mapping: ${err.message}`);
+          setRefreshTrigger(prev => prev + 1); // Revert state
+          return false;
+      }
+  };
+
+  const deleteDrugMaster = async (id: string): Promise<boolean> => {
+      if (!requireDb()) return false;
+      const supabase = getSupabase();
+      
+      const original = drugMasters.find(dm => dm.id === id);
+      setDrugMasters(prev => prev.filter(dm => dm.id !== id));
+
+      try {
+          const { error } = await supabase.from('pharmacy_drug_master').delete().eq('id', id);
+          if (error) throw error;
+          
+          showToast('info', 'Drug mapping removed.');
+          return true;
+      } catch (err: any) {
+          showToast('error', `Failed to remove mapping: ${err.message}`);
+          if (original) setDrugMasters(prev => [...prev, original]);
+          return false;
+      }
+  };
+
+  const dispensePrescription = async (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string }>): Promise<boolean> => {
+      if (!requireDb()) return false;
+      const supabase = getSupabase();
+      
+      const prescription = prescriptions.find(p => p.id === prescriptionId);
+      if (!prescription) {
+          showToast('error', 'Prescription not found locally.');
+          return false;
+      }
+      
+      try {
+          const ledgerEntries: any[] = [];
+          const dispensedItemIds: string[] = [];
+          
+          for (const item of prescription.items) {
+              const allocation = allocatedBatches[item.id];
+              if (allocation) {
+                  // Calculate point-in-time balance from DB for this batch
+                  let currentBalance = 0;
+                  const { data: ledgerData } = await supabase
+                      .from('inventory_stock_ledger')
+                      .select('stock_in_quantity, stock_out_quantity')
+                      .eq('store_id', storeId)
+                      .eq('item_id', item.itemId)
+                      .eq('batch_no', (allocation.batchNo || '').trim());
+                    
+                  ledgerData?.forEach(row => {
+                      currentBalance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+                  });
+
+                  const newBalance = currentBalance - item.totalQty;
+
+                  ledgerEntries.push({
+                      store_id: storeId,
+                      item_id: item.itemId,
+                      transaction_type: 'STOCKOUT',
+                      ref_type: 'PHARMACY DISPENSE',
+                      ref_doc_no: prescription.id,
+                      ref_doc_date: new Date().toISOString(),
+                      stock_in_quantity: 0,
+                      stock_out_quantity: item.totalQty,
+                      batch_no: allocation.batchNo,
+                      batch_date: allocation.batchDate || null,
+                      expiry_date: allocation.expiryDate || null,
+                      closing_stock: newBalance,
+                      closing_stock_rate: allocation.rate,
+                      closing_stock_value: newBalance * allocation.rate,
+                      currency: 'SAR'
+                  });
+                  dispensedItemIds.push(item.id);
+              }
+          }
+          
+          if (ledgerEntries.length > 0) {
+              const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
+              if (ledgerError) throw ledgerError;
+              
+              // Update items status
+              const { error: itemsError } = await supabase.from('prescription_items')
+                  .update({ status: 'Dispensed' })
+                  .in('id', dispensedItemIds);
+              if (itemsError) throw itemsError;
+              
+              const allDispensed = prescription.items.every(item => item.status === 'Dispensed' || dispensedItemIds.includes(item.id));
+              const newStatus = allDispensed ? 'Dispensed' : 'Partially Dispensed';
+              
+              const { error: headerError } = await supabase.from('prescriptions')
+                  .update({ status: newStatus })
+                  .eq('id', prescription.id);
+              if (headerError) throw headerError;
+              
+              setPrescriptions(prev => prev.map(p => {
+                  if (p.id !== prescriptionId) return p;
+                  return {
+                      ...p,
+                      status: newStatus as any,
+                      items: p.items.map(i => dispensedItemIds.includes(i.id) ? { ...i, status: 'Dispensed' as any } : i)
+                  };
+              }));
+              
+              showToast('success', `Prescription ${prescriptionId.slice(-6)} successfully dispensed.`);
+              return true;
+          } else {
+              showToast('info', 'No items were selected for dispensing.');
+              return false;
+          }
+      } catch (e: any) {
+          console.error("Dispense error:", e);
+          showToast('error', `Failed to dispense: ${e.message}`);
+          return false;
+      }
+  };
+
   const saveServiceOrders = async (orders: ServiceOrder[]) => {
       if (!requireDb()) return;
       
@@ -2013,7 +2192,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
       saveDirectSale, fetchBatchDetails,
-      prescriptions, savePrescription,
+      prescriptions, savePrescription, dispensePrescription,
+      drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb

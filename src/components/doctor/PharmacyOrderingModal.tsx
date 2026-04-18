@@ -5,7 +5,7 @@ import {
   Filter, Calendar, Activity, Clock
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import { InventoryItem, Prescription, PrescriptionItem } from '../../types';
+import { InventoryItem, Prescription, PrescriptionItem, DrugGeneric, DrugMaster } from '../../types';
 
 interface PharmacyOrderingModalProps {
     appointmentId: string;
@@ -22,7 +22,10 @@ const FREQUENCIES = [
 export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({ 
     appointmentId, patientId, onClose 
 }) => {
-    const { inventoryItems, user, savePrescription, showToast } = useData();
+    const { 
+        inventoryItems, drugGenerics, drugMasters, 
+        user, savePrescription, showToast 
+    } = useData();
     
     // Order Header info
     const [orderType, setOrderType] = useState('Generic / Item');
@@ -31,16 +34,39 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
     // Search states
     const [genericQuery, setGenericQuery] = useState('');
     const [tradeQuery, setTradeQuery] = useState('');
-    const [showResults, setShowResults] = useState(false);
+    const [selectedGenericId, setSelectedGenericId] = useState<string | null>(null);
+    const [showGenericResults, setShowGenericResults] = useState(false);
+    const [showTradeResults, setShowTradeResults] = useState(false);
     const searchRef = useRef<HTMLDivElement>(null);
+    const tradeSearchRef = useRef<HTMLDivElement>(null);
 
     // Selected Items for current order
     const [selectedItems, setSelectedItems] = useState<Partial<PrescriptionItem>[]>([]);
 
-    // Filtering inventory items
-    const filteredItems = inventoryItems.filter(item => {
+    // 1. Generic Search Filtering
+    const filteredGenerics = drugGenerics.filter(g => {
+        if (!g.isActive) return false;
+        const q = genericQuery.toLowerCase();
+        return g.genericName.toLowerCase().includes(q) || g.genericCode.toLowerCase().includes(q);
+    }).slice(0, 10);
+
+    // 2. Trade Search Filtering (Optionally filtered by Generic)
+    const filteredTrades = inventoryItems.filter(item => {
         if (!item.isActive) return false;
-        const q = (genericQuery || tradeQuery).toLowerCase();
+        
+        // If a generic is selected, only show trades mapped to it
+        if (selectedGenericId) {
+            const isMapped = drugMasters.some(dm => 
+                (dm.genericId?.trim() === selectedGenericId.trim()) && 
+                (dm.itemId?.trim() === item.id?.trim()) && 
+                dm.isActive !== false
+            );
+            if (!isMapped) return false;
+        }
+
+        const q = tradeQuery.toLowerCase();
+        if (!q && selectedGenericId) return true; // Show all trades for selected generic if query is empty
+        
         return item.itemName.toLowerCase().includes(q) || 
                item.itemCode.toLowerCase().includes(q) ||
                (item.itemDescription && item.itemDescription.toLowerCase().includes(q));
@@ -49,20 +75,50 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
     useEffect(() => {
         const handler = (e: MouseEvent) => {
             if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-                setShowResults(false);
+                setShowGenericResults(false);
+            }
+            if (tradeSearchRef.current && !tradeSearchRef.current.contains(e.target as Node)) {
+                setShowTradeResults(false);
             }
         };
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    const handleSelectGeneric = (generic: DrugGeneric) => {
+        setGenericQuery(generic.genericName);
+        setSelectedGenericId(generic.id);
+        setShowGenericResults(false);
+        setShowTradeResults(true); // Open trade results automatically
+        // If there's only one trade name for this generic, we could auto-select it here
+        // but for now just filter the trade list.
+    };
+
     const handleAddItem = (item: InventoryItem) => {
+        // Find mapped generic if not already set by manual generic search
+        let gName = '';
+        if (selectedGenericId) {
+            const g = drugGenerics.find(dg => dg.id === selectedGenericId);
+            gName = g?.genericName || '';
+        } else {
+            const mapping = drugMasters.find(dm => 
+                (dm.itemId?.trim() === item.id?.trim()) && 
+                dm.isActive !== false
+            );
+            if (mapping) {
+                const g = drugGenerics.find(dg => dg.id?.trim() === mapping.genericId?.trim());
+                gName = g?.genericName || '';
+            }
+        }
+        
+        console.log(`Mapping item: ${item.itemName} (${item.id}) -> Generic: ${gName || 'NOT FOUND'}`);
+
         const newItem: Partial<PrescriptionItem> = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
             itemId: item.id,
             itemName: item.itemName,
             itemCode: item.itemCode,
-            genericName: item.itemDescription || item.itemName, // Using description as Generic for demo
+            genericName: gName || 'Generic Not Mapped',
             frequency: 'Once Daily',
             dose: '1',
             units: item.baseUom || 'Tab',
@@ -73,9 +129,10 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
             status: 'Pending'
         };
         setSelectedItems([...selectedItems, newItem]);
-        setShowResults(false);
+        setShowTradeResults(false);
         setGenericQuery('');
         setTradeQuery('');
+        setSelectedGenericId(null);
     };
 
     const updateItem = (id: string, field: keyof PrescriptionItem, value: any) => {
@@ -99,8 +156,16 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
             return;
         }
 
+        const prescriptionId = crypto.randomUUID();
+
+        // Assign the new prescriptionId to all items
+        const itemsWithId = selectedItems.map(item => ({
+            ...item,
+            prescriptionId
+        }));
+
         const prescription: Prescription = {
-            id: crypto.randomUUID(),
+            id: prescriptionId,
             appointmentId,
             patientId,
             doctorId: user?.employeeId || '',
@@ -108,7 +173,7 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
             orderType: orderType,
             status: 'Pending',
             totalAmount: 0, // Calculated at pharmacy
-            items: selectedItems as PrescriptionItem[]
+            items: itemsWithId as PrescriptionItem[]
         };
 
         const success = await savePrescription(prescription);
@@ -193,37 +258,37 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                     className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:ring-0 outline-none transition-all group-hover:border-slate-300"
                                     placeholder="Search by salt or chemical name..."
                                     value={genericQuery}
-                                    onChange={e => { setGenericQuery(e.target.value); setShowResults(true); }}
-                                    onFocus={() => setShowResults(true)}
+                                    onChange={e => { 
+                                        setGenericQuery(e.target.value); 
+                                        setShowGenericResults(true);
+                                        // Clear trade filter when generic search is edited
+                                        if (selectedGenericId) setSelectedGenericId(null); 
+                                    }}
+                                    onFocus={() => setShowGenericResults(true)}
                                 />
-                                {showResults && genericQuery.length > 0 && (
+                                {showGenericResults && genericQuery.length > 0 && (
                                     <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-slate-200 z-[110] max-h-80 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
-                                        {filteredItems.length === 0 ? (
-                                            <div className="p-8 text-center text-slate-400 italic font-medium">No medications found for "{genericQuery}"</div>
-                                        ) : filteredItems.map(item => (
+                                        {filteredGenerics.length === 0 ? (
+                                            <div className="p-8 text-center text-slate-400 italic font-medium">No generics found for "{genericQuery}"</div>
+                                        ) : filteredGenerics.map(generic => (
                                             <button 
-                                                key={item.id}
-                                                onClick={() => handleAddItem(item)}
+                                                key={generic.id}
+                                                onClick={() => handleSelectGeneric(generic)}
                                                 className="w-full text-left p-4 hover:bg-blue-50/50 border-b border-slate-50 flex items-center justify-between group/item transition-colors"
                                             >
                                                 <div className="flex items-center gap-4">
                                                     <div className="bg-blue-100 p-2 rounded-lg text-blue-600 group-hover/item:bg-blue-600 group-hover/item:text-white transition-all">
-                                                        <Pill className="w-4 h-4" />
+                                                        <Activity className="w-4 h-4" />
                                                     </div>
                                                     <div>
-                                                        <p className="font-bold text-slate-800 group-hover:text-blue-700">{item.itemName}</p>
+                                                        <p className="font-bold text-slate-800 group-hover:text-blue-700">{generic.genericName}</p>
                                                         <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                                                            <span className="font-bold bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-tighter">{item.itemCode}</span>
-                                                            {item.itemDescription && (
-                                                                <span className="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">{item.itemDescription}</span>
-                                                            )}
+                                                            <span className="font-bold bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-tighter">{generic.genericCode}</span>
+                                                            <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">{generic.strength || 'N/A'}</span>
                                                         </div>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-3">
-                                                    {item.stock && <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded">Qty: {item.stock.reusableCount || 0}</span>}
-                                                    <Plus className="w-4 h-4 text-slate-300 group-hover/item:text-blue-600" />
-                                                </div>
+                                                <Plus className="w-4 h-4 text-slate-300 group-hover/item:text-blue-600" />
                                             </button>
                                         ))}
                                     </div>
@@ -231,7 +296,7 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                             </div>
                         </div>
 
-                        <div className="flex-1 space-y-2">
+                        <div className="flex-1 space-y-2" ref={tradeSearchRef}>
                             <label className="text-[10px] font-bold text-indigo-800 uppercase tracking-widest">Trade Search</label>
                             <div className="relative">
                                 <input 
@@ -239,9 +304,46 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                     className="w-full bg-white border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm shadow-sm focus:border-indigo-500 outline-none transition-all"
                                     placeholder="Search by brand name..."
                                     value={tradeQuery}
-                                    onChange={e => { setTradeQuery(e.target.value); setShowResults(true); }}
-                                    onFocus={() => setShowResults(true)}
+                                    onChange={e => { setTradeQuery(e.target.value); setShowTradeResults(true); }}
+                                    onFocus={() => setShowTradeResults(true)}
                                 />
+                                {showTradeResults && (tradeQuery.length > 0 || selectedGenericId) && (
+                                    <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-slate-200 z-[110] max-h-80 overflow-y-auto animate-in slide-in-from-top-2 duration-200">
+                                        {filteredTrades.length === 0 ? (
+                                            <div className="p-8 text-center text-slate-400 italic font-medium">No brands found {selectedGenericId ? 'for this generic' : ''}</div>
+                                        ) : filteredTrades.map(item => (
+                                            <button 
+                                                key={item.id}
+                                                onClick={() => handleAddItem(item)}
+                                                className="w-full text-left p-4 hover:bg-indigo-50/50 border-b border-slate-50 flex items-center justify-between group/item transition-colors"
+                                            >
+                                                <div className="flex items-center gap-4">
+                                                    <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600 group-hover/item:bg-indigo-600 group-hover/item:text-white transition-all">
+                                                        <Pill className="w-4 h-4" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-slate-800 group-hover:text-indigo-700">{item.itemName}</p>
+                                                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                                                            <span className="font-bold bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-tighter">{item.itemCode}</span>
+                                                            {item.itemDescription && (
+                                                                <span className="bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter truncate max-w-[150px]">{item.itemDescription}</span>
+                                                            )}
+                                                            {!drugMasters.some(dm => dm.itemId?.trim() === item.id?.trim() && dm.isActive !== false) && (
+                                                                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black uppercase tracking-tighter animate-pulse shadow-sm border border-amber-200 flex items-center gap-1">
+                                                                    <Info className="w-2.5 h-2.5" /> No Generic Mapping
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    {item.stock && <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Qty: {item.stock.reusableCount || 0}</span>}
+                                                    <Plus className="w-4 h-4 text-slate-300 group-hover/item:text-indigo-600" />
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -290,7 +392,13 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                         <td className="p-4">
                                             <div>
                                                 <p className="font-bold text-slate-800 text-sm">{item.itemName}</p>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{item.genericName}</p>
+                                                {item.genericName === 'Generic Not Mapped' ? (
+                                                    <span className="text-[9px] text-orange-600 font-bold bg-orange-50 px-2 py-1 rounded border border-orange-100 flex items-center gap-1 w-fit mt-1 animate-pulse">
+                                                       <Info className="w-2.5 h-2.5" /> Mapping Required
+                                                    </span>
+                                                ) : (
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{item.genericName}</p>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-4">
