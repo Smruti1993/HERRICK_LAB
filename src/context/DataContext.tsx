@@ -92,6 +92,7 @@ interface DataContextType {
   
   fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
   fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
+  repairPh000006: (storeId: string) => Promise<void>;
 
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
@@ -725,44 +726,53 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('stores').select('*, branches(name)'),
           supabase.from('store_item_mappings').select('*'),
           supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'),
-          supabase.from('prescriptions').select(`
-              *,
-              employees (first_name, last_name),
-              prescription_items (*, inventory_items (item_name, item_code))
-          `),
+          supabase.from('prescriptions').select('*'),
+          supabase.from('prescription_items').select('*'),
           supabase.from('pharmacy_drug_generics').select('*'),
           supabase.from('pharmacy_drug_master').select('*')
         ]);
 
-        const [pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, prRes, dgRes, dmRes] = 
-            await Promise.race([fetchPromise, timeoutPromise]) as any[];
+        const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
+        
+        // Find all errors in parallel results
+        const resultErrors = results.filter(r => r && r.error);
+        if (resultErrors.length > 0) {
+            console.error("Sync Partial Failures:", resultErrors.map(r => r.error));
+            showToast('error', `Database Sync Error: ${resultErrors[0].error.message}. Checking other tables...`);
+        }
 
-        if (pRes.error) throw pRes.error;
+        const [
+            pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, 
+            vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, 
+            vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
+            prRes, piRes, dgRes, dmRes
+        ] = results;
 
-        if (pRes.data) setPatients(pRes.data.map(mapPatientFromDb));
-        if (eRes.data) setEmployees(eRes.data.map(mapEmpFromDb));
-        if (dRes.data) setDepartments(dRes.data.map(mapDeptFromDb));
-        if (uRes.data) setUnits(uRes.data.map(mapDeptFromDb)); 
-        if (sRes.data) setServiceCentres(sRes.data.map(mapDeptFromDb));
-        if (avRes.data) setAvailabilities(avRes.data.map(mapAvailFromDb));
-        if (apRes.data) setAppointments(apRes.data.map(mapAptFromDb));
-        if (vRes.data) setVitals(vRes.data.map(mapVitalFromDb));
-        if (diRes.data) setDiagnoses(diRes.data.map(mapDiagnosisFromDb));
-        if (notRes.data) setClinicalNotes(notRes.data.map(mapNoteFromDb));
-        if (alRes.data) setAllergies(alRes.data.map(mapAllergyFromDb));
-        if (narRes.data) setNarrativeDiagnoses(narRes.data.map(mapNarrativeFromDb));
-        if (mdRes.data) setMasterDiagnoses(mdRes.data.map(mapMasterDiagFromDb));
-        if (sdRes.data) setServiceDefinitions(sdRes.data.map(mapServiceDefFromDb));
-        if (stRes.data) setServiceTariffs(stRes.data.map(mapTariffFromDb));
-        if (ordRes.data) setServiceOrders(ordRes.data.map(mapOrderFromDb));
-        if (vsgRes.data && vsgRes.data.length > 0) setVitalSignGroups(vsgRes.data.map(mapVitalSignGroupFromDb));
-        if (vspRes.data && vspRes.data.length > 0) setVitalSignParameters(vspRes.data.map(mapVitalSignParameterFromDb));
-        if (docRes.data) setPatientDocuments(docRes.data.map(mapDocumentFromDb));
-        if (denRes.data) setDentalICDs(denRes.data.map(mapMasterDiagFromDb)); // Re-using mapper as structure is identical
-        if (invRes.data) setInventoryItems(invRes.data.map(mapInventoryItemFromDb));
-        if (brRes.data) setBranches(brRes.data.map(mapBranchFromDb));
-        if (stRes2.data) setStores(stRes2.data.map(mapStoreFromDb));
-        if (mRes.data) setStoreItemMappings(mRes.data.map(mapStoreMappingFromDb));
+        if (pRes && pRes.data) setPatients(pRes.data.map(mapPatientFromDb));
+        if (eRes && eRes.data) setEmployees(eRes.data.map(mapEmpFromDb));
+        if (dRes && dRes.data) setDepartments(dRes.data.map(mapDeptFromDb));
+        if (uRes && uRes.data) setUnits(uRes.data.map(mapDeptFromDb)); 
+        if (sRes && sRes.data) setServiceCentres(sRes.data.map(mapDeptFromDb));
+        if (avRes && avRes.data) setAvailabilities(avRes.data.map(mapAvailFromDb));
+        if (apRes && apRes.data) setAppointments(apRes.data.map(mapAptFromDb));
+        if (vRes && vRes.data) setVitals(vRes.data.map(mapVitalFromDb));
+        if (diRes && diRes.data) setDiagnoses(diRes.data.map(mapDiagnosisFromDb));
+        if (notRes && notRes.data) setClinicalNotes(notRes.data.map(mapNoteFromDb));
+        if (alRes && alRes.data) setAllergies(alRes.data.map(mapAllergyFromDb));
+        if (narRes && narRes.data) setNarrativeDiagnoses(narRes.data.map(mapNarrativeFromDb));
+        if (mdRes && mdRes.data) setMasterDiagnoses(mdRes.data.map(mapMasterDiagFromDb));
+        if (sdRes && sdRes.data) setServiceDefinitions(sdRes.data.map(mapServiceDefFromDb));
+        if (stRes && stRes.data) setServiceTariffs(stRes.data.map(mapTariffFromDb));
+        if (ordRes && ordRes.data) setServiceOrders(ordRes.data.map(mapOrderFromDb));
+        if (vsgRes && vsgRes.data && vsgRes.data.length > 0) setVitalSignGroups(vsgRes.data.map(mapVitalSignGroupFromDb));
+        if (vspRes && vspRes.data && vspRes.data.length > 0) setVitalSignParameters(vspRes.data.map(mapVitalSignParameterFromDb));
+        if (docRes && docRes.data) setPatientDocuments(docRes.data.map(mapDocumentFromDb));
+        if (denRes && denRes.data) setDentalICDs(denRes.data.map(mapMasterDiagFromDb));
+        if (invRes && invRes.data) setInventoryItems(invRes.data.map(mapInventoryItemFromDb));
+        if (brRes && brRes.data) setBranches(brRes.data.map(mapBranchFromDb));
+        if (stRes2 && stRes2.data) setStores(stRes2.data.map(mapStoreFromDb));
+        if (mRes && mRes.data) setStoreItemMappings(mRes.data.map(mapStoreMappingFromDb));
+        
         if (osRes && osRes.data) {
            const mappedOS = osRes.data.map((os: any) => ({
              id: os.id, storeId: os.store_id, entryDate: os.entry_date, status: os.status,
@@ -773,11 +783,38 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
            }));
            setOpeningStocks(mappedOS);
         }
-        if (prRes && prRes.data) setPrescriptions(prRes.data.map(mapPrescriptionFromDb));
+
+        if (prRes && prRes.data) {
+            console.log(`Fetched ${prRes.data.length} prescriptions`);
+            const rawPrescriptions = prRes.data;
+            const rawItems = piRes?.data || [];
+            const mappedInvItems = invRes?.data ? invRes.data.map(mapInventoryItemFromDb) : [];
+            
+            const structuredPrescriptions = rawPrescriptions.map((p: any) => {
+                const myItems = rawItems.filter((i: any) => i.prescription_id === p.id).map((i: any) => {
+                    const inv = mappedInvItems.find(item => item.id === i.item_id);
+                    return {
+                        ...i,
+                        inventory_items: inv ? { item_name: inv.itemName, item_code: inv.itemCode } : null
+                    };
+                });
+
+                return mapPrescriptionFromDb({ 
+                    ...p, 
+                    prescription_items: myItems,
+                    total_amount: Number(p.total_amount) || 0 
+                });
+            });
+            
+            setPrescriptions(structuredPrescriptions);
+        } else if (prRes && prRes.error) {
+            console.error("Prescriptions Fetch Error:", prRes.error);
+        }
+
         if (dgRes && dgRes.data) setDrugGenerics(dgRes.data.map(mapDrugGenericFromDb));
         if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
 
-        if (bRes.data) {
+        if (bRes && bRes.data) {
             const rawBills = bRes.data;
             const rawItems = biRes.data || [];
             const rawPayments = payRes.data || [];
@@ -792,13 +829,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         showToast('success', 'Data synced with database.');
       } catch (error: any) {
-        console.error("Error fetching data:", error);
-        // Better error message
+        console.error("Critical Sync Error:", error);
         let msg = 'Failed to connect to database.';
         if (error.code === 'PGRST301' || error.message?.includes('does not exist')) {
             msg = 'Connected, but tables are missing. Please check your DB schema.';
         } else if (error.message?.includes('FetchError')) {
-             msg = 'Network error or invalid URL.';
+            msg = 'Connection refused. Is the database server running?';
         }
         showToast('error', msg);
       } finally {
@@ -807,7 +843,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     fetchAllData();
-  }, [refreshTrigger, user]); // Refetch on login
+  }, [user, refreshTrigger]);
 
   // --- Actions ---
 
@@ -815,6 +851,42 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const id = Date.now().toString();
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => removeToast(id), 5000);
+  };
+
+  const getBatchStockBalance = async (storeId: string, itemId: string, batchNo: string): Promise<number> => {
+    const supabase = getSupabase();
+    const cleanBatch = (batchNo || '').trim().toUpperCase();
+    let balance = 0;
+    
+    const { data } = await supabase
+      .from('inventory_stock_ledger')
+      .select('stock_in_quantity, stock_out_quantity')
+      .eq('store_id', storeId)
+      .eq('item_id', itemId)
+      .eq('batch_no', cleanBatch);
+      
+    data?.forEach(row => {
+      balance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+    });
+    
+    return balance;
+  };
+
+  const getItemStockBalance = async (storeId: string, itemId: string): Promise<number> => {
+    const supabase = getSupabase();
+    let balance = 0;
+    
+    const { data } = await supabase
+      .from('inventory_stock_ledger')
+      .select('stock_in_quantity, stock_out_quantity')
+      .eq('store_id', storeId)
+      .eq('item_id', itemId);
+      
+    data?.forEach(row => {
+      balance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+    });
+    
+    return balance;
   };
 
   const saveOpeningStock = async (stock: OpeningStock) => {
@@ -840,7 +912,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  item_code: i.itemCode,
                  item_name: i.itemName,
                  item_category: i.itemCategory,
-                 batch_no: i.batchNo,
+                 batch_no: (i.batchNo || '').trim().toUpperCase(),
                  batch_start_date: i.batchStartDate || null,
                  batch_end_date: i.batchEndDate || null,
                  quantity: i.quantity,
@@ -855,26 +927,32 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (itemsError) throw itemsError;
 
           // Write to Stock Ledger
-          const ledgerEntries = stock.items.map(i => ({
-             store_id: stock.storeId,
-             item_id: i.itemId,
-             transaction_type: 'STOCKIN',
-             ref_type: 'OPENING STOCK',
-             ref_doc_no: savedStockId,
-             ref_doc_date: stock.entryDate,
-             stock_in_quantity: i.quantity,
-             stock_out_quantity: 0,
-             closing_stock: i.quantity, // Normally calculated, but OS is usually starting stock
-             closing_stock_rate: i.rate,
-             closing_stock_value: i.amount,
-             currency: 'SAR',
-             batch_no: i.batchNo,
-             batch_date: i.batchStartDate,
-             expiry_date: i.batchEndDate
-          }));
-          
-          const { error: ledgerError } = await getSupabase().from('inventory_stock_ledger').insert(ledgerEntries);
-          if (ledgerError) console.error("Error writing to ledger:", ledgerError);
+          for (const i of stock.items) {
+              const cleanBatch = (i.batchNo || '').trim().toUpperCase();
+              const itemBalance = await getItemStockBalance(stock.storeId, i.itemId);
+              const qty = Number(i.quantity || 0);
+              const rate = Number(i.rate || 0);
+              const newBalance = itemBalance + qty;
+
+              const { error: ledgerError } = await getSupabase().from('inventory_stock_ledger').insert({
+                 store_id: stock.storeId,
+                 item_id: i.itemId,
+                 transaction_type: 'STOCKIN',
+                 ref_type: 'OPENING STOCK',
+                 ref_doc_no: savedStockId,
+                 ref_doc_date: stock.entryDate,
+                 stock_in_quantity: qty,
+                 stock_out_quantity: 0,
+                 closing_stock: newBalance,
+                 closing_stock_rate: rate,
+                 closing_stock_value: newBalance * rate,
+                 currency: 'SAR',
+                 batch_no: cleanBatch,
+                 batch_date: i.batchStartDate || null,
+                 expiry_date: i.batchEndDate || null
+              });
+              if (ledgerError) console.error("Error writing to ledger:", ledgerError);
+          }
       }
       
       // Update local state by forcing a refresh or manually mapping
@@ -1037,10 +1115,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const expiryMap = new Map();
       const batchDateMap = new Map();
       openingData?.forEach(i => {
-        mrpMap.set(i.batch_no, i.mrp);
-        rateMap.set(i.batch_no, i.rate);
-        expiryMap.set(i.batch_no, i.batch_end_date);
-        batchDateMap.set(i.batch_no, i.batch_start_date);
+        const b = (i.batch_no || '').trim().toUpperCase();
+        mrpMap.set(b, i.mrp);
+        rateMap.set(b, i.rate);
+        expiryMap.set(b, i.batch_end_date);
+        batchDateMap.set(b, i.batch_start_date);
       });
 
       // 2. Aggregate current stock from ledger
@@ -1052,18 +1131,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const stockMap = new Map();
       ledgerData?.forEach(row => {
-        const current = stockMap.get(row.batch_no) || 0;
-        stockMap.set(row.batch_no, current + Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
+        const b = (row.batch_no || '').trim().toUpperCase();
+        const current = stockMap.get(b) || 0;
+        stockMap.set(b, current + Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
       });
 
-      return Array.from(stockMap.entries()).map(([batchNo, currentStock]) => ({
-        batchNo,
-        currentStock,
-        mrp: mrpMap.get(batchNo) || 0,
-        rate: rateMap.get(batchNo) || 0,
-        batchDate: batchDateMap.get(batchNo),
-        expiryDate: expiryMap.get(batchNo)
-      })).filter(b => b.currentStock > 0);
+      return Array.from(stockMap.entries()).map(([batchNo, currentStock]) => {
+        const mrp = mrpMap.get(batchNo) || 0;
+        const rate = rateMap.get(batchNo) || 0;
+        return {
+          batchNo,
+          currentStock,
+          mrp,
+          rate: mrp > 0 ? mrp : rate, // Use MRP as primary rate if available
+          batchDate: batchDateMap.get(batchNo),
+          expiryDate: expiryMap.get(batchNo)
+        };
+      }).filter(b => b.currentStock > 0);
 
     } catch (error) {
       console.error('Error fetching batch details:', error);
@@ -1126,30 +1210,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const localBalances = new Map<string, number>();
 
       for (const i of sale.items) {
-        const balanceKey = `${sale.storeId}-${i.itemId}-${i.batchNo}`;
-        let currentBalance = 0;
+        const cleanBatch = (i.batchNo || '').trim().toUpperCase();
+        const itemKey = `${sale.storeId}-${i.itemId}`;
+        let currentItemBalance = 0;
 
-        if (localBalances.has(balanceKey)) {
-          currentBalance = localBalances.get(balanceKey)!;
+        if (localBalances.has(itemKey)) {
+          currentItemBalance = localBalances.get(itemKey)!;
         } else {
-          // Calculate point-in-time from DB
-          const { data: ledgerData } = await supabase
-            .from('inventory_stock_ledger')
-            .select('stock_in_quantity, stock_out_quantity')
-            .eq('store_id', sale.storeId)
-            .eq('item_id', i.itemId)
-            .eq('batch_no', (i.batchNo || '').trim());
-            
-          ledgerData?.forEach(row => {
-             currentBalance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
-          });
+          currentItemBalance = await getItemStockBalance(sale.storeId, i.itemId);
         }
 
-        const newBalance = currentBalance - i.quantity;
-        localBalances.set(balanceKey, newBalance);
+        // Batch-Specific Validation
+        const batchBalance = await getBatchStockBalance(sale.storeId, i.itemId, cleanBatch);
+        const qty = Number(i.quantity || 0);
+        if (batchBalance < qty) {
+            const itemDef = inventoryItems.find(inv => inv.id === i.itemId);
+            throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${itemDef?.itemName || i.itemId} (Available in batch: ${batchBalance}, Required: ${qty})`);
+        }
+
+        const newBalance = currentItemBalance - qty;
+        localBalances.set(itemKey, newBalance);
 
         // Use costRate if available, fallback to unitPrice (sale price) only if absolutely necessary
-        const valuationRate = i.costRate || 0;
+        const valuationRate = Number(i.costRate || 0);
 
         ledgerEntries.push({
           store_id: sale.storeId,
@@ -1159,11 +1242,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ref_doc_no: sale.saleNo,
           ref_doc_date: sale.saleDate,
           stock_in_quantity: 0,
-          stock_out_quantity: i.quantity,
+          stock_out_quantity: qty,
           closing_stock: newBalance,
           closing_stock_rate: valuationRate,
           closing_stock_value: newBalance * valuationRate,
-          batch_no: i.batchNo,
+          batch_no: cleanBatch,
           batch_date: i.batchDate || null,
           expiry_date: i.expiryDate || null,
           currency: 'SAR'
@@ -1891,7 +1974,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
-  const dispensePrescription = async (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string }>): Promise<boolean> => {
+  const dispensePrescription = async (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>): Promise<boolean> => {
       if (!requireDb()) return false;
       const supabase = getSupabase();
       
@@ -1904,24 +1987,33 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
           const ledgerEntries: any[] = [];
           const dispensedItemIds: string[] = [];
+          const localBalances = new Map<string, number>();
           
           for (const item of prescription.items) {
               const allocation = allocatedBatches[item.id];
               if (allocation) {
-                  // Calculate point-in-time balance from DB for this batch
-                  let currentBalance = 0;
-                  const { data: ledgerData } = await supabase
-                      .from('inventory_stock_ledger')
-                      .select('stock_in_quantity, stock_out_quantity')
-                      .eq('store_id', storeId)
-                      .eq('item_id', item.itemId)
-                      .eq('batch_no', (allocation.batchNo || '').trim());
-                    
-                  ledgerData?.forEach(row => {
-                      currentBalance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
-                  });
+                  const cleanBatch = (allocation.batchNo || '').trim().toUpperCase();
+                  const itemKey = `${storeId}-${item.itemId}`;
+                  
+                  // 1. Batch Specific Validation
+                  const currentBatchBalance = await getBatchStockBalance(storeId, item.itemId, cleanBatch);
+                  const qty = Number(item.totalQty || 0);
+                  if (currentBatchBalance < qty) {
+                      throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${item.itemName} (Available in batch: ${currentBatchBalance}, Required: ${qty})`);
+                  }
 
-                  const newBalance = currentBalance - item.totalQty;
+                  // 2. Cumulative Item Balance for Ledger
+                  let currentItemBalance = 0;
+                  if (localBalances.has(itemKey)) {
+                      currentItemBalance = localBalances.get(itemKey)!;
+                  } else {
+                      currentItemBalance = await getItemStockBalance(storeId, item.itemId);
+                  }
+
+                  const newBalance = currentItemBalance - qty;
+                  localBalances.set(itemKey, newBalance);
+
+                  const rate = Number(allocation.rate || 0);
 
                   ledgerEntries.push({
                       store_id: storeId,
@@ -1931,13 +2023,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       ref_doc_no: prescription.id,
                       ref_doc_date: new Date().toISOString(),
                       stock_in_quantity: 0,
-                      stock_out_quantity: item.totalQty,
-                      batch_no: allocation.batchNo,
+                      stock_out_quantity: qty,
+                      batch_no: cleanBatch,
                       batch_date: allocation.batchDate || null,
                       expiry_date: allocation.expiryDate || null,
                       closing_stock: newBalance,
-                      closing_stock_rate: allocation.rate,
-                      closing_stock_value: newBalance * allocation.rate,
+                      closing_stock_rate: rate,
+                      closing_stock_value: newBalance * rate,
                       currency: 'SAR'
                   });
                   dispensedItemIds.push(item.id);
@@ -1948,6 +2040,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
               if (ledgerError) throw ledgerError;
               
+              // Calculate total dispensed amount for this transaction
+              const transactionTotal = Object.values(allocatedBatches).reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+              const existingHeaderTotal = Number(prescription.totalAmount) || 0;
+              const newHeaderTotal = Number((existingHeaderTotal + transactionTotal).toFixed(2));
+
+              console.log(`Dispensing: Trans Total=${transactionTotal}, Old Total=${existingHeaderTotal}, New Total=${newHeaderTotal}`);
+
               // Update items status
               const { error: itemsError } = await supabase.from('prescription_items')
                   .update({ status: 'Dispensed' })
@@ -1957,16 +2056,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const allDispensed = prescription.items.every(item => item.status === 'Dispensed' || dispensedItemIds.includes(item.id));
               const newStatus = allDispensed ? 'Dispensed' : 'Partially Dispensed';
               
-              const { error: headerError } = await supabase.from('prescriptions')
-                  .update({ status: newStatus })
-                  .eq('id', prescription.id);
-              if (headerError) throw headerError;
+              console.log(`Updating Prescription ${prescription.id} with status ${newStatus} and total_amount ${newHeaderTotal}`);
+
+              const { data: updateData, error: headerError } = await supabase.from('prescriptions')
+                  .update({ 
+                      status: newStatus,
+                      total_amount: newHeaderTotal 
+                  } as any)
+                  .eq('id', prescription.id)
+                  .select();
+              
+              if (headerError) {
+                  console.error("Prescription Header Update Failed:", headerError);
+                  throw headerError;
+              }
+              
+              console.log("Prescription Header Updated Successfully:", updateData);
               
               setPrescriptions(prev => prev.map(p => {
                   if (p.id !== prescriptionId) return p;
                   return {
                       ...p,
                       status: newStatus as any,
+                      totalAmount: newHeaderTotal,
                       items: p.items.map(i => dispensedItemIds.includes(i.id) ? { ...i, status: 'Dispensed' as any } : i)
                   };
               }));
@@ -2150,6 +2262,82 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const repairPh000006 = async (storeId: string) => {
+    if (!requireDb()) return;
+    const supabase = getSupabase();
+    
+    try {
+        // 1. Get PH000006 and the target store
+        const { data: itemData, error: itemError } = await supabase
+            .from('inventory_items')
+            .select('id')
+            .eq('item_code', 'PH000006')
+            .single();
+        
+        if (itemError || !itemData) {
+            showToast('error', 'Item PH000006 not found.');
+            return;
+        }
+
+        const itemId = itemData.id;
+
+        // 2. Fetch all ledger entries, EXCLUDING Batch 007 and 1009/009 (Actually, fetch all for that item in that store)
+        // Note: The user wants to IGNORE Batch 007 from the running total calculation.
+        const { data: entries, error: fetchError } = await supabase
+            .from('inventory_stock_ledger')
+            .select('*')
+            .eq('store_id', storeId)
+            .eq('item_id', itemId)
+            .order('ref_doc_date', { ascending: true })
+            .order('created_at', { ascending: true });
+
+        if (fetchError) throw fetchError;
+        if (!entries || entries.length === 0) {
+            showToast('info', 'No ledger entries found to repair.');
+            return;
+        }
+
+        console.log(`Starting Repair for ${entries.length} entries...`);
+        let balance = 0;
+        
+        for (const entry of entries) {
+            const batchNo = (entry.batch_no || '').trim().toUpperCase();
+            
+            // IF it's Batch 007, we keep it but it doesn't contribute to the "Repair" balance 
+            // OR we skip it and start the balance fresh from the next non-007 batch?
+            // The user said "No need" to include them. 
+            // So for any entry that IS NOT Batch 007, we start a cumulative total from 0.
+            
+            if (batchNo === '007') {
+                // Batch 007 entries are left as they are (or we could zero them, but better to just skip them in our running total)
+                continue; 
+            }
+
+            const qtyIn = Number(entry.stock_in_quantity || 0);
+            const qtyOut = Number(entry.stock_out_quantity || 0);
+            const rate = Number(entry.closing_stock_rate || 0);
+            
+            balance = balance + qtyIn - qtyOut;
+            
+            console.log(`Updating entry ${entry.ref_doc_no} Batch ${batchNo}: Old Bal=${entry.closing_stock}, New Bal=${balance}`);
+
+            const { error: updateError } = await supabase
+                .from('inventory_stock_ledger')
+                .update({ 
+                    closing_stock: balance,
+                    closing_stock_value: balance * rate 
+                } as any)
+                .eq('id', entry.id);
+            
+            if (updateError) console.error("Repair update error:", updateError);
+        }
+
+        showToast('success', 'Stock Ledger for PH000006 repaired successfully (Ignoring Batch 007).');
+    } catch (err: any) {
+        showToast('error', `Repair failed: ${err.message}`);
+    }
+  };
+
   const uploadInventoryItems = async (items: InventoryItem[]) => {
     if (!requireDb()) return;
     setInventoryItems(prev => [...prev, ...items]);
@@ -2191,7 +2379,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       stores, saveStore, deleteStore,
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
-      saveDirectSale, fetchBatchDetails,
+      saveDirectSale, fetchBatchDetails, repairPh000006,
       prescriptions, savePrescription, dispensePrescription,
       drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,

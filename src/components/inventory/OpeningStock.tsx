@@ -341,56 +341,74 @@ export const OpeningStockPage: React.FC = () => {
                                 ) : items.map((item, index) => (
                                     <tr key={index} className="border-b border-slate-200 hover:bg-slate-50/50">
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <ItemSearchCell 
-                                                item={item} 
-                                                inventoryItems={inventoryItems} 
-                                                onChange={(itemId) => handleItemChange(index, itemId)} 
-                                            />
-                                        </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200 text-slate-500 hidden md:table-cell">{item.itemCode}</td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200 text-slate-500 hidden md:table-cell">{item.itemCategory}</td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="text" className="w-full p-1 border border-slate-300 text-xs" value={item.batchNo || ''} onChange={e => handleFieldChange(index, 'batchNo', e.target.value)} />
-                                        </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="date" className="w-full p-1 border border-slate-300 text-xs" value={item.batchStartDate || ''} onChange={e => handleFieldChange(index, 'batchStartDate', e.target.value)} />
-                                        </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="date" className="w-full p-1 border border-slate-300 text-xs" value={item.batchEndDate || ''} onChange={e => handleFieldChange(index, 'batchEndDate', e.target.value)} />
-                                        </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200">
                                             {isReadOnly ? (
-                                                <div className="w-full p-1 text-sm bg-transparent">{item.itemName || 'N/A'}</div>
+                                                <div className="w-full p-1 text-xs text-slate-700 font-medium">{item.itemName || 'N/A'}</div>
                                             ) : (
                                                 <ItemSearchCell 
-                                                    item={item}
-                                                    inventoryItems={inventoryItems}
-                                                    onChange={(itemId) => handleItemChange(index, itemId)}
+                                                    item={item} 
+                                                    inventoryItems={inventoryItems} 
+                                                    onChange={(itemId) => handleItemChange(index, itemId)} 
                                                 />
                                             )}
                                         </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200 hidden md:table-cell text-slate-500">{item.itemCode}</td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200 hidden md:table-cell text-slate-500">{item.itemCategory}</td>
+                                        <td className="px-2 py-1.5 border-r border-slate-200 text-slate-500 hidden md:table-cell text-xs">{item.itemCode}</td>
+                                        <td className="px-2 py-1.5 border-r border-slate-200 text-slate-500 hidden md:table-cell text-xs">{item.itemCategory}</td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="text" className={`w-24 p-1 border border-slate-300 rounded ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.batchNo || ''} onChange={(e) => handleFieldChange(index, 'batchNo', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="text" 
+                                                className={`w-full p-1 border border-slate-300 text-xs rounded ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.batchNo || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'batchNo', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="date" className={`w-[110px] p-1 border border-slate-300 rounded text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.batchStartDate || ''} onChange={(e) => handleFieldChange(index, 'batchStartDate', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="date" 
+                                                className={`w-full p-1 border border-slate-300 rounded text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.batchStartDate || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'batchStartDate', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="date" className={`w-[110px] p-1 border border-slate-300 rounded text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.batchEndDate || ''} onChange={(e) => handleFieldChange(index, 'batchEndDate', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="date" 
+                                                className={`w-full p-1 border border-slate-300 rounded text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.batchEndDate || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'batchEndDate', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="number" className={`w-20 p-1 border border-slate-300 rounded text-right ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.quantity || ''} onChange={(e) => handleFieldChange(index, 'quantity', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="number" 
+                                                className={`w-full p-1 border border-slate-300 rounded text-right text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.quantity || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'quantity', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="number" className={`w-20 p-1 border border-slate-300 rounded text-right ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.rate || ''} onChange={(e) => handleFieldChange(index, 'rate', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="number" 
+                                                className={`w-full p-1 border border-slate-300 rounded text-right text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.rate || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'rate', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
-                                        <td className="px-2 py-1.5 border-r border-slate-200 font-medium text-right">
+                                        <td className="px-2 py-1.5 border-r border-slate-200 font-medium text-right text-xs">
                                             {item.amount?.toFixed(2)}
                                         </td>
                                         <td className="px-2 py-1.5 border-r border-slate-200">
-                                            <input type="number" className={`w-20 p-1 border border-slate-300 rounded text-right ${isReadOnly ? 'bg-slate-50' : ''}`} value={item.mrp || ''} onChange={(e) => handleFieldChange(index, 'mrp', e.target.value)} disabled={isReadOnly} />
+                                            <input 
+                                                type="number" 
+                                                className={`w-full p-1 border border-slate-300 rounded text-right text-xs ${isReadOnly ? 'bg-slate-50' : ''}`} 
+                                                value={item.mrp || ''} 
+                                                onChange={(e) => handleFieldChange(index, 'mrp', e.target.value)} 
+                                                disabled={isReadOnly}
+                                            />
                                         </td>
                                         <td className="px-2 py-1.5 text-center">
                                             <button 

@@ -20,6 +20,12 @@ export const OPPharmacy: React.FC = () => {
     const [selectedPrescriptionId, setSelectedPrescriptionId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<'All' | 'Pending' | 'Dispensed'>('Pending');
+    const [fromDate, setFromDate] = useState<string>(() => {
+        const d = new Date();
+        d.setDate(d.getDate() - 30); // Default to last 30 days
+        return d.toISOString().split('T')[0];
+    });
+    const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
     const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number }>>({});
     const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number } | null>(null);
 
@@ -38,12 +44,34 @@ export const OPPharmacy: React.FC = () => {
 
     const filteredPrescriptions = useMemo(() => {
         return prescriptions.filter(p => {
-            const matchesSearch = p.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                                (patients.find(pat => pat.id === p.patientId)?.firstName.toLowerCase().includes(searchQuery.toLowerCase()));
-            const matchesStatus = statusFilter === 'All' || p.status === statusFilter;
-            return matchesSearch && matchesStatus;
-        }).sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
-    }, [prescriptions, searchQuery, statusFilter, patients]);
+            // 1. Robust Search Match
+            const pat = patients.find(pat => pat.id === p.patientId);
+            const patName = pat ? `${pat.firstName || ''} ${pat.lastName || ''}`.toLowerCase() : '';
+            const query = searchQuery.toLowerCase().trim();
+            const matchesSearch = !query || 
+                                p.id.toLowerCase().includes(query) || 
+                                patName.includes(query);
+            
+            // 2. Robust Status Match
+            const status = (p.status || '').toLowerCase().trim();
+            const filterValue = (statusFilter || 'Pending').toLowerCase();
+            const matchesStatus = filterValue === 'all' || 
+                                (filterValue === 'pending' && (status === 'pending' || status === 'partially dispensed')) ||
+                                (filterValue === 'dispensed' && (status === 'dispensed' || status === 'partially dispensed'));
+            
+            // 3. Robust Date Range Match (Handles both "T" and space separators)
+            if (!p.orderDate) return false;
+            const orderDateStr = p.orderDate.substring(0, 10); // Safely get YYYY-MM-DD
+            const matchesDate = (!fromDate || orderDateStr >= fromDate) && 
+                                (!toDate || orderDateStr <= toDate);
+
+            return matchesSearch && matchesStatus && matchesDate;
+        }).sort((a, b) => {
+            const dateA = a.orderDate ? new Date(a.orderDate).getTime() : 0;
+            const dateB = b.orderDate ? new Date(b.orderDate).getTime() : 0;
+            return dateB - dateA;
+        });
+    }, [prescriptions, searchQuery, statusFilter, patients, fromDate, toDate]);
 
     const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number) => {
         if (!selectedStoreId) {
@@ -82,10 +110,31 @@ export const OPPharmacy: React.FC = () => {
             <div className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0">
                 <div className="p-4 border-b border-slate-200">
                     <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
-                        <Clock className="w-5 h-5 text-blue-600" /> Pending Orders
+                        <Clock className="w-5 h-5 text-blue-600" /> 
+                        {statusFilter === 'All' ? 'All Orders' : statusFilter === 'Dispensed' ? 'Dispensed Orders' : 'Pending Orders'}
                     </h2>
                     
                     <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2 mb-1">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 tracking-tighter">From Date</label>
+                                <input 
+                                    type="date" 
+                                    value={fromDate}
+                                    onChange={e => setFromDate(e.target.value)}
+                                    className="w-full p-1.5 text-[10px] bg-slate-50 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-600"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 tracking-tighter">To Date</label>
+                                <input 
+                                    type="date" 
+                                    value={toDate}
+                                    onChange={e => setToDate(e.target.value)}
+                                    className="w-full p-1.5 text-[10px] bg-slate-50 border border-slate-200 rounded outline-none focus:ring-1 focus:ring-blue-500 font-bold text-slate-600"
+                                />
+                            </div>
+                        </div>
                         <select 
                             className="w-full p-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-500"
                             value={selectedStoreId}
@@ -123,8 +172,10 @@ export const OPPharmacy: React.FC = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                    {filteredPrescriptions.length === 0 ? (
-                        <div className="p-8 text-center text-slate-400 italic text-sm">No prescriptions found.</div>
+                            {filteredPrescriptions.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 italic text-sm">
+                            No prescriptions found in this view.
+                        </div>
                     ) : (
                         filteredPrescriptions.map(p => {
                             const pat = patients.find(pat => pat.id === p.patientId);
@@ -141,7 +192,11 @@ export const OPPharmacy: React.FC = () => {
                                     </div>
                                     <p className="font-bold text-slate-800 text-sm truncate">{pat?.firstName} {pat?.lastName}</p>
                                     <div className="flex items-center gap-2 mt-2">
-                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${p.status === 'Dispensed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                            p.status === 'Dispensed' ? 'bg-emerald-100 text-emerald-700' : 
+                                            p.status === 'Partially Dispensed' ? 'bg-indigo-100 text-indigo-700' :
+                                            'bg-amber-100 text-amber-700'
+                                        }`}>
                                             {p.status}
                                         </span>
                                         <span className="text-[10px] text-slate-400 font-semibold">{p.items.length} Items</span>
@@ -306,7 +361,9 @@ export const OPPharmacy: React.FC = () => {
                                 <div className="flex flex-col">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Billable</span>
                                     <span className="text-2xl font-black text-slate-800">
-                                        SAR {Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
+                                        SAR {selectedPrescription.status === 'Dispensed' 
+                                            ? selectedPrescription.totalAmount.toFixed(2)
+                                            : Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
                                     </span>
                                 </div>
                                 <div className="flex flex-col">

@@ -101,7 +101,7 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                                 {batch.currentStock} <span className="text-[10px] font-bold text-slate-400 uppercase">Available</span>
                                             </span>
                                             <span className="text-[10px] font-bold text-slate-400">
-                                                Rate: {batch.rate} SAR
+                                                MRP: {batch.mrp || batch.rate} SAR
                                             </span>
                                         </div>
                                     </button>

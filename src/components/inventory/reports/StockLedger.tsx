@@ -4,7 +4,7 @@ import { StockLedgerEntry } from '../../../types';
 import { Search, Download, Printer } from 'lucide-react';
 
 export const StockLedgerReport: React.FC = () => {
-    const { stores, fetchStockLedger } = useData();
+    const { stores, fetchStockLedger, repairPh000006, showToast } = useData();
     
     const [storeId, setStoreId] = useState<string>('');
     const [fromDate, setFromDate] = useState<string>('');
@@ -36,6 +36,17 @@ export const StockLedgerReport: React.FC = () => {
             console.error('Failed to fetch report');
         } finally {
             setIsSearching(false);
+        }
+    };
+
+    const handleRepair = async () => {
+        if (!storeId) {
+            showToast('error', 'Select a store first.');
+            return;
+        }
+        if (window.confirm('This will recalculate all closing stocks for PH000006 (Ignoring Batch 007). Continue?')) {
+            await repairPh000006(storeId);
+            handleSearch(); // Refresh report
         }
     };
 
@@ -104,14 +115,24 @@ export const StockLedgerReport: React.FC = () => {
                                 <option key={s.id} value={s.id}>{s.storeName} ({s.storeCode})</option>
                             ))}
                         </select>
-                        <button 
-                            disabled={!storeId || isSearching}
-                            onClick={handleSearch}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white px-6 py-1 mx-2 rounded flex items-center gap-2 transition-colors font-medium"
-                        >
-                            <Search className="w-4 h-4" />
-                            {isSearching ? 'Searching...' : 'Search'}
-                        </button>
+                        <div className="flex gap-2 items-center">
+                            {searchQuery.toUpperCase().includes('PH000006') && (
+                                <button 
+                                    onClick={handleRepair}
+                                    className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 shadow-sm"
+                                >
+                                    Repair PH000006
+                                </button>
+                            )}
+                            <button 
+                                disabled={!storeId || isSearching}
+                                onClick={handleSearch}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white px-6 py-1 mx-2 rounded flex items-center gap-2 transition-colors font-medium"
+                            >
+                                <Search className="w-4 h-4" />
+                                {isSearching ? 'Searching...' : 'Search'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
