@@ -85,6 +85,11 @@ export const NAV_ITEMS: NavItem[] = [
         label: 'OP Pharmacy',
         path: '/pharmacy/op-pharmacy',
         icon: 'Clock'
+      },
+      {
+        label: 'Drug Return',
+        path: '/pharmacy/drug-return',
+        icon: 'Undo'
       }
     ]
   },

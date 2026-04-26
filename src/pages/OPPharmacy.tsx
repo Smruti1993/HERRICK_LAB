@@ -6,9 +6,10 @@ import {
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { BatchSelectionModal } from '../components/pharmacy/BatchSelectionModal';
+import { PharmacyInvoiceReport } from '../components/pharmacy/PharmacyInvoiceReport';
 
 export const OPPharmacy: React.FC = () => {
-    const { prescriptions, inventoryItems, patients, showToast, stores, dispensePrescription } = useData();
+    const { prescriptions, inventoryItems, patients, showToast, stores, dispensePrescription, employees, bills, appointments } = useData();
     
     const [selectedStoreId, setSelectedStoreId] = useState<string>('');
     useEffect(() => {
@@ -28,6 +29,7 @@ export const OPPharmacy: React.FC = () => {
     const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
     const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number }>>({});
     const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number } | null>(null);
+    const [generatedInvoiceId, setGeneratedInvoiceId] = useState<string | null>(null);
 
     const selectedPrescription = useMemo(() => 
         prescriptions.find(p => p.id === selectedPrescriptionId), 
@@ -98,9 +100,12 @@ export const OPPharmacy: React.FC = () => {
             return;
         }
 
-        const success = await dispensePrescription(selectedPrescription.id, selectedStoreId, selectedBatches);
-        if (success) {
+        const result = await dispensePrescription(selectedPrescription.id, selectedStoreId, selectedBatches);
+        if (result.success) {
             setSelectedBatches({});
+            if (result.invoiceId) {
+                setGeneratedInvoiceId(result.invoiceId);
+            }
         }
     };
 
@@ -231,6 +236,26 @@ export const OPPharmacy: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
+                                {selectedPrescription.status === 'Dispensed' && (
+                                    <button 
+                                        onClick={() => {
+                                            // 1. Try direct link
+                                            let bill = bills.find(b => b.prescriptionId === selectedPrescription.id);
+                                            
+                                            // 2. Fallback for older data: match by patient and pharmacy flag
+                                            if (!bill) {
+                                                bill = bills.find(b => b.isPharmacy && b.patientId === selectedPrescription.patientId);
+                                            }
+
+                                            if (bill) setGeneratedInvoiceId(bill.id);
+                                            else showToast('info', 'No invoice found for this dispensed order.');
+                                        }}
+                                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg shadow-emerald-100 transition-all active:scale-95"
+                                        title="Reprint Invoice"
+                                    >
+                                        <Printer className="w-4 h-4" /> Print Invoice
+                                    </button>
+                                )}
                                 <button className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-all" title="Print Prescription">
                                     <Printer className="w-5 h-5" />
                                 </button>
@@ -399,14 +424,29 @@ export const OPPharmacy: React.FC = () => {
                 )}
             </div>
 
-            {activeBatchItem && selectedStoreId && (
+            {activeBatchItem && (
                 <BatchSelectionModal 
-                    storeId={selectedStoreId}
                     itemId={activeBatchItem.itemId}
                     itemName={activeBatchItem.itemName}
                     requiredQty={activeBatchItem.reqQty}
+                    storeId={selectedStoreId}
                     onClose={() => setActiveBatchItem(null)}
                     onSelect={handleBatchSelected}
+                />
+            )}
+
+            {generatedInvoiceId && bills.find(b => b.id === generatedInvoiceId) && (
+                <PharmacyInvoiceReport 
+                    bill={bills.find(b => b.id === generatedInvoiceId)!}
+                    patient={patients.find(p => p.id === (bills.find(b => b.id === generatedInvoiceId)?.patientId || selectedPrescription?.patientId))}
+                    doctor={(() => {
+                        const bill = bills.find(b => b.id === generatedInvoiceId);
+                        const docId = bill?.doctorId || 
+                                     selectedPrescription?.doctorId || 
+                                     appointments.find(a => a.id === bill?.appointmentId)?.doctorId;
+                        return employees.find(e => e.id === docId);
+                    })()}
+                    onClose={() => setGeneratedInvoiceId(null)}
                 />
             )}
         </div>

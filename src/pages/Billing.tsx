@@ -334,7 +334,7 @@ export const Billing = () => {
                   <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">14Yrs/${patient?.gender?.toUpperCase() || 'MALE'}</span><span class="info-arabic">: العمر / الجنس</span></div>
               </div>
               <div class="info-card">
-                  <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">INV-O-ALH-${bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
+                  <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">${bill.invoiceNo || 'INV-O-ALH-' + bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
                   <div class="info-row"><span class="info-label">Bill Date:</span><span class="info-value">${new Date(bill.date).toLocaleString()}</span><span class="info-arabic">: تاريخ الفاتورة</span></div>
                   <div class="info-row"><span class="info-label">Consultant :</span><span class="info-value">Dr Hebtulla Hajrs</span><span class="info-arabic">: الطبيب المعالج</span></div>
                   <div class="info-row"><span class="info-label">Insurance Name :</span><span class="info-value">CASH</span><span class="info-value">VATNO-</span></div>
@@ -531,7 +531,7 @@ export const Billing = () => {
                                     const patient = patients.find(p => p.id === bill.patientId);
                                     return (
                                         <tr key={bill.id} className="hover:bg-slate-50 transition-colors">
-                                            <td className="px-6 py-4 font-mono text-xs text-slate-500">#{bill.id.slice(-6)}</td>
+                                            <td className="px-6 py-4 font-mono text-xs text-slate-500">{bill.invoiceNo || `#${bill.id.slice(-6)}`}</td>
                                             <td className="px-6 py-4">{new Date(bill.date).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 font-medium text-slate-900">{patient?.firstName} {patient?.lastName}</td>
                                             <td className="px-6 py-4 font-medium text-slate-900">${bill.totalAmount.toFixed(2)}</td>

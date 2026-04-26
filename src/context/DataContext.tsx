@@ -93,7 +93,9 @@ interface DataContextType {
   fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
   fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
   repairPh000006: (storeId: string) => Promise<void>;
-
+  dispensePrescription: (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>) => Promise<{ success: boolean; invoiceId?: string }>;
+  processPharmacyReturn: (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string }>) => Promise<{ success: boolean; invoiceId?: string }>;
+  fetchBillItems: (billId: string) => Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; }>>;
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
   deleteVitalSignParameter: (id: string) => void;
@@ -275,9 +277,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const mapBillFromDb = (b: any, items: any[], payments: any[]): Bill => ({
-    id: b.id, patientId: b.patient_id, appointmentId: b.appointment_id, date: b.date,
-    status: b.status, totalAmount: b.total_amount, paidAmount: b.paid_amount,
-    items: items.map(i => ({ id: i.id, description: i.description, quantity: i.quantity, unitPrice: i.unit_price, total: i.total })),
+    id: b.id, 
+    invoiceNo: b.invoice_no,
+    patientId: b.patient_id, 
+    appointmentId: b.appointment_id, 
+    date: b.date,
+    status: b.status, 
+    totalAmount: b.total_amount, 
+    paidAmount: b.paid_amount,
+    isPharmacy: b.is_pharmacy,
+    prescriptionId: b.prescription_id,
+    doctorId: b.doctor_id,
+    createdBy: b.created_by,
+    items: items.map(i => ({ 
+        id: i.id, 
+        description: i.description, 
+        quantity: i.quantity, 
+        unitPrice: i.unit_price, 
+        total: i.total,
+        itemId: i.item_id,
+        batchNo: i.batch_no,
+        discountAmount: i.discount_amount,
+        taxAmount: i.tax_amount
+    })),
     payments: payments.map(p => ({ id: p.id, date: p.date, amount: p.amount, method: p.method, reference: p.reference }))
   });
 
@@ -705,18 +727,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('service_centres').select('*'),
           supabase.from('doctor_availability').select('*'),
           supabase.from('appointments').select('*'),
-          supabase.from('bills').select('*'),
-          supabase.from('bill_items').select('*'),
-          supabase.from('payments').select('*'),
-          supabase.from('clinical_vitals').select('*'),
-          supabase.from('clinical_diagnoses').select('*'),
-          supabase.from('clinical_notes').select('*'),
-          supabase.from('clinical_allergies').select('*'),
-          supabase.from('clinical_narrative_diagnoses').select('*'),
-          supabase.from('master_diagnoses').select('*'),
-          supabase.from('service_definitions').select('*'),
-          supabase.from('service_tariffs').select('*'),
-          supabase.from('service_orders').select('*'),
+          supabase.from('bills').select('*').order('date', { ascending: false }).limit(5000),
+          supabase.from('bill_items').select('*').limit(10000),
+          supabase.from('payments').select('*').limit(5000),
+          supabase.from('clinical_vitals').select('*').limit(2000),
+          supabase.from('clinical_diagnoses').select('*').limit(2000),
+          supabase.from('clinical_notes').select('*').limit(2000),
+          supabase.from('clinical_allergies').select('*').limit(1000),
+          supabase.from('clinical_narrative_diagnoses').select('*').limit(1000),
+          supabase.from('master_diagnoses').select('*').limit(1000),
+          supabase.from('service_definitions').select('*').limit(2000),
+          supabase.from('service_tariffs').select('*').limit(5000),
+          supabase.from('service_orders').select('*').limit(5000),
           supabase.from('vital_sign_groups').select('*'),
           supabase.from('vital_sign_parameters').select('*'),
           supabase.from('patient_documents').select('*'),
@@ -726,20 +748,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('stores').select('*, branches(name)'),
           supabase.from('store_item_mappings').select('*'),
           supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'),
-          supabase.from('prescriptions').select('*'),
-          supabase.from('prescription_items').select('*'),
+          supabase.from('prescriptions').select('*').order('order_date', { ascending: false }).limit(2000),
+          supabase.from('prescription_items').select('*').limit(10000),
           supabase.from('pharmacy_drug_generics').select('*'),
           supabase.from('pharmacy_drug_master').select('*')
         ]);
 
         const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
         
-        // Find all errors in parallel results
-        const resultErrors = results.filter(r => r && r.error);
-        if (resultErrors.length > 0) {
-            console.error("Sync Partial Failures:", resultErrors.map(r => r.error));
-            showToast('error', `Database Sync Error: ${resultErrors[0].error.message}. Checking other tables...`);
-        }
+        // Detailed error logging
+        const tableNames = [
+            'patients', 'employees', 'departments', 'units', 'service_centres', 'doctor_availability', 'appointments', 
+            'bills', 'bill_items', 'payments', 'clinical_vitals', 'clinical_diagnoses', 'clinical_notes', 
+            'clinical_allergies', 'clinical_narrative_diagnoses', 'master_diagnoses', 'service_definitions', 
+            'service_tariffs', 'service_orders', 'vital_sign_groups', 'vital_sign_parameters', 'patient_documents', 
+            'dental_icd_master', 'inventory_items', 'branches', 'stores', 'store_item_mappings', 
+            'inventory_opening_stocks', 'prescriptions', 'prescription_items', 'pharmacy_drug_generics', 'pharmacy_drug_master'
+        ];
+
+        results.forEach((r, idx) => {
+            if (r && r.error) {
+                console.error(`Sync Failure on table [${tableNames[idx]}]:`, r.error);
+                showToast('error', `Sync Error [${tableNames[idx]}]: ${r.error.message}`);
+            }
+        });
 
         const [
             pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, 
@@ -872,21 +904,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return balance;
   };
 
-  const getItemStockBalance = async (storeId: string, itemId: string): Promise<number> => {
+  const getItemValuation = async (storeId: string, itemId: string): Promise<{ quantity: number, rate: number }> => {
     const supabase = getSupabase();
-    let balance = 0;
     
-    const { data } = await supabase
+    // Get the latest ledger entry for this item in this store
+    // This row contains the most up-to-date cumulative closing stock and average rate
+    const { data, error } = await supabase
       .from('inventory_stock_ledger')
-      .select('stock_in_quantity, stock_out_quantity')
+      .select('closing_stock, closing_stock_rate')
       .eq('store_id', storeId)
-      .eq('item_id', itemId);
-      
-    data?.forEach(row => {
-      balance += (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0));
-    });
-    
-    return balance;
+      .eq('item_id', itemId)
+      .order('ref_doc_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error || !data || data.length === 0) {
+        return { quantity: 0, rate: 0 };
+    }
+
+    return { 
+        quantity: Number(data[0].closing_stock || 0), 
+        rate: Number(data[0].closing_stock_rate || 0) 
+    };
   };
 
   const saveOpeningStock = async (stock: OpeningStock) => {
@@ -929,10 +968,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           // Write to Stock Ledger
           for (const i of stock.items) {
               const cleanBatch = (i.batchNo || '').trim().toUpperCase();
-              const itemBalance = await getItemStockBalance(stock.storeId, i.itemId);
-              const qty = Number(i.quantity || 0);
-              const rate = Number(i.rate || 0);
-              const newBalance = itemBalance + qty;
+              
+              // Get current store-wide item balance and rate for WAC
+              const { quantity: prevQty, rate: prevRate } = await getItemValuation(stock.storeId, i.itemId);
+              
+              const qtyIn = Number(i.quantity || 0);
+              const inRate = Number(i.rate || 0);
+              const newBalance = prevQty + qtyIn;
+
+              // Calculate WAC (Weighted Average Cost)
+              const prevValue = prevQty * prevRate;
+              const newValue = qtyIn * inRate;
+              const newAverageRate = newBalance > 0 ? (prevValue + newValue) / newBalance : inRate;
+              const finalRate = Number(newAverageRate.toFixed(2));
 
               const { error: ledgerError } = await getSupabase().from('inventory_stock_ledger').insert({
                  store_id: stock.storeId,
@@ -941,11 +989,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  ref_type: 'OPENING STOCK',
                  ref_doc_no: savedStockId,
                  ref_doc_date: stock.entryDate,
-                 stock_in_quantity: qty,
+                 stock_in_quantity: qtyIn,
                  stock_out_quantity: 0,
                  closing_stock: newBalance,
-                 closing_stock_rate: rate,
-                 closing_stock_value: newBalance * rate,
+                 closing_stock_rate: finalRate,
+                 closing_stock_value: newBalance * finalRate,
                  currency: 'SAR',
                  batch_no: cleanBatch,
                  batch_date: i.batchStartDate || null,
@@ -977,11 +1025,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             .eq('store_id', filters.storeId);
             
          if (filters.fromDate) {
-             query = query.gte('ref_doc_date', filters.fromDate);
+             query = query.gte('ref_doc_date', `${filters.fromDate}T00:00:00.000Z`);
          }
          
          if (filters.toDate) {
-             query = query.lte('ref_doc_date', filters.toDate);
+             query = query.lte('ref_doc_date', `${filters.toDate}T23:59:59.999Z`);
          }
          
          const { data, error } = await query;
@@ -1207,17 +1255,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // 3. Update Stock Ledger (STOCKOUT)
       const ledgerEntries = [];
-      const localBalances = new Map<string, number>();
+      const localBalances = new Map<string, { quantity: number, rate: number }>();
 
       for (const i of sale.items) {
         const cleanBatch = (i.batchNo || '').trim().toUpperCase();
         const itemKey = `${sale.storeId}-${i.itemId}`;
         let currentItemBalance = 0;
+        let currentAverageRate = 0;
 
         if (localBalances.has(itemKey)) {
-          currentItemBalance = localBalances.get(itemKey)!;
+          const val = localBalances.get(itemKey)!;
+          currentItemBalance = val.quantity;
+          currentAverageRate = val.rate;
         } else {
-          currentItemBalance = await getItemStockBalance(sale.storeId, i.itemId);
+          const val = await getItemValuation(sale.storeId, i.itemId);
+          currentItemBalance = val.quantity;
+          currentAverageRate = val.rate;
         }
 
         // Batch-Specific Validation
@@ -1229,10 +1282,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         const newBalance = currentItemBalance - qty;
-        localBalances.set(itemKey, newBalance);
+        localBalances.set(itemKey, { quantity: newBalance, rate: currentAverageRate });
 
-        // Use costRate if available, fallback to unitPrice (sale price) only if absolutely necessary
-        const valuationRate = Number(i.costRate || 0);
+        // In WAC, Stock Out inherits the current store-wide average rate
+        const valuationRate = currentAverageRate;
 
         ledgerEntries.push({
           store_id: sale.storeId,
@@ -1987,7 +2040,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
           const ledgerEntries: any[] = [];
           const dispensedItemIds: string[] = [];
-          const localBalances = new Map<string, number>();
+          const localBalances = new Map<string, { quantity: number, rate: number }>();
           
           for (const item of prescription.items) {
               const allocation = allocatedBatches[item.id];
@@ -2002,18 +2055,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${item.itemName} (Available in batch: ${currentBatchBalance}, Required: ${qty})`);
                   }
 
-                  // 2. Cumulative Item Balance for Ledger
+                  // 2. Cumulative Item Balance for Ledger (WAC)
                   let currentItemBalance = 0;
+                  let currentAverageRate = 0;
                   if (localBalances.has(itemKey)) {
-                      currentItemBalance = localBalances.get(itemKey)!;
+                      const val = localBalances.get(itemKey)!;
+                      currentItemBalance = val.quantity;
+                      currentAverageRate = val.rate;
                   } else {
-                      currentItemBalance = await getItemStockBalance(storeId, item.itemId);
+                      const val = await getItemValuation(storeId, item.itemId);
+                      currentItemBalance = val.quantity;
+                      currentAverageRate = val.rate;
                   }
 
                   const newBalance = currentItemBalance - qty;
-                  localBalances.set(itemKey, newBalance);
+                  localBalances.set(itemKey, { quantity: newBalance, rate: currentAverageRate });
 
-                  const rate = Number(allocation.rate || 0);
+                  // In WAC, Stock Out inherits the current average rate
+                  const rate = currentAverageRate;
 
                   ledgerEntries.push({
                       store_id: storeId,
@@ -2073,6 +2132,81 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               
               console.log("Prescription Header Updated Successfully:", updateData);
               
+              // NEW: Generate Pharmacy Invoice
+              const invoiceNo = await generateSequentialInvoiceNumber(storeId);
+              const billId = crypto.randomUUID();
+              
+              const newBill: any = {
+                  id: billId,
+                  patient_id: prescription.patientId,
+                  appointment_id: prescription.appointmentId || null,
+                  date: new Date().toISOString(),
+                  status: 'Unpaid',
+                  total_amount: transactionTotal,
+                  paid_amount: 0,
+                  invoice_no: invoiceNo,
+                  is_pharmacy: true,
+                  prescription_id: prescriptionId,
+                  created_by: user?.username || user?.email || 'admin'
+              };
+
+              const { error: billError } = await supabase.from('bills').insert(newBill);
+              
+              if (billError) {
+                  console.error("Failed to create pharmacy bill:", billError);
+                  // Non-fatal for the dispense itself, but we should log it
+              } else {
+                  const billItems = prescription.items
+                    .filter(item => dispensedItemIds.includes(item.id))
+                    .map(item => {
+                        const allocation = allocatedBatches[item.id];
+                        const qty = Number(item.totalQty || 0);
+                        const rate = Number(allocation.rate || 0);
+                        return {
+                            id: crypto.randomUUID(),
+                            bill_id: billId,
+                            item_id: item.itemId,
+                            batch_no: allocation.batchNo,
+                            description: item.itemName,
+                            quantity: qty,
+                            unit_price: rate,
+                            total: Number((qty * rate).toFixed(2))
+                        };
+                    });
+                  
+                  const { error: billItemsError } = await supabase.from('bill_items').insert(billItems);
+                  if (billItemsError) {
+                      console.error("CRITICAL: Failed to save bill items:", billItemsError.message, "Payload:", JSON.stringify(billItems[0]));
+                  }
+                  
+                  // Update local bills state
+                  const localBill: Bill = {
+                      id: billId,
+                      invoiceNo: invoiceNo,
+                      patientId: prescription.patientId,
+                      appointmentId: prescription.appointmentId,
+                      date: newBill.date,
+                      status: 'Unpaid',
+                      totalAmount: transactionTotal,
+                      paidAmount: 0,
+                      isPharmacy: true,
+                      prescriptionId: prescriptionId,
+                      doctorId: prescription.doctorId,
+                      createdBy: user?.username || user?.email || 'admin',
+                      items: billItems.map(bi => ({
+                          id: bi.id,
+                          description: bi.description,
+                          quantity: bi.quantity,
+                          unitPrice: bi.unit_price,
+                          total: bi.total,
+                          itemId: bi.item_id,
+                          batchNo: bi.batch_no
+                      })),
+                      payments: []
+                  };
+                  setBills(prev => [localBill, ...prev]);
+              }
+
               setPrescriptions(prev => prev.map(p => {
                   if (p.id !== prescriptionId) return p;
                   return {
@@ -2083,16 +2217,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   };
               }));
               
-              showToast('success', `Prescription ${prescriptionId.slice(-6)} successfully dispensed.`);
-              return true;
+              showToast('success', `Prescription dispensed. Invoice ${invoiceNo} generated.`);
+              return { success: true, invoiceId: billId };
           } else {
               showToast('info', 'No items were selected for dispensing.');
-              return false;
+              return { success: false };
           }
       } catch (e: any) {
           console.error("Dispense error:", e);
           showToast('error', `Failed to dispense: ${e.message}`);
-          return false;
+          return { success: false };
       }
   };
 
@@ -2297,35 +2431,47 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return;
         }
 
-        console.log(`Starting Repair for ${entries.length} entries...`);
+        console.log(`Starting WAC Repair for ${entries.length} entries...`);
         let balance = 0;
+        let averageRate = 0;
         
         for (const entry of entries) {
             const batchNo = (entry.batch_no || '').trim().toUpperCase();
             
-            // IF it's Batch 007, we keep it but it doesn't contribute to the "Repair" balance 
-            // OR we skip it and start the balance fresh from the next non-007 batch?
-            // The user said "No need" to include them. 
-            // So for any entry that IS NOT Batch 007, we start a cumulative total from 0.
-            
             if (batchNo === '007') {
-                // Batch 007 entries are left as they are (or we could zero them, but better to just skip them in our running total)
                 continue; 
             }
 
             const qtyIn = Number(entry.stock_in_quantity || 0);
             const qtyOut = Number(entry.stock_out_quantity || 0);
-            const rate = Number(entry.closing_stock_rate || 0);
+            const entryRate = Number(entry.closing_stock_rate || 0); // This is the 'Purchase Rate' for StockIn
+            
+            const prevBalance = balance;
+            const prevRate = averageRate;
             
             balance = balance + qtyIn - qtyOut;
+
+            // Recalculate Average Rate if Stock In
+            if (qtyIn > 0) {
+                const prevValue = prevBalance * prevRate;
+                const newValue = qtyIn * entryRate;
+                averageRate = balance > 0 ? (prevValue + newValue) / balance : entryRate;
+            } else {
+                // For Stock Out, rate remains the same
+                averageRate = prevRate;
+            }
             
-            console.log(`Updating entry ${entry.ref_doc_no} Batch ${batchNo}: Old Bal=${entry.closing_stock}, New Bal=${balance}`);
+            // Round to 2 decimals like in the screenshot
+            const finalRate = Number(averageRate.toFixed(2));
+
+            console.log(`Updating entry ${entry.ref_doc_no}: Qty=${balance}, Rate=${finalRate}`);
 
             const { error: updateError } = await supabase
                 .from('inventory_stock_ledger')
                 .update({ 
                     closing_stock: balance,
-                    closing_stock_value: balance * rate 
+                    closing_stock_rate: finalRate,
+                    closing_stock_value: balance * finalRate 
                 } as any)
                 .eq('id', entry.id);
             
@@ -2335,6 +2481,324 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         showToast('success', 'Stock Ledger for PH000006 repaired successfully (Ignoring Batch 007).');
     } catch (err: any) {
         showToast('error', `Repair failed: ${err.message}`);
+    }
+  };
+
+  const generateSequentialInvoiceNumber = async (storeId: string): Promise<string> => {
+    const supabase = getSupabase();
+    const store = stores.find(s => s.id === storeId);
+    const storeCode = store?.storeCode || 'GEN';
+    const year = new Date().getFullYear().toString().slice(-2);
+    const prefix = `INV-D-${storeCode}-${year}`;
+
+    let nextSequence = 1;
+    // Query for the latest invoice with this prefix
+    try {
+        const { data, error } = await supabase
+            .from('bills')
+            .select('invoice_no')
+            .like('invoice_no', `${prefix}%`)
+            .order('invoice_no', { ascending: false })
+            .limit(1);
+
+        if (!error && data && data.length > 0) {
+            const lastInvoice = data[0].invoice_no || '';
+            const parts = lastInvoice.split('-');
+            const lastSequenceStr = parts[parts.length - 1];
+            if (lastSequenceStr) {
+                // The last sequence string might include the year + seq, e.g. 26000208
+                // We want to extract the sequence part. 
+                // Since the prefix is INV-D-STORE-26, the split part is 000208 or similar
+                const sequenceNum = parseInt(lastSequenceStr);
+                if (!isNaN(sequenceNum)) {
+                    nextSequence = sequenceNum + 1;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not fetch latest invoice number, starting sequence at 1", e);
+    }
+
+    const paddedSequence = nextSequence.toString().padStart(6, '0');
+    return `${prefix}${paddedSequence}`;
+  };
+
+  const generateSequentialReturnNumber = async (storeId: string): Promise<string> => {
+    const supabase = getSupabase();
+    const store = stores.find(s => s.id === storeId);
+    const storeCode = store?.storeCode || 'GEN';
+    const year = new Date().getFullYear().toString().slice(-2);
+    const prefix = `RET-D-${storeCode}-${year}`;
+
+    let nextSequence = 1;
+    try {
+        const { data, error } = await supabase
+            .from('pharmacy_returns')
+            .select('return_no')
+            .like('return_no', `${prefix}%`)
+            .order('return_no', { ascending: false })
+            .limit(1);
+
+        if (!error && data && data.length > 0) {
+            const lastInvoice = data[0].return_no || '';
+            const parts = lastInvoice.split('-');
+            const lastSequenceStr = parts[parts.length - 1];
+            
+            if (lastSequenceStr && lastSequenceStr.length >= 6) {
+                // Extracts the actual sequence from 26000001 format
+                const actualSeq = parseInt(lastSequenceStr.slice(-6));
+                if (!isNaN(actualSeq)) {
+                    nextSequence = actualSeq + 1;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not fetch latest return number", e);
+    }
+
+    const paddedSequence = nextSequence.toString().padStart(6, '0');
+    return `${prefix}${paddedSequence}`;
+  };
+
+  const processPharmacyReturn = async (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string }>): Promise<{ success: boolean; invoiceId?: string }> => {
+    if (!requireDb()) return { success: false };
+    try {
+      console.log(`Starting return for Bill: ${originalBillId} in Store: ${storeId}`);
+      const supabase = getSupabase();
+      const originalBill = bills.find(b => b.id === originalBillId);
+      if (!originalBill) throw new Error("Original invoice record not found in system.");
+
+      const returnInvoiceNo = await generateSequentialReturnNumber(storeId);
+      const returnBillId = crypto.randomUUID();
+      const returnDate = new Date().toISOString();
+
+      const totalReturnAmount = returns.reduce((sum, r) => sum + (r.qty * r.rate), 0);
+
+      // 1. Create Return Header in new table
+      const { error: billError } = await supabase.from('pharmacy_returns').insert({
+          id: returnBillId,
+          return_no: returnInvoiceNo,
+          original_bill_id: originalBillId,
+          patient_id: originalBill.patientId,
+          store_id: storeId,
+          return_date: returnDate,
+          total_amount: totalReturnAmount,
+          created_by: user?.username || user?.email || 'admin'
+      });
+
+      if (billError) throw billError;
+
+      // 2. Look up batch details for ALL items from the stock ledger FIRST
+      //    so we can use them in both pharmacy_return_items AND inventory_stock_ledger
+      const batchInfoMap: Record<string, { batchNo: string; batchDate: string | null; expiryDate: string | null; prevStock: number; prevRate: number }> = {};
+
+      for (const r of returns) {
+          // Latest closing stock (any entry) — for balance
+          const { data: lastStockData } = await supabase
+            .from('inventory_stock_ledger')
+            .select('closing_stock, closing_stock_rate')
+            .eq('store_id', storeId)
+            .eq('item_id', r.itemId)
+            .order('ref_doc_date', { ascending: false })
+            .limit(1);
+
+          // Most recent PHARMACY DISPENSE — for batch details
+          const { data: dispenseData } = await supabase
+            .from('inventory_stock_ledger')
+            .select('batch_no, batch_date, expiry_date')
+            .eq('store_id', storeId)
+            .eq('item_id', r.itemId)
+            .eq('ref_type', 'PHARMACY DISPENSE')
+            .order('ref_doc_date', { ascending: false })
+            .limit(1);
+
+          const lastEntry = lastStockData?.[0];
+          const dispenseEntry = dispenseData?.[0];
+
+          batchInfoMap[r.itemId] = {
+              batchNo: r.batchNo || dispenseEntry?.batch_no || '',
+              batchDate: dispenseEntry?.batch_date || null,
+              expiryDate: dispenseEntry?.expiry_date || null,
+              prevStock: Number(lastEntry?.closing_stock || 0),
+              prevRate: Number(lastEntry?.closing_stock_rate || r.rate),
+          };
+      }
+
+      // 3. Create Return Items — now with correct batch info
+      const returnItems = returns.map(r => {
+          const batchInfo = batchInfoMap[r.itemId] || {};
+          return {
+              id: crypto.randomUUID(),
+              return_id: returnBillId,
+              item_id: r.itemId,
+              batch_no: batchInfo.batchNo || '',
+              batch_date: batchInfo.batchDate || null,
+              expiry_date: batchInfo.expiryDate || null,
+              description: r.description,
+              quantity: r.qty,
+              unit_price: r.rate,
+              total_amount: Number((r.qty * r.rate).toFixed(2))
+          };
+      });
+
+      const { error: itemsError } = await supabase.from('pharmacy_return_items').insert(returnItems);
+      if (itemsError) throw itemsError;
+
+      // 4. Update Stock Ledger (Stock In — one entry per returned item)
+      for (const r of returns) {
+          const batchInfo = batchInfoMap[r.itemId] || {};
+          const newStock = batchInfo.prevStock + Number(r.qty);
+
+          const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert({
+              id: crypto.randomUUID(),
+              store_id: storeId,
+              item_id: r.itemId,
+              batch_no: batchInfo.batchNo || '',
+              batch_date: batchInfo.batchDate || null,
+              expiry_date: batchInfo.expiryDate || null,
+              transaction_type: 'Return',
+              ref_type: 'PHARMACY RETURN',
+              ref_doc_no: returnInvoiceNo,
+              ref_doc_date: returnDate,
+              stock_in_quantity: r.qty,
+              stock_out_quantity: 0,
+              closing_stock: newStock,
+              closing_stock_rate: batchInfo.prevRate,
+              closing_stock_value: newStock * batchInfo.prevRate,
+              currency: 'SAR'
+          });
+          if (ledgerError) throw ledgerError;
+      }
+
+      // 4. Also create a matching "Bill" record for financial reporting consistency if desired
+      // Or just update local state to include a "virtual" bill for the report
+      const localReturnBill: Bill = {
+          id: returnBillId,
+          invoiceNo: returnInvoiceNo,
+          patientId: originalBill.patientId,
+          appointmentId: originalBill.appointmentId,
+          date: returnDate,
+          status: 'Paid',
+          totalAmount: -totalReturnAmount, // Keep negative for financial logic
+          paidAmount: -totalReturnAmount,
+          isPharmacy: true,
+          createdBy: user?.username || user?.email || 'admin',
+          items: returnItems.map(ri => ({
+              id: ri.id,
+              description: `RETURN: ${ri.description}`,
+              quantity: -ri.quantity,
+              unitPrice: ri.unit_price,
+              total: -ri.total_amount,
+              itemId: ri.item_id,
+              batchNo: ri.batch_no
+          })),
+          payments: []
+      };
+      setBills(prev => [localReturnBill, ...prev]);
+
+      return { success: true, invoiceId: returnBillId };
+    } catch (err: any) {
+      console.error("Return processing failed:", err);
+      showToast('error', `Return failed: ${err.message}`);
+      return { success: false };
+    }
+  };
+
+  const fetchBillItems = async (billId: string): Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; }>> => {
+    if (!requireDb()) return [];
+    const supabase = getSupabase();
+    try {
+      // Step 0: Load already-returned quantities for this bill from pharmacy_return_items
+      // via pharmacy_returns (original_bill_id = billId)
+      const returnedQtyByItemId: Record<string, number> = {};
+      const { data: priorReturns } = await supabase
+        .from('pharmacy_returns')
+        .select('id')
+        .eq('original_bill_id', billId);
+
+      if (priorReturns && priorReturns.length > 0) {
+        const returnIds = priorReturns.map((r: any) => r.id);
+        const { data: priorReturnItems } = await supabase
+          .from('pharmacy_return_items')
+          .select('item_id, quantity')
+          .in('return_id', returnIds);
+
+        for (const ri of (priorReturnItems || [])) {
+          const key = ri.item_id;
+          returnedQtyByItemId[key] = (returnedQtyByItemId[key] || 0) + Number(ri.quantity || 0);
+        }
+      }
+
+      // Step 1: Try bill_items first
+      const { data: billItemsData, error: billItemsError } = await supabase
+        .from('bill_items')
+        .select('*')
+        .eq('bill_id', billId);
+
+      if (!billItemsError && billItemsData && billItemsData.length > 0) {
+        return billItemsData.map((i: any) => ({
+          id: i.id,
+          description: i.description || '',
+          quantity: Number(i.quantity || 0),
+          unitPrice: Number(i.unit_price || 0),
+          total: Number(i.total || 0),
+          itemId: i.item_id || '',
+          batchNo: i.batch_no || '',
+          returnedQty: returnedQtyByItemId[i.item_id] || 0
+        }));
+      }
+
+      // Step 2: Fallback — look up prescription_items via the bill's prescription_id
+      console.warn(`fetchBillItems: No bill_items for ${billId}, falling back to prescription_items`);
+      const { data: billData } = await supabase
+        .from('bills')
+        .select('prescription_id')
+        .eq('id', billId)
+        .single();
+
+      if (!billData?.prescription_id) {
+        console.warn('fetchBillItems: No prescription_id linked to this bill');
+        return [];
+      }
+
+      const { data: prescItems, error: prescError } = await supabase
+        .from('prescription_items')
+        .select('*')
+        .eq('prescription_id', billData.prescription_id);
+
+      if (prescError || !prescItems || prescItems.length === 0) {
+        console.warn('fetchBillItems: No prescription_items found either', prescError?.message);
+        return [];
+      }
+
+      const dispensed = prescItems.filter((i: any) => i.status === 'Dispensed' || i.status === 'dispensed');
+      const sourceItems = dispensed.length > 0 ? dispensed : prescItems;
+
+      const bill = bills.find(b => b.id === billId);
+      const totalBillAmount = bill?.totalAmount || 0;
+      const totalQtyDispensed = sourceItems.reduce((s: number, i: any) => s + Number(i.total_qty || 0), 0);
+
+      return sourceItems.map((i: any) => {
+        const qty = Number(i.total_qty || 0);
+        const invItem = inventoryItems.find(inv => inv.id === i.item_id);
+        const itemName = invItem?.itemName || i.generic_name || 'Unknown Item';
+        const unitPrice = (qty > 0 && totalQtyDispensed > 0 && totalBillAmount > 0)
+          ? Number((totalBillAmount / totalQtyDispensed).toFixed(2))
+          : 0;
+        return {
+          id: i.id,
+          description: itemName,
+          quantity: qty,
+          unitPrice: unitPrice,
+          total: Number((qty * unitPrice).toFixed(2)),
+          itemId: i.item_id || '',
+          batchNo: '',
+          returnedQty: returnedQtyByItemId[i.item_id] || 0
+        };
+      });
+    } catch (err: any) {
+      console.error('fetchBillItems exception:', err.message);
+      return [];
     }
   };
 
@@ -2379,7 +2843,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       stores, saveStore, deleteStore,
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
-      saveDirectSale, fetchBatchDetails, repairPh000006,
+      saveDirectSale, fetchBatchDetails, repairPh000006, processPharmacyReturn, fetchBillItems,
       prescriptions, savePrescription, dispensePrescription,
       drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,

@@ -23,6 +23,7 @@ import { DrugGenericMaster } from './components/pharmacy/masters/DrugGenericMast
 import { DrugMaster } from './components/pharmacy/masters/DrugMaster';
 import { DirectSale } from './components/pharmacy/DirectSale';
 import { OPPharmacy } from './pages/OPPharmacy';
+import { DrugReturn } from './pages/DrugReturn';
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
 
@@ -85,6 +86,7 @@ const AppRoutes = () => {
               <Route path="masters/drug-master" element={<DrugMaster />} />
               <Route path="direct-sale" element={<DirectSale />} />
               <Route path="op-pharmacy" element={<OPPharmacy />} />
+              <Route path="drug-return" element={<DrugReturn />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

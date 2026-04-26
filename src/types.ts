@@ -170,7 +170,11 @@ export interface BillItem {
   description: string;
   quantity: number;
   unitPrice: number;
+  discountAmount?: number;
+  taxAmount?: number;
   total: number;
+  itemId?: string;
+  batchNo?: string;
 }
 
 export interface Payment {
@@ -183,14 +187,19 @@ export interface Payment {
 
 export interface Bill {
   id: string;
+  invoiceNo?: string; // e.g., INV-D-HUMC-26000208
   patientId: string;
   appointmentId?: string; // Optional link to an appointment
   date: string;
   status: 'Unpaid' | 'Partial' | 'Paid' | 'Cancelled';
   totalAmount: number;
   paidAmount: number;
+  discountAmount?: number;
+  taxAmount?: number;
   items: BillItem[];
   payments: Payment[];
+  isPharmacy?: boolean;
+  prescriptionId?: string;
 }
 
 // --- Clinical / Workbench Types ---
