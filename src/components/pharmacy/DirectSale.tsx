@@ -25,7 +25,7 @@ const INITIAL_PATIENT = {
 };
 
 export const DirectSale: React.FC = () => {
-  const { stores, inventoryItems, storeItemMappings, saveDirectSale, fetchBatchDetails } = useData();
+  const { stores, inventoryItems, storeItemMappings, saveDirectSale, fetchBatchDetails, itemTaxMappings, taxMasters } = useData();
   
   const [patient, setPatient] = useState(INITIAL_PATIENT);
   const [selectedStore, setSelectedStore] = useState('');
@@ -101,6 +101,12 @@ export const DirectSale: React.FC = () => {
     if (!batchData) return;
 
     const newItems = [...items];
+    const mapping = itemTaxMappings.find(m => m.itemId === newItems[index].itemId);
+    const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+    const taxPercent = tax?.percentage || 0;
+    const basePrice = batchData.mrp * newItems[index].quantity;
+    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+
     newItems[index] = {
       ...newItems[index],
       batchNo: batchNo,
@@ -108,22 +114,36 @@ export const DirectSale: React.FC = () => {
       unitPrice: batchData.mrp,
       costRate: batchData.rate,
       expiryDate: batchData.expiryDate,
-      totalPrice: batchData.mrp * newItems[index].quantity
+      totalPrice: Number((basePrice + taxAmount).toFixed(2))
     };
     setItems(newItems);
   };
 
   const updateItemQty = (index: number, qty: number) => {
     const newItems = [...items];
+    const mapping = itemTaxMappings.find(m => m.itemId === newItems[index].itemId);
+    const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+    const taxPercent = tax?.percentage || 0;
+    const basePrice = qty * newItems[index].unitPrice;
+    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+
     newItems[index] = {
       ...newItems[index],
       quantity: qty,
-      totalPrice: qty * newItems[index].unitPrice
+      totalPrice: Number((basePrice + taxAmount).toFixed(2))
     };
     setItems(newItems);
   };
 
-  const totalSaleAmount = items.reduce((sum, item) => sum + item.totalPrice, 0);
+    const totalSaleAmount = items.reduce((sum, item) => sum + item.totalPrice, 0);
+    const totalTaxAmount = items.reduce((sum, item) => {
+        const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+        const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+        if (tax && item.unitPrice > 0) {
+            return sum + (item.quantity * item.unitPrice * (tax.percentage / 100));
+        }
+        return sum;
+    }, 0);
 
   const handleDispense = async () => {
     if (!patient.firstName) { setError('First name is required.'); return; }
@@ -376,9 +396,15 @@ export const DirectSale: React.FC = () => {
                </div>
             </div>
             <div className="flex items-center gap-3">
-               <div className="text-right">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Amount</p>
-                  <p className="text-lg font-black text-violet-600 leading-none">SAR {totalSaleAmount.toFixed(2)}</p>
+               <div className="text-right flex gap-6 items-center border-r border-slate-100 pr-6 mr-6">
+                  <div>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Tax</p>
+                    <p className="text-sm font-bold text-slate-500 leading-none">SAR {totalTaxAmount.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Payable</p>
+                    <p className="text-lg font-black text-violet-600 leading-none">SAR {totalSaleAmount.toFixed(2)}</p>
+                  </div>
                </div>
                <button 
                  onClick={addItemRow}
@@ -400,6 +426,7 @@ export const DirectSale: React.FC = () => {
                       <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
                       <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
                       <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Unit MRP</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Tax</th>
                       <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Subtotal</th>
                       <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]"></th>
                    </tr>
@@ -483,6 +510,23 @@ export const DirectSale: React.FC = () => {
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-600 italic">
                            {item.unitPrice > 0 ? item.unitPrice.toFixed(2) : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                           {(() => {
+                               const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+                               const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+                               if (tax && item.unitPrice > 0) {
+                                   const base = item.quantity * item.unitPrice;
+                                   const amt = base * (tax.percentage / 100);
+                                   return (
+                                       <div className="flex flex-col">
+                                           <span className="text-violet-600 font-bold">{amt.toFixed(2)}</span>
+                                           <span className="text-[9px] text-slate-400 font-bold uppercase">({tax.percentage}%)</span>
+                                       </div>
+                                   );
+                               }
+                               return <span className="text-slate-200">0.00</span>;
+                           })()}
                         </td>
                         <td className="px-4 py-3 text-right font-black text-slate-800">
                            {item.totalPrice > 0 ? item.totalPrice.toFixed(2) : '0.00'}

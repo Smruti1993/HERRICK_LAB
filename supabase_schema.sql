@@ -80,16 +80,21 @@ create table if not exists bills (
   date timestamp with time zone default now(),
   status text default 'Unpaid', -- 'Unpaid', 'Paid', 'Partial', 'Cancelled'
   total_amount numeric(10,2) default 0,
-  paid_amount numeric(10,2) default 0
+  paid_amount numeric(10,2) default 0,
+  tax_amount numeric(10,2) default 0
 );
 
 -- 8. Bill Items
 create table if not exists bill_items (
   id uuid primary key default uuid_generate_v4(),
   bill_id uuid references bills(id) on delete cascade,
+  item_id uuid,
+  batch_no text,
   description text not null,
   quantity numeric(10,2) default 1,
   unit_price numeric(10,2) default 0,
+  tax_percentage numeric(5,2) default 0,
+  tax_amount numeric(10,2) default 0,
   total numeric(10,2) default 0
 );
 
@@ -471,6 +476,7 @@ create table if not exists pharmacy_direct_sales (
   is_new_external_patient boolean default true,
   
   total_amount numeric(15,2) default 0,
+  tax_amount numeric(15,2) default 0,
   created_at timestamp with time zone default now(),
   updated_at timestamp with time zone default now()
 );
@@ -483,6 +489,8 @@ create table if not exists pharmacy_direct_sale_items (
   batch_no text not null,
   quantity numeric(10,2) not null check (quantity > 0),
   unit_price numeric(15,2) not null, -- MRP
+  tax_percentage numeric(5,2) default 0,
+  tax_amount numeric(15,2) default 0,
   total_price numeric(15,2) not null,
   expiry_date date,
   created_at timestamp with time zone default now()
@@ -525,3 +533,52 @@ CREATE INDEX IF NOT EXISTS idx_prescriptions_patient ON prescriptions(patient_id
 CREATE INDEX IF NOT EXISTS idx_prescriptions_appointment ON prescriptions(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_prescriptions_status ON prescriptions(status);
 CREATE INDEX IF NOT EXISTS idx_prescription_items_prescription ON prescription_items(prescription_id);
+
+-- 36. Tax Masters
+CREATE TABLE IF NOT EXISTS tax_masters (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tax_name TEXT NOT NULL,
+    percentage DECIMAL(10, 2) NOT NULL,
+    status TEXT DEFAULT 'Active',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 37. Item Tax Mapping
+CREATE TABLE IF NOT EXISTS item_tax_mappings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    item_id UUID REFERENCES inventory_items(id) ON DELETE CASCADE,
+    tax_id UUID REFERENCES tax_masters(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(item_id, tax_id)
+);
+
+-- 38. Pharmacy Returns
+CREATE TABLE IF NOT EXISTS pharmacy_returns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    return_no TEXT UNIQUE NOT NULL,
+    original_bill_id UUID REFERENCES bills(id),
+    patient_id UUID REFERENCES patients(id),
+    store_id UUID REFERENCES stores(id),
+    return_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    total_amount DECIMAL(12,2) DEFAULT 0,
+    tax_amount DECIMAL(12,2) DEFAULT 0,
+    created_by TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 39. Pharmacy Return Items
+CREATE TABLE IF NOT EXISTS pharmacy_return_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    return_id UUID REFERENCES pharmacy_returns(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id),
+    batch_no TEXT,
+    batch_date DATE,
+    expiry_date DATE,
+    description TEXT,
+    quantity DECIMAL(10,2) DEFAULT 0,
+    unit_price DECIMAL(12,2) DEFAULT 0,
+    tax_percentage DECIMAL(5,2) DEFAULT 0,
+    tax_amount DECIMAL(12,2) DEFAULT 0,
+    total_amount DECIMAL(12,2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

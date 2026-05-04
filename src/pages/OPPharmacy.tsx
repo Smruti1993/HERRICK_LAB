@@ -27,7 +27,7 @@ export const OPPharmacy: React.FC = () => {
         return d.toISOString().split('T')[0];
     });
     const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-    const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number }>>({});
+    const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }>>({});
     const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number } | null>(null);
     const [generatedInvoiceId, setGeneratedInvoiceId] = useState<string | null>(null);
 
@@ -383,13 +383,23 @@ export const OPPharmacy: React.FC = () => {
                         {/* Dispensing Footer / Summary */}
                         <div className="bg-white p-6 border-t border-slate-200 shrink-0 flex items-center justify-between">
                             <div className="flex items-center gap-12">
-                                <div className="flex flex-col">
-                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Billable</span>
-                                    <span className="text-2xl font-black text-slate-800">
-                                        SAR {selectedPrescription.status === 'Dispensed' 
-                                            ? selectedPrescription.totalAmount.toFixed(2)
-                                            : Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
-                                    </span>
+                                <div className="flex items-center gap-10">
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tax Amount</span>
+                                        <span className="text-sm font-bold text-slate-500">
+                                            SAR {selectedPrescription.status === 'Dispensed' 
+                                                ? (selectedPrescription.taxAmount || 0).toFixed(2)
+                                                : Object.values(selectedBatches).reduce((sum, b) => sum + (b.taxAmount || 0), 0).toFixed(2)}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Billable</span>
+                                        <span className="text-2xl font-black text-slate-800">
+                                            SAR {selectedPrescription.status === 'Dispensed' 
+                                                ? selectedPrescription.totalAmount.toFixed(2)
+                                                : Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div className="flex flex-col">
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Items Status</span>

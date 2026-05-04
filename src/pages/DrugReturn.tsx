@@ -14,6 +14,8 @@ type LiveBillItem = {
   itemId?: string;
   batchNo?: string;
   returnedQty: number;    // already returned in prior transactions
+  taxPercentage: number;
+  taxAmount: number;      // total tax originally charged for the full qty
 };
 
 export const DrugReturn: React.FC = () => {
@@ -85,7 +87,9 @@ export const DrugReturn: React.FC = () => {
     const totalReturnAmount = useMemo(() => {
         return liveItems.reduce((sum, item) => {
             const qty = returnQuantities[item.id] || 0;
-            return sum + (qty * item.unitPrice);
+            const base = qty * item.unitPrice;
+            const tax = Number((base * (item.taxPercentage / 100)).toFixed(2));
+            return sum + base + tax;
         }, 0);
     }, [liveItems, returnQuantities]);
 
@@ -98,13 +102,14 @@ export const DrugReturn: React.FC = () => {
         const itemsToReturn = Object.entries(returnQuantities)
             .filter(([_, qty]) => qty > 0)
             .map(([itemId, qty]) => {
-                const item = liveItems.find(i => i.id === itemId);
+                const item = liveItems.find(li => li.id === itemId);
                 return {
                     itemId: item?.itemId || '',
                     batchNo: item?.batchNo || '',
+                    qty: qty,
+                    rate: item?.unitPrice || 0,
                     description: item?.description || '',
-                    qty,
-                    rate: item?.unitPrice || 0
+                    taxPercentage: item?.taxPercentage || 0
                 };
             });
 
@@ -163,7 +168,7 @@ export const DrugReturn: React.FC = () => {
                             <option value="">Select Store</option>
                             {stores.map(s => (
                                 <option key={s.id} value={s.id}>
-                                    {s.storeName || s.name || 'Unnamed Store'}
+                                    {s.storeName || 'Unnamed Store'}
                                 </option>
                             ))}
                         </select>
@@ -225,12 +230,6 @@ export const DrugReturn: React.FC = () => {
                                 ) : liveItems.length === 0 ? (
                                     <div className="text-center py-20 text-slate-400">
                                         <p className="font-medium">No items found for this invoice.</p>
-                                        <p className="text-xs mt-2 text-slate-300">Run this SQL in Supabase to fix missing columns:</p>
-                                        <code className="text-[10px] bg-slate-100 px-2 py-1 rounded block mt-2 text-left max-w-sm mx-auto text-slate-600">
-                                            ALTER TABLE bill_items<br/>
-                                            ADD COLUMN IF NOT EXISTS item_id TEXT,<br/>
-                                            ADD COLUMN IF NOT EXISTS batch_no TEXT;
-                                        </code>
                                     </div>
                                 ) : (
                                     <table className="w-full text-left">
@@ -239,9 +238,10 @@ export const DrugReturn: React.FC = () => {
                                                 <th className="pb-4">Item Description</th>
                                                 <th className="pb-4 text-center">Dispensed</th>
                                                 <th className="pb-4 text-center text-orange-500">Already Returned</th>
-                                                <th className="pb-4 text-center">Return Qty</th>
-                                                <th className="pb-4 text-right">Unit Rate</th>
-                                                <th className="pb-4 text-right">Credit</th>
+                                                <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-400 uppercase">Return Qty</th>
+                                                <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-400 uppercase">Unit Rate</th>
+                                                <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-400 uppercase">Tax</th>
+                                                <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-400 uppercase">Credit</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
@@ -288,9 +288,21 @@ export const DrugReturn: React.FC = () => {
                                                             <div className="text-[10px] text-slate-400 mt-1">max {maxReturnable}</div>
                                                         )}
                                                     </td>
-                                                    <td className="py-4 text-right font-medium text-slate-500">SAR {item.unitPrice.toFixed(2)}</td>
-                                                    <td className="py-4 text-right font-black text-slate-800">
-                                                        SAR {((returnQuantities[item.id] || 0) * item.unitPrice).toFixed(2)}
+                                                    <td className="px-4 py-4 text-right">
+                                                        <span className="text-xs font-bold text-slate-600">SAR {item.unitPrice.toFixed(2)}</span>
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-xs font-bold text-orange-600">
+                                                                SAR {((returnQuantities[item.id] || 0) * item.unitPrice * (item.taxPercentage / 100)).toFixed(2)}
+                                                            </span>
+                                                            <span className="text-[9px] font-black text-slate-400 uppercase">({item.taxPercentage}%)</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-4 text-right">
+                                                        <span className="text-sm font-black text-slate-800">
+                                                            SAR {((returnQuantities[item.id] || 0) * item.unitPrice * (1 + item.taxPercentage / 100)).toFixed(2)}
+                                                        </span>
                                                     </td>
                                                 </tr>
                                                 );

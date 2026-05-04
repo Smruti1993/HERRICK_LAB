@@ -1,4 +1,4 @@
-import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill } from 'lucide-react';
+import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill, ShoppingCart } from 'lucide-react';
 
 export const APP_NAME = "MediCore HMS";
 
@@ -91,6 +91,17 @@ export const NAV_ITEMS: NavItem[] = [
         path: '/pharmacy/drug-return',
         icon: 'Undo'
       }
+    ]
+  },
+
+  // Procurement Section
+  {
+    label: 'Procurement',
+    path: '/procurement',
+    icon: ShoppingCart,
+    category: 'Procurement',
+    subItems: [
+      { label: 'Tax Management', path: '/procurement/tax' }
     ]
   },
 

@@ -5,7 +5,7 @@ import {
   Filter, Calendar, Activity, Clock
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
-import { InventoryItem, Prescription, PrescriptionItem, DrugGeneric, DrugMaster } from '../../types';
+import { InventoryItem, Prescription, PrescriptionItem, DrugGeneric } from '../../types';
 
 interface PharmacyOrderingModalProps {
     appointmentId: string;

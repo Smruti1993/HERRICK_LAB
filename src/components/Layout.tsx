@@ -48,7 +48,7 @@ export const Layout = () => {
     return acc;
   }, {} as Record<string, NavItem[]>);
 
-  const categories = ['Main', 'Patient Care', 'Administration', 'Inventory', 'Pharmacy', 'System'];
+  const categories = ['Main', 'Patient Care', 'Administration', 'Inventory', 'Pharmacy', 'Procurement', 'System'];
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">

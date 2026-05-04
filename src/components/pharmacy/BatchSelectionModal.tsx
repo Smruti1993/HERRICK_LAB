@@ -8,7 +8,7 @@ interface BatchSelectionModalProps {
     itemName: string;
     requiredQty: number;
     onClose: () => void;
-    onSelect: (batch: { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number }) => void;
+    onSelect: (batch: { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }) => void;
 }
 
 export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
@@ -19,7 +19,7 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
     onClose,
     onSelect
 }) => {
-    const { fetchBatchDetails, isLoading } = useData();
+    const { fetchBatchDetails, itemTaxMappings, taxMasters } = useData();
     const [batches, setBatches] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [loading, setLoading] = useState(true);
@@ -42,6 +42,11 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
     const filteredBatches = batches.filter(b => 
         b.batchNo.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    // Tax calculation
+    const itemMapping = itemTaxMappings.find(m => m.itemId === itemId);
+    const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+    const taxPercent = taxMaster?.percentage || 0;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -82,7 +87,19 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                 return (
                                     <button 
                                         key={batch.batchNo}
-                                        onClick={() => onSelect({ batchNo: batch.batchNo, rate: batch.rate, batchDate: batch.batchDate, expiryDate: batch.expiryDate, amount: batch.rate * requiredQty })}
+                                        onClick={() => {
+                                            const baseAmount = batch.rate * requiredQty;
+                                            const taxAmt = Number((baseAmount * (taxPercent / 100)).toFixed(2));
+                                            onSelect({ 
+                                                batchNo: batch.batchNo, 
+                                                rate: batch.rate, 
+                                                batchDate: batch.batchDate, 
+                                                expiryDate: batch.expiryDate, 
+                                                baseAmount: Number(baseAmount.toFixed(2)),
+                                                taxAmount: taxAmt,
+                                                amount: Number((baseAmount + taxAmt).toFixed(2)) 
+                                            });
+                                        }}
                                         disabled={isInsufficient}
                                         className={`w-full flex items-center justify-between p-4 rounded-xl border text-left transition-all ${
                                             isInsufficient 
@@ -101,7 +118,7 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                                 {batch.currentStock} <span className="text-[10px] font-bold text-slate-400 uppercase">Available</span>
                                             </span>
                                             <span className="text-[10px] font-bold text-slate-400">
-                                                MRP: {batch.mrp || batch.rate} SAR
+                                                MRP: {batch.mrp || batch.rate} SAR {taxPercent > 0 && <span className="text-violet-500">(+{taxPercent}% Tax)</span>}
                                             </span>
                                         </div>
                                     </button>

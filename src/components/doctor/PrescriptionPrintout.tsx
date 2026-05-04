@@ -1,5 +1,5 @@
 import React from 'react';
-import { Prescription, Patient, PrescriptionItem, Diagnosis, Allergy, VitalSign, Employee } from '../../types';
+import { Prescription, Patient, Diagnosis, Allergy, VitalSign, Employee } from '../../types';
 
 interface PrescriptionPrintoutProps {
     prescription: Prescription;
@@ -165,7 +165,7 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-300">
-                        {prescription.items.map((item, idx) => (
+                        {prescription.items.map((item) => (
                             <tr key={item.id} className="divide-x divide-slate-400 min-h-[3rem]">
                                 <td className="p-2 align-top">
                                     <div className="font-bold uppercase">{item.genericName}</div>

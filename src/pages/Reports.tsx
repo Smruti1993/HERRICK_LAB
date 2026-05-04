@@ -62,8 +62,16 @@ export const Reports = () => {
         return getDocName(apt?.doctorId);
     };
 
+    console.log(`Reports: Total bills: ${bills.length}`);
+    const returnsInBills = bills.filter(b => b.items.some(i => i.description.startsWith('RETURN:')));
+    if (returnsInBills.length > 0) console.log(`Reports: Found ${returnsInBills.length} returns in bills.`);
+
+    // Trace for missing invoices
+    console.log("Reports: Raw Bills in state:", bills.map(b => b.invoiceNo));
+    
     bills.forEach(bill => {
         // 1. Date Range Filter
+        if (!bill.date) return;
         const bDate = bill.date.split('T')[0];
         if (startDate && bDate < startDate) return;
         if (endDate && bDate > endDate) return;
@@ -101,22 +109,30 @@ export const Reports = () => {
         }
         const group = patientMap.get(patient.id)!;
 
-        // 3. Process Bill Items (Invoices) - DEBIT
+        // 3. Process Bill Items (Invoices)
         bill.items.forEach(item => {
+            const isReturn = item.description.startsWith('RETURN:');
+            
             group.rows.push({
                 id: item.id,
                 date: bill.date,
-                voucherType: 'CASH', // Assuming Cash invoices for now
-                invoiceNo: `INV-${bill.id.slice(-8).toUpperCase()}`,
+                voucherType: isReturn ? 'RETURN' : 'CASH',
+                invoiceNo: bill.invoiceNo || `INV-${bill.id.slice(-8).toUpperCase()}`,
                 type: 'Invoice',
                 doctorName: getBillDoctor(bill.appointmentId),
                 serviceCode: getServiceCode(item.description),
                 serviceName: item.description,
-                debit: item.total,
-                credit: 0,
+                debit: isReturn ? 0 : item.total,
+                credit: isReturn ? Math.abs(item.total) : 0,
                 insurance: 0, 
                 tax: 0
             });
+
+            if (isReturn) {
+                group.totalCredit += Math.abs(item.total);
+            } else {
+                group.totalDebit += item.total;
+            }
         });
 
         // 4. Process Payments (Receipts) - CREDIT
@@ -147,6 +163,7 @@ export const Reports = () => {
                 insurance: 0,
                 tax: 0
             });
+            group.totalCredit += pay.amount;
         });
     });
 
@@ -155,10 +172,7 @@ export const Reports = () => {
         // Sort by date ascending
         group.rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
         
-        // Calc totals
-        group.totalDebit = group.rows.reduce((sum, r) => sum + r.debit, 0);
-        group.totalCredit = group.rows.reduce((sum, r) => sum + r.credit, 0);
-        group.totalBalance = group.totalDebit - group.totalCredit; // Simple balance logic
+        group.totalBalance = group.totalDebit - group.totalCredit;
         
         groups.push(group);
     });
@@ -259,9 +273,9 @@ export const Reports = () => {
                         <div className="col-span-1 p-2 border-r border-slate-300">Invoice No</div>
                         <div className="col-span-1 p-2 border-r border-slate-300">Type</div>
                         <div className="col-span-1 p-2 border-r border-slate-300">Date</div>
-                        <div className="col-span-2 p-2 border-r border-slate-300">Doctor Name</div>
+                        <div className="col-span-1 p-2 border-r border-slate-300">Doctor Name</div>
                         <div className="col-span-1 p-2 border-r border-slate-300">Service Code</div>
-                        <div className="col-span-2 p-2 border-r border-slate-300">Service Name</div>
+                        <div className="col-span-3 p-2 border-r border-slate-300">Service Name</div>
                         <div className="col-span-1 p-2 border-r border-slate-300 text-right">Cash / Ded.</div>
                         <div className="col-span-1 p-2 border-r border-slate-300 text-right">Payment</div>
                         <div className="col-span-1 p-2 text-right">Balance</div>
@@ -284,20 +298,22 @@ export const Reports = () => {
 
                                 {/* Rows */}
                                 {group.rows.map((row, idx) => (
-                                    <div key={idx} className="grid grid-cols-12 text-[11px] border-b border-slate-200 text-slate-600 hover:bg-yellow-50 transition-colors">
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.voucherType}</div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate font-medium">{row.invoiceNo}</div>
+                                    <div key={idx} className={`grid grid-cols-12 text-[11px] border-b border-slate-200 hover:bg-yellow-50 transition-colors ${row.voucherType === 'RETURN' ? 'text-red-700 font-bold bg-red-50' : 'text-slate-600'}`}>
+                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
+                                            {row.voucherType}
+                                        </div>
+                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 truncate ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium'}`}>{row.invoiceNo}</div>
                                         <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.type}</div>
                                         <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
                                             {new Date(row.date).toLocaleString([], {year: 'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}
                                         </div>
-                                        <div className="col-span-2 p-1.5 border-r border-slate-200 truncate" title={row.doctorName}>{row.doctorName}</div>
+                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate" title={row.doctorName}>{row.doctorName}</div>
                                         <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.serviceCode}</div>
-                                        <div className="col-span-2 p-1.5 border-r border-slate-200 truncate" title={row.serviceName}>{row.serviceName}</div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 text-right font-medium text-slate-800">
-                                            {row.debit > 0 ? row.debit.toFixed(2) : '0.00'}
+                                        <div className="col-span-3 p-1.5 border-r border-slate-200 font-medium" title={row.serviceName}>{row.serviceName}</div>
+                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-bold'}`}>
+                                            {row.debit !== 0 ? row.debit.toFixed(2) : '0.00'}
                                         </div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 text-right font-medium text-slate-800">
+                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium text-slate-800'}`}>
                                             {row.credit > 0 ? row.credit.toFixed(2) : ''}
                                         </div>
                                         <div className="col-span-1 p-1.5 text-right text-slate-400">0.00</div>
