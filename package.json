@@ -30,4 +30,7 @@
     "typescript": "~5.7.2",
     "vite": "^6.1.0"
   }
+  "engines": {
+  "node": "18.x"
+}
 }
