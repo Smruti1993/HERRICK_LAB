@@ -582,3 +582,80 @@ CREATE TABLE IF NOT EXISTS pharmacy_return_items (
     total_amount DECIMAL(12,2) DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 40. Finance Organizations
+CREATE TABLE IF NOT EXISTS finance_organizations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    sponsor_type TEXT NOT NULL,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 41. Insurance Policies
+CREATE TABLE IF NOT EXISTS insurance_policies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    policy_no TEXT UNIQUE NOT NULL,
+    policy_name TEXT NOT NULL,
+    sponsor_type TEXT NOT NULL CHECK (sponsor_type IN ('TPA', 'Corporate', 'Insurance', 'Self')),
+    sponsor_id UUID REFERENCES finance_organizations(id) ON DELETE SET NULL,
+    insurance_id UUID REFERENCES finance_organizations(id) ON DELETE SET NULL,
+    service_tax TEXT DEFAULT 'VAT 15 PERCENT',
+    start_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    sponsor_pay_tax BOOLEAN DEFAULT TRUE,
+    is_sponsor_price BOOLEAN DEFAULT TRUE,
+    patient_amt NUMERIC(10, 2) DEFAULT 0.00,
+    active BOOLEAN DEFAULT TRUE,
+    restricted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 42. Policy Mapped Branches
+CREATE TABLE IF NOT EXISTS policy_mapped_branches (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    policy_id UUID NOT NULL REFERENCES insurance_policies(id) ON DELETE CASCADE,
+    branch_code TEXT NOT NULL,
+    branch_name TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (policy_id, branch_code)
+);
+
+-- 43. Policy Rules
+CREATE TABLE IF NOT EXISTS policy_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    policy_id UUID NOT NULL REFERENCES insurance_policies(id) ON DELETE CASCADE,
+    rule_type TEXT NOT NULL CHECK (rule_type IN ('SERVICES', 'DRUGS', 'CONSUMABLES', 'ALL')),
+    visit_type TEXT NOT NULL CHECK (visit_type IN ('OP', 'IP', 'ER')),
+    gender TEXT DEFAULT 'All',
+    class_name TEXT DEFAULT 'SERVICE_GROUPS',
+    tariff_class TEXT DEFAULT 'A+',
+    tariff_value TEXT DEFAULT 'A+ Value',
+    amount_limit NUMERIC(12, 2) DEFAULT 0.00,
+    quantity_limit INT DEFAULT 0,
+    patient_copay TEXT DEFAULT '10%',
+    sponsor_payment TEXT DEFAULT '90%',
+    patient_deductible TEXT DEFAULT '0',
+    patient_deductible_type TEXT DEFAULT 'Amt',
+    approval_required BOOLEAN DEFAULT TRUE,
+    exclude BOOLEAN DEFAULT FALSE,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 44. Patient Max Amounts
+CREATE TABLE IF NOT EXISTS policy_patient_max_amounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    policy_id UUID NOT NULL REFERENCES insurance_policies(id) ON DELETE CASCADE,
+    class_name TEXT NOT NULL DEFAULT 'A+',
+    circle_name TEXT DEFAULT 'Corporate',
+    branch_code TEXT DEFAULT 'All',
+    pat_max_amt NUMERIC(12, 2) NOT NULL DEFAULT 100.00,
+    minimum_amt NUMERIC(12, 2) DEFAULT 0.00,
+    approval_limit NUMERIC(12, 2) DEFAULT 1500.00,
+    visit_type TEXT DEFAULT 'OP',
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);

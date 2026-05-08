@@ -24,6 +24,8 @@ import { DrugMaster } from './components/pharmacy/masters/DrugMaster';
 import { DirectSale } from './components/pharmacy/DirectSale';
 import { OPPharmacy } from './pages/OPPharmacy';
 import { DrugReturn } from './pages/DrugReturn';
+import { OrganizationMaster } from './pages/OrganizationMaster';
+import { PlanDefinition } from './pages/PlanDefinition';
 import { Tax } from './pages/Tax';
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
@@ -92,6 +94,11 @@ const AppRoutes = () => {
             <Route path="procurement">
               <Route index element={<Navigate to="tax" replace />} />
               <Route path="tax" element={<Tax />} />
+            </Route>
+            <Route path="finance">
+              <Route index element={<Navigate to="masters/organization" replace />} />
+              <Route path="masters/organization" element={<OrganizationMaster />} />
+              <Route path="masters/plan-definition" element={<PlanDefinition />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

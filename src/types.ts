@@ -579,3 +579,56 @@ export interface ItemTaxMapping {
   taxId: string;
   createdAt?: string;
 }
+
+export interface OrganizationContact {
+  id: string;
+  firstName: string;
+  middleName?: string;
+  lastName?: string;
+  designation?: string;
+  contactType?: string;
+  value?: string;
+  mobile?: string;
+  idType?: string;
+  idNo?: string;
+  primaryId: boolean;
+}
+
+export interface Organization {
+  id: string;
+  code: string;
+  sponsorType: string;
+  payerId?: string;
+  vatNotRequired: boolean;
+  contractCreatedBy?: string;
+  organizationType: 'With MOU' | 'Without MOU';
+  accountNo?: string;
+  organizationGroup?: string;
+  receiverId?: string;
+  gatewayConfiguration?: string;
+  vatNo?: string;
+  name: string;
+  active: boolean;
+  isDamanOrThiqa: boolean;
+  maxApprovalTime?: number;
+  
+  // Address details
+  addressDetails?: string;
+  buildingNo?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  state?: string;
+  dist?: string;
+  
+  // Contacts
+  contacts?: OrganizationContact[];
+  
+  // Insurance mapping
+  insuranceId?: string;
+  
+  // Class wise tariff
+  branchId?: string;
+  
+  createdAt?: string;
+}

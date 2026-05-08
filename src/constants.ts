@@ -105,6 +105,24 @@ export const NAV_ITEMS: NavItem[] = [
     ]
   },
 
+  // Finance Section
+  {
+    label: 'Finance',
+    path: '/finance',
+    icon: CreditCard,
+    category: 'Finance',
+    subItems: [
+      {
+        label: 'Master',
+        path: '/finance/masters',
+        subItems: [
+          { label: 'Organization', path: '/finance/masters/organization' },
+          { label: 'Plan Definition', path: '/finance/masters/plan-definition' }
+        ]
+      }
+    ]
+  },
+
   { label: 'Connection', path: '/connection', icon: Database, category: 'System' },
 ];
 

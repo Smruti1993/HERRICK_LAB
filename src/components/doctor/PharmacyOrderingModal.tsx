@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../../context/DataContext';
 import { InventoryItem, Prescription, PrescriptionItem, DrugGeneric } from '../../types';
+import { getSupabase } from '../../services/supabaseClient';
 
 interface PharmacyOrderingModalProps {
     appointmentId: string;
@@ -24,7 +25,7 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
 }) => {
     const { 
         inventoryItems, drugGenerics, drugMasters, 
-        user, savePrescription, showToast 
+        stores, user, savePrescription, showToast 
     } = useData();
     
     // Order Header info
@@ -42,6 +43,39 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
 
     // Selected Items for current order
     const [selectedItems, setSelectedItems] = useState<Partial<PrescriptionItem>[]>([]);
+    
+    // Stock levels from ledger state
+    const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+    const [itemStocks, setItemStocks] = useState<Record<string, number>>({});
+
+    useEffect(() => {
+        const loadItemStocks = async () => {
+            try {
+                const supabase = getSupabase();
+                let query = supabase.from('inventory_stock_ledger')
+                    .select('item_id, stock_in_quantity, stock_out_quantity, store_id');
+                
+                if (selectedStoreId) {
+                    query = query.eq('store_id', selectedStoreId);
+                }
+
+                const { data, error } = await query;
+                if (error) throw error;
+
+                const stocks: Record<string, number> = {};
+                data?.forEach((row: any) => {
+                    const itemId = row.item_id;
+                    const qty = Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0);
+                    stocks[itemId] = (stocks[itemId] || 0) + qty;
+                });
+                setItemStocks(stocks);
+            } catch (err) {
+                console.error('Error loading item stocks:', err);
+            }
+        };
+
+        loadItemStocks();
+    }, [selectedStoreId]);
 
     // 1. Generic Search Filtering
     const filteredGenerics = drugGenerics.filter(g => {
@@ -53,6 +87,12 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
     // 2. Trade Search Filtering (Optionally filtered by Generic)
     const filteredTrades = inventoryItems.filter(item => {
         if (!item.isActive) return false;
+        
+        // Filter by available stock if item scope is set to 'Available Items'
+        if (itemScope === 'Available Items') {
+            const stockQty = itemStocks[item.id] || 0;
+            if (stockQty <= 0) return false;
+        }
         
         // If a generic is selected, only show trades mapped to it
         if (selectedGenericId) {
@@ -240,8 +280,15 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                 <option>-- Item Class --</option>
                             </select>
                             <div className="h-4 w-px bg-slate-300 mx-1"></div>
-                            <select className="bg-transparent text-xs font-bold text-slate-600 outline-none cursor-pointer">
-                                <option>-- Store --</option>
+                            <select 
+                                value={selectedStoreId} 
+                                onChange={e => setSelectedStoreId(e.target.value)}
+                                className="bg-transparent text-xs font-bold text-slate-600 outline-none cursor-pointer"
+                            >
+                                <option value="">-- All Stores --</option>
+                                {stores.map(store => (
+                                    <option key={store.id} value={store.id}>{store.storeName}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
@@ -337,7 +384,13 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                                     </div>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    {item.stock && <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Qty: {item.stock.reusableCount || 0}</span>}
+                                                    <span className={`text-[10px] font-black px-2 py-1 rounded ${
+                                                        (itemStocks[item.id] || 0) > 0 
+                                                            ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' 
+                                                            : 'text-rose-600 bg-rose-50 border border-rose-100 animate-pulse'
+                                                    }`}>
+                                                        Qty: {itemStocks[item.id] || 0}
+                                                    </span>
                                                     <Plus className="w-4 h-4 text-slate-300 group-hover/item:text-indigo-600" />
                                                 </div>
                                             </button>

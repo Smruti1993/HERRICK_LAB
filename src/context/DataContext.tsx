@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact
 } from '../types';
 import { 
     getSupabase, 
@@ -125,6 +125,10 @@ interface DataContextType {
   itemTaxMappings: ItemTaxMapping[];
   saveItemTaxMapping: (mapping: ItemTaxMapping) => Promise<void>;
   deleteItemTaxMapping: (id: string) => Promise<void>;
+
+  organizations: Organization[];
+  saveOrganization: (org: Organization) => Promise<void>;
+  deleteOrganization: (id: string) => Promise<void>;
   
   toasts: ToastMessage[];
   showToast: (type: 'success' | 'error' | 'info', message: string) => void;
@@ -190,6 +194,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [stores, setStores] = useState<Store[]>([]);
   const [storeItemMappings, setStoreItemMappings] = useState<StoreItemMapping[]>([]);
   const [openingStocks, setOpeningStocks] = useState<OpeningStock[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
     if (!requireDb()) return;
@@ -960,6 +965,50 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             setBills(structuredBills.sort((a: Bill, b: Bill) => new Date(b.date).getTime() - new Date(a.date).getTime()));
         }
+
+        // Load organizations gracefully
+        let orgsData = [];
+        try {
+            const { data, error } = await supabase.from('finance_organizations').select('*');
+            if (data && !error) {
+                orgsData = data.map((o: any) => ({
+                    id: o.id,
+                    code: o.code,
+                    sponsorType: o.sponsor_type,
+                    payerId: o.payer_id,
+                    vatNotRequired: !!o.vat_not_required,
+                    contractCreatedBy: o.contract_created_by,
+                    organizationType: o.organization_type,
+                    accountNo: o.account_no,
+                    organizationGroup: o.organization_group,
+                    receiverId: o.receiver_id,
+                    gatewayConfiguration: o.gateway_configuration,
+                    vatNo: o.vat_no,
+                    name: o.name,
+                    active: !!o.active,
+                    isDamanOrThiqa: !!o.is_daman_or_thiqa,
+                    maxApprovalTime: o.max_approval_time,
+                    addressDetails: o.address_details,
+                    buildingNo: o.building_no,
+                    city: o.city,
+                    country: o.country,
+                    postalCode: o.postal_code,
+                    state: o.state,
+                    dist: o.dist,
+                    contacts: o.contacts || [],
+                    insuranceId: o.insurance_id,
+                    branchId: o.branch_id,
+                    createdAt: o.created_at
+                }));
+            } else {
+                const local = localStorage.getItem('medicore_organizations');
+                if (local) orgsData = JSON.parse(local);
+            }
+        } catch (err) {
+            const local = localStorage.getItem('medicore_organizations');
+            if (local) orgsData = JSON.parse(local);
+        }
+        setOrganizations(orgsData);
         
         showToast('success', 'Data synced with database.');
       } catch (error: any) {
@@ -3056,6 +3105,76 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const saveOrganization = async (org: Organization) => {
+    // Local update first
+    setOrganizations(prev => {
+        const index = prev.findIndex(o => o.id === org.id);
+        if (index > -1) {
+            const updated = [...prev];
+            updated[index] = org;
+            localStorage.setItem('medicore_organizations', JSON.stringify(updated));
+            return updated;
+        }
+        const updated = [org, ...prev];
+        localStorage.setItem('medicore_organizations', JSON.stringify(updated));
+        return updated;
+    });
+
+    if (checkConfigured()) {
+        try {
+            const dbOrg = {
+                id: org.id,
+                code: org.code,
+                sponsor_type: org.sponsorType,
+                payer_id: org.payerId,
+                vat_not_required: org.vatNotRequired,
+                contract_created_by: org.contractCreatedBy,
+                organization_type: org.organizationType,
+                account_no: org.accountNo,
+                organization_group: org.organizationGroup,
+                receiver_id: org.receiverId,
+                gateway_configuration: org.gatewayConfiguration,
+                vat_no: org.vatNo,
+                name: org.name,
+                active: org.active,
+                is_daman_or_thiqa: org.isDamanOrThiqa,
+                max_approval_time: org.maxApprovalTime,
+                address_details: org.addressDetails,
+                building_no: org.buildingNo,
+                city: org.city,
+                country: org.country,
+                postal_code: org.postalCode,
+                state: org.state,
+                dist: org.dist,
+                contacts: org.contacts,
+                insurance_id: org.insuranceId,
+                branch_id: org.branchId,
+                created_at: org.createdAt || new Date().toISOString()
+            };
+            const { error } = await getSupabase().from('finance_organizations').upsert(dbOrg);
+            if (error) {
+                console.warn("Supabase organization upsert warning:", error.message);
+            }
+        } catch (err: any) {
+            console.warn("Supabase organization upsert exception:", err.message);
+        }
+    }
+  };
+
+  const deleteOrganization = async (id: string) => {
+    setOrganizations(prev => {
+        const updated = prev.filter(o => o.id !== id);
+        localStorage.setItem('medicore_organizations', JSON.stringify(updated));
+        return updated;
+    });
+
+    if (checkConfigured()) {
+        try {
+            await getSupabase().from('finance_organizations').delete().eq('id', id);
+        } catch (err) {}
+    }
+  };
+
   return (
     <DataContext.Provider value={{
       user, login, loginDemo, logout,
@@ -3082,6 +3201,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       prescriptions, savePrescription, dispensePrescription,
       drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       taxMasters, saveTaxMaster, deleteTaxMaster, itemTaxMappings, saveItemTaxMapping, deleteItemTaxMapping,
+      organizations, saveOrganization, deleteOrganization,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
