@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff
 } from '../types';
 import { 
     getSupabase, 
@@ -135,6 +135,13 @@ interface DataContextType {
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   removeToast: (id: string) => void;
   
+  sponsorTariffs: SponsorTariff[];
+  saveSponsorTariff: (tariff: SponsorTariff) => Promise<void>;
+  saveSponsorTariffBatch: (tariffs: SponsorTariff[]) => Promise<void>;
+  deleteSponsorTariff: (id: string) => Promise<void>;
+  resolveNegotiatedPrice: (sponsorId: string | undefined | null, itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES', itemCodeOrId: string, className?: string) => number;
+  getBasePrice: (itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES', itemCodeOrId: string) => number;
+  
   isLoading: boolean;
   isDbConnected: boolean;
   updateDbConnection: (url: string, key: string) => void;
@@ -195,6 +202,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [storeItemMappings, setStoreItemMappings] = useState<StoreItemMapping[]>([]);
   const [openingStocks, setOpeningStocks] = useState<OpeningStock[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [sponsorTariffs, setSponsorTariffs] = useState<SponsorTariff[]>(() => {
+      const saved = localStorage.getItem('medicore_sponsor_tariffs');
+      return saved ? JSON.parse(saved) : [];
+  });
+
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
     if (!requireDb()) return;
@@ -298,8 +310,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     appointmentId: b.appointment_id, 
     date: b.date,
     status: b.status, 
-    totalAmount: b.total_amount, 
-    paidAmount: b.paid_amount,
+    totalAmount: Number(b.total_amount || 0), 
+    paidAmount: Number(b.paid_amount || 0),
+    discountAmount: Number(b.discount_amount || 0),
+    taxAmount: Number(b.tax_amount || 0),
+    roundOff: Number(b.round_off || 0),
+    paymentMode: b.payment_mode,
+    amountReceived: Number(b.amount_received || 0),
+    referenceNo: b.reference_no,
+    notes: b.notes,
+    departmentId: b.department_id,
     isPharmacy: !!(b.is_pharmacy || (b.invoice_no && (b.invoice_no.startsWith('PH-') || b.invoice_no.startsWith('INV-D-')))),
     prescriptionId: b.prescription_id,
     doctorId: b.doctor_id,
@@ -307,15 +327,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     items: items.map(i => ({ 
         id: i.id, 
         description: i.description, 
-        quantity: i.quantity, 
-        unitPrice: i.unit_price, 
-        total: i.total,
+        quantity: Number(i.quantity || 0), 
+        unitPrice: Number(i.unit_price || 0), 
+        total: Number(i.total || 0),
         itemId: i.item_id,
         batchNo: i.batch_no,
-        discountAmount: i.discount_amount,
-        taxAmount: i.tax_amount
+        discountAmount: Number(i.discount_amount || 0),
+        discountPercentage: Number(i.discount_percentage || 0),
+        taxAmount: Number(i.tax_amount || 0),
+        taxPercentage: Number(i.tax_percentage || 0),
+        itemType: i.item_type
     })),
-    payments: payments.map(p => ({ id: p.id, date: p.date, amount: p.amount, method: p.method, reference: p.reference }))
+    payments: payments.map(p => ({ id: p.id, date: p.date, amount: Number(p.amount || 0), method: p.method, reference: p.reference }))
   });
 
   const mapVitalFromDb = (v: any): VitalSign => ({
@@ -1009,8 +1032,43 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (local) orgsData = JSON.parse(local);
         }
         setOrganizations(orgsData);
+
+        // Load sponsor tariffs gracefully
+        let tariffsData = [];
+        try {
+            const { data, error } = await supabase.from('sponsor_tariffs').select('*');
+            if (data && !error) {
+                tariffsData = data.map((t: any) => ({
+                    id: t.id,
+                    sponsorId: t.sponsor_id,
+                    itemType: t.item_type,
+                    itemCode: t.item_code,
+                    itemName: t.item_name,
+                    cptCode: t.cpt_code,
+                    groupName: t.group_name,
+                    baseTariff: Number(t.base_tariff || 0),
+                    contractType: t.contract_type,
+                    tariffAmount: Number(t.tariff_amount || 0),
+                    sponsorCode: t.sponsor_code,
+                    sponsorDescription: t.sponsor_description,
+                    className: t.class_name,
+                    nphiesCode: t.nphies_code,
+                    nphiesDesc: t.nphies_desc,
+                    active: !!t.active,
+                    createdAt: t.created_at
+                }));
+            } else {
+                const local = localStorage.getItem('medicore_sponsor_tariffs');
+                if (local) tariffsData = JSON.parse(local);
+            }
+        } catch (err) {
+            const local = localStorage.getItem('medicore_sponsor_tariffs');
+            if (local) tariffsData = JSON.parse(local);
+        }
+        setSponsorTariffs(tariffsData);
         
         showToast('success', 'Data synced with database.');
+
       } catch (error: any) {
         console.error("Critical Sync Error:", error);
         let msg = 'Failed to connect to database.';
@@ -1485,9 +1543,186 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const saveSponsorTariff = async (tariff: SponsorTariff) => {
+    setSponsorTariffs(prev => {
+      const exists = prev.find(t => t.id === tariff.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(t => t.id === tariff.id ? tariff : t);
+      } else {
+        updated = [...prev, tariff];
+      }
+      localStorage.setItem('medicore_sponsor_tariffs', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbTariff = {
+          id: tariff.id,
+          sponsor_id: tariff.sponsorId,
+          item_type: tariff.itemType,
+          item_code: tariff.itemCode,
+          item_name: tariff.itemName,
+          cpt_code: tariff.cptCode || null,
+          group_name: tariff.groupName || null,
+          base_tariff: tariff.baseTariff,
+          contract_type: tariff.contractType,
+          tariff_amount: tariff.tariffAmount,
+          sponsor_code: tariff.sponsorCode || null,
+          sponsor_description: tariff.sponsorDescription || null,
+          class_name: tariff.className,
+          nphies_code: tariff.nphiesCode || null,
+          nphies_desc: tariff.nphiesDesc || null,
+          active: tariff.active
+        };
+
+        const { error } = await supabase.from('sponsor_tariffs').upsert(dbTariff);
+        if (error) throw error;
+        showToast('success', 'Sponsor tariff saved successfully to database!');
+      } catch (err: any) {
+        console.error("Database error saving sponsor tariff:", err);
+        showToast('error', `Failed to sync with database: ${err.message}`);
+      }
+    } else {
+      showToast('success', 'Sponsor tariff saved locally.');
+    }
+  };
+
+  const saveSponsorTariffBatch = async (tariffs: SponsorTariff[]) => {
+    if (tariffs.length === 0) return;
+
+    setSponsorTariffs(prev => {
+      let updated = [...prev];
+      tariffs.forEach(t => {
+        const index = updated.findIndex(existing => existing.id === t.id);
+        if (index > -1) {
+          updated[index] = t;
+        } else {
+          updated.push(t);
+        }
+      });
+      localStorage.setItem('medicore_sponsor_tariffs', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbTariffs = tariffs.map(t => ({
+          id: t.id,
+          sponsor_id: t.sponsorId,
+          item_type: t.itemType,
+          item_code: t.itemCode,
+          item_name: t.itemName,
+          cpt_code: t.cptCode || null,
+          group_name: t.groupName || null,
+          base_tariff: t.baseTariff,
+          contract_type: t.contractType,
+          tariff_amount: t.tariffAmount,
+          sponsor_code: t.sponsorCode || null,
+          sponsor_description: t.sponsorDescription || null,
+          class_name: t.className,
+          nphies_code: t.nphiesCode || null,
+          nphies_desc: t.nphiesDesc || null,
+          active: t.active
+        }));
+
+        const { error } = await supabase.from('sponsor_tariffs').upsert(dbTariffs);
+        if (error) throw error;
+        showToast('success', `${tariffs.length} sponsor tariffs saved to database!`);
+      } catch (err: any) {
+        console.error("Database error batch saving sponsor tariffs:", err);
+        showToast('error', `Failed to sync batch: ${err.message}`);
+      }
+    } else {
+      showToast('success', `${tariffs.length} sponsor tariffs saved locally.`);
+    }
+  };
+
+  const deleteSponsorTariff = async (id: string) => {
+    setSponsorTariffs(prev => {
+      const updated = prev.filter(t => t.id !== id);
+      localStorage.setItem('medicore_sponsor_tariffs', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('sponsor_tariffs').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Sponsor tariff removed from database.');
+      } catch (err: any) {
+        console.error("Database error deleting sponsor tariff:", err);
+        showToast('error', `Failed to delete from database: ${err.message}`);
+      }
+    } else {
+      showToast('info', 'Sponsor tariff removed locally.');
+    }
+  };
+
+  const getBasePrice = (
+    itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES',
+    itemCodeOrId: string
+  ): number => {
+    if (itemType === 'SERVICES') {
+      const service = serviceDefinitions.find(s => s.id === itemCodeOrId || s.code === itemCodeOrId);
+      if (service) {
+        const tariff = serviceTariffs.find(t => t.serviceId === service.id && t.status === 'Active');
+        if (tariff) return tariff.price;
+      }
+      return 0;
+    } else {
+      const item = inventoryItems.find(i => i.id === itemCodeOrId || i.itemCode === itemCodeOrId);
+      if (item && item.pricing && item.pricing.length > 0) {
+        return item.pricing[0].price;
+      }
+      return item?.stock?.itemRate || 0;
+    }
+  };
+
+  const resolveNegotiatedPrice = (
+    sponsorId: string | undefined | null,
+    itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES',
+    itemCodeOrId: string,
+    className: string = 'A+'
+  ): number => {
+    if (!sponsorId) {
+      return getBasePrice(itemType, itemCodeOrId);
+    }
+
+    const match = sponsorTariffs.find(t => 
+      t.active &&
+      t.sponsorId === sponsorId &&
+      t.itemType === itemType &&
+      (t.itemCode === itemCodeOrId || t.cptCode === itemCodeOrId) &&
+      t.className.toUpperCase() === className.toUpperCase()
+    );
+
+    if (match) {
+      return match.tariffAmount;
+    }
+
+    const matchAnyClass = sponsorTariffs.find(t => 
+      t.active &&
+      t.sponsorId === sponsorId &&
+      t.itemType === itemType &&
+      (t.itemCode === itemCodeOrId || t.cptCode === itemCodeOrId)
+    );
+
+    if (matchAnyClass) {
+      return matchAnyClass.tariffAmount;
+    }
+
+    return getBasePrice(itemType, itemCodeOrId);
+  };
+
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
       showToast(type, message);
   };
+
 
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -1940,7 +2175,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           date: bill.date,
           status: bill.status, 
           total_amount: bill.totalAmount, 
-          paid_amount: bill.paidAmount
+          paid_amount: bill.paidAmount,
+          invoice_no: bill.invoiceNo || null,
+          discount_amount: bill.discountAmount || 0,
+          tax_amount: bill.taxAmount || 0,
+          round_off: bill.roundOff || 0,
+          doctor_id: bill.doctorId || null,
+          department_id: bill.departmentId || null,
+          payment_mode: bill.paymentMode || null,
+          amount_received: bill.amountReceived || 0,
+          reference_no: bill.referenceNo || null,
+          notes: bill.notes || null,
+          created_by: bill.createdBy || 'admin',
+          is_pharmacy: bill.isPharmacy || false,
+          prescription_id: bill.prescriptionId || null
       });
 
       if (billError) { 
@@ -1952,17 +2200,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const itemsDb = bill.items.map(i => ({ 
           id: i.id, 
           bill_id: bill.id, 
+          item_id: i.itemId || null,
+          batch_no: i.batchNo || null,
           description: i.description, 
           quantity: Number(i.quantity), 
           unit_price: Number(i.unitPrice), 
-          total: Number(i.total) 
+          total: Number(i.total),
+          item_type: i.itemType || null,
+          discount_percentage: Number(i.discountPercentage || 0),
+          discount_amount: Number(i.discountAmount || 0),
+          tax_percentage: Number(i.taxPercentage || 0),
+          tax_amount: Number(i.taxAmount || 0)
       }));
       
       const { error: itemsError } = await getSupabase().from('bill_items').insert(itemsDb);
       
       if (itemsError) { 
           showToast('error', 'Failed to save bill items: ' + itemsError.message);
-          // Optional: Delete the bill if items failed? For now, keep it as it might be manually fixable or retryable logic could be added.
           return false;
       } 
 
@@ -3202,9 +3456,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       taxMasters, saveTaxMaster, deleteTaxMaster, itemTaxMappings, saveItemTaxMapping, deleteItemTaxMapping,
       organizations, saveOrganization, deleteOrganization,
+      sponsorTariffs, saveSponsorTariff, saveSponsorTariffBatch, deleteSponsorTariff, resolveNegotiatedPrice, getBasePrice,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
+
     }}>
       {children}
     </DataContext.Provider>

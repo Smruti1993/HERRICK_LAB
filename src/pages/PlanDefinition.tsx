@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useData } from '../context/DataContext';
+import { getSupabase } from '../services/supabaseClient';
 import { 
   Search, Plus, Trash2, ShieldCheck, Layers, Percent, Check, X, FileText, 
   ChevronRight, Calendar, Landmark, Settings, AlertCircle, HelpCircle, 
@@ -29,6 +30,7 @@ interface PolicyRule {
   patientCoPay: string;
   sponsorPay: string;
   active: boolean;
+  groupName?: string;
 }
 
 interface PatientMaxAmountConfig {
@@ -67,7 +69,7 @@ interface PolicyItem {
 }
 
 export const PlanDefinition: React.FC = () => {
-    const { organizations, branches, showToast } = useData();
+    const { organizations, branches, showToast, serviceDefinitions, drugGenerics, isDbConnected } = useData();
 
     // Tab management inside Create/Edit Mode
     const [subTab, setSubTab] = useState<'policy' | 'policyRule' | 'classHospitalMapping'>('policy');
@@ -140,6 +142,110 @@ export const PlanDefinition: React.FC = () => {
         ];
     });
 
+    useEffect(() => {
+        const loadPoliciesFromDb = async () => {
+            if (!isDbConnected) return;
+            const supabase = getSupabase();
+            try {
+                // Fetch insurance policies
+                const { data: ipData, error: ipError } = await supabase
+                    .from('insurance_policies')
+                    .select('*');
+                if (ipError) throw ipError;
+
+                if (!ipData || ipData.length === 0) return;
+
+                // Fetch rules
+                const { data: rulesData, error: rulesError } = await supabase
+                    .from('policy_rules')
+                    .select('*');
+                if (rulesError) throw rulesError;
+
+                // Fetch mapped branches
+                const { data: branchesData, error: branchesError } = await supabase
+                    .from('policy_mapped_branches')
+                    .select('*');
+                if (branchesError) throw branchesError;
+
+                // Fetch max amounts
+                const { data: maxAmtsData, error: maxAmtsError } = await supabase
+                    .from('policy_patient_max_amounts')
+                    .select('*');
+                if (maxAmtsError) throw maxAmtsError;
+
+                // Structure them into PolicyItem
+                const loaded: PolicyItem[] = ipData.map((p: any) => {
+                    const myRules = (rulesData || []).filter((r: any) => r.policy_id === p.id).map((r: any) => ({
+                        id: r.id,
+                        type: r.rule_type,
+                        visitType: r.visit_type,
+                        gender: r.gender || 'All',
+                        ageBracket: 'All', // Default bracket
+                        amountLimit: Number(r.amount_limit || 0),
+                        quantityLimit: Number(r.quantity_limit || 0),
+                        className: r.class_name || '',
+                        aliasCode: r.alias_code || '',
+                        aliasName: r.alias_name || '',
+                        tariffClass: r.tariff_class || 'A+',
+                        tariffValue: r.tariff_value || '',
+                        dayOfService: 'All',
+                        exclude: !!r.exclude,
+                        patientCoPay: r.patient_copay || '0',
+                        sponsorPay: r.sponsor_payment || '100',
+                        active: !!r.active,
+                        groupName: r.group_name || 'All'
+                    }));
+
+                    const myHospitals = (branchesData || []).filter((b: any) => b.policy_id === p.id).map((b: any) => ({
+                        code: b.branch_code,
+                        name: b.branch_name
+                    }));
+
+                    const myMaxConfigs = (maxAmtsData || []).filter((m: any) => m.policy_id === p.id).map((m: any) => ({
+                        id: m.id,
+                        className: m.class_name,
+                        circleName: m.circle_name || '',
+                        branch: m.branch_code || 'All',
+                        patMaxAmt: Number(m.pat_max_amt || 100),
+                        minimumAmt: Number(m.minimum_amt || 0),
+                        addOnType: 'None',
+                        approvalLimit: Number(m.approval_limit || 1500),
+                        groupName: 'SERVICE_GROUPS',
+                        visitType: m.visit_type || 'OP',
+                        active: !!m.active
+                    }));
+
+                    return {
+                        id: p.id,
+                        policyNo: p.policy_no,
+                        policyName: p.policy_name,
+                        active: !!p.active,
+                        restricted: !!p.restricted,
+                        sponsorType: p.sponsor_type,
+                        sponsorId: p.sponsor_id || '',
+                        insuranceId: p.insurance_id || '',
+                        serviceTax: p.service_tax || 'VAT 15 PERCENT',
+                        startDate: p.start_date ? p.start_date.split('.')[0] : '', // format datetime-local
+                        endDate: p.end_date ? p.end_date.split('.')[0] : '',
+                        sponsorPayTax: !!p.sponsor_pay_tax,
+                        isSponsorPrice: !!p.is_sponsor_price,
+                        patientAmt: Number(p.patient_amt || 0),
+                        isAutoCorporatePlanCreate: false,
+                        hospitals: myHospitals,
+                        rules: myRules,
+                        maxAmountConfigs: myMaxConfigs
+                    };
+                });
+
+                setPolicies(loaded);
+            } catch (err) {
+                console.error("Failed to load policies from database:", err);
+            }
+        };
+
+        loadPoliciesFromDb();
+    }, [isDbConnected]);
+
     // ----------------------------------------------------
     // TAB 1: POLICY FORM STATES
     // ----------------------------------------------------
@@ -173,9 +279,26 @@ export const PlanDefinition: React.FC = () => {
     const [ruleAmountLimit, setRuleAmountLimit] = useState<number>(0);
     const [ruleQuantityLimit, setRuleQuantityLimit] = useState<number>(0);
     const [ruleClass, setRuleClass] = useState('SERVICE_GROUPS');
+    const [ruleGroup, setRuleGroup] = useState('All');
     const [ruleNetwork, setRuleNetwork] = useState('');
     const [ruleHospital, setRuleHospital] = useState('');
     const [ruleActive, setRuleActive] = useState(true);
+
+    const serviceGroups = useMemo(() => {
+        const groups = new Set<string>();
+        serviceDefinitions?.forEach(s => {
+            if (s.groupName) groups.add(s.groupName);
+        });
+        return Array.from(groups).sort();
+    }, [serviceDefinitions]);
+
+    const drugGroups = useMemo(() => {
+        const groups = new Set<string>();
+        drugGenerics?.forEach(d => {
+            if (d.groupName) groups.add(d.groupName);
+        });
+        return Array.from(groups).sort();
+    }, [drugGenerics]);
 
     const [ruleApprovalRequired, setRuleApprovalRequired] = useState(true);
     const [ruleApprovalAmount, setRuleApprovalAmount] = useState<number>(0);
@@ -255,7 +378,8 @@ export const PlanDefinition: React.FC = () => {
             exclude: ruleExclusion,
             patientCoPay: `${rulePatientCoPay}${rulePatientCoPayIsPercent ? '%' : ' SAR'}`,
             sponsorPay: `${ruleSponsorPayment}%`,
-            active: ruleActive
+            active: ruleActive,
+            groupName: ruleGroup
         };
 
         setRulesList([...rulesList, newRule]);
@@ -311,6 +435,7 @@ export const PlanDefinition: React.FC = () => {
         setMappedHospitals([]);
         setRulesList([]);
         setMacList([]);
+        setRuleGroup('All');
         setSelectedPolicyId(null);
         setSubTab('policy');
         setIsCreateMode(true);
@@ -335,27 +460,44 @@ export const PlanDefinition: React.FC = () => {
         setMappedHospitals(policy.hospitals || []);
         setRulesList(policy.rules || []);
         setMacList(policy.maxAmountConfigs || []);
+        setRuleGroup('All');
         setSubTab('policy');
         setIsCreateMode(true);
     };
 
-    const handleDeletePolicy = (id: string) => {
+    const handleDeletePolicy = async (id: string) => {
         if (confirm('Are you sure you want to delete this policy definition?')) {
+            if (isDbConnected) {
+                const supabase = getSupabase();
+                try {
+                    const { error } = await supabase
+                        .from('insurance_policies')
+                        .delete()
+                        .eq('id', id);
+                    if (error) throw error;
+                    showToast('success', 'Policy deleted successfully from Supabase!');
+                } catch (err: any) {
+                    console.error("Failed to delete policy from database:", err);
+                    showToast('error', `Failed to delete from database: ${err.message}`);
+                }
+            }
             const filtered = policies.filter(p => p.id !== id);
             savePolicies(filtered);
             showToast('success', 'Policy deleted successfully');
         }
     };
 
-    const handleSavePolicy = (e: React.FormEvent) => {
+    const handleSavePolicy = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!policyName.trim()) {
             showToast('error', 'Policy Name is required');
             return;
         }
 
+        const policyId = selectedPolicyId || crypto.randomUUID();
+
         const policyData: PolicyItem = {
-            id: selectedPolicyId || crypto.randomUUID(),
+            id: policyId,
             policyNo,
             policyName,
             active,
@@ -374,6 +516,111 @@ export const PlanDefinition: React.FC = () => {
             rules: rulesList,
             maxAmountConfigs: macList
         };
+
+        // --- DATABASE SYNC ---
+        if (isDbConnected) {
+            const supabase = getSupabase();
+            try {
+                // 1. Upsert base Insurance Policy
+                const dbPolicy = {
+                    id: policyId,
+                    policy_no: policyNo,
+                    policy_name: policyName,
+                    active,
+                    restricted,
+                    sponsor_type: sponsorType,
+                    sponsor_id: sponsorId || null,
+                    insurance_id: insuranceId || null,
+                    service_tax: serviceTax,
+                    start_date: startDate,
+                    end_date: endDate,
+                    sponsor_pay_tax: sponsorPayTax,
+                    is_sponsor_price: isSponsorPrice,
+                    patient_amt: patientAmt
+                };
+
+                const { error: ipError } = await supabase
+                    .from('insurance_policies')
+                    .upsert(dbPolicy);
+
+                if (ipError) throw ipError;
+
+                // 2. Clear old mapping, rules, and max amounts first to ensure full sync
+                await supabase.from('policy_mapped_branches').delete().eq('policy_id', policyId);
+                await supabase.from('policy_rules').delete().eq('policy_id', policyId);
+                await supabase.from('policy_patient_max_amounts').delete().eq('policy_id', policyId);
+
+                // 3. Insert mapped branches/hospitals
+                if (mappedHospitals.length > 0) {
+                    const dbBranches = mappedHospitals.map(h => ({
+                        policy_id: policyId,
+                        branch_code: h.code,
+                        branch_name: h.name
+                    }));
+                    const { error: brError } = await supabase
+                        .from('policy_mapped_branches')
+                        .insert(dbBranches);
+                    if (brError) throw brError;
+                }
+
+                // 4. Insert rules
+                if (rulesList.length > 0) {
+                    const dbRules = rulesList.map(r => ({
+                        id: r.id.startsWith('rule-') && r.id.length < 15 ? crypto.randomUUID() : r.id, // Ensure valid UUID
+                        policy_id: policyId,
+                        rule_type: r.type,
+                        visit_type: r.visitType,
+                        gender: r.gender,
+                        class_name: r.className || 'SERVICE_GROUPS',
+                        tariff_class: r.tariffClass || 'A+',
+                        tariff_value: r.tariffValue || '',
+                        amount_limit: r.amountLimit,
+                        quantity_limit: r.quantityLimit,
+                        patient_copay: r.patientCoPay,
+                        sponsor_payment: r.sponsorPay,
+                        patient_deductible: '0',
+                        patient_deductible_type: 'Amt',
+                        alias_code: r.aliasCode || null,
+                        alias_name: r.aliasName || null,
+                        approval_required: true,
+                        exclude: !!r.exclude,
+                        active: !!r.active,
+                        group_name: r.groupName || 'All'
+                    }));
+
+                    const { error: ruError } = await supabase
+                        .from('policy_rules')
+                        .insert(dbRules);
+                    if (ruError) throw ruError;
+                }
+
+                // 5. Insert max amount configurations
+                if (macList.length > 0) {
+                    const dbMacs = macList.map(m => ({
+                        id: m.id.startsWith('mac-') && m.id.length < 15 ? crypto.randomUUID() : m.id, // Ensure valid UUID
+                        policy_id: policyId,
+                        class_name: m.className,
+                        circle_name: m.circleName || 'Corporate',
+                        branch_code: m.branch || 'All',
+                        pat_max_amt: m.patMaxAmt,
+                        minimum_amt: m.minimumAmt,
+                        approval_limit: m.approvalLimit,
+                        visit_type: m.visitType || 'OP',
+                        active: !!m.active
+                    }));
+
+                    const { error: macError } = await supabase
+                        .from('policy_patient_max_amounts')
+                        .insert(dbMacs);
+                    if (macError) throw macError;
+                }
+
+                showToast('success', 'Policy and rules saved successfully to Supabase!');
+            } catch (dbErr: any) {
+                console.error("Database Save Error:", dbErr);
+                showToast('error', `Failed to save to Database: ${dbErr.message}`);
+            }
+        }
 
         let updated: PolicyItem[];
         if (selectedPolicyId) {
@@ -699,7 +946,7 @@ export const PlanDefinition: React.FC = () => {
                                     </div>
                                     <div>
                                         <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Type <span className="text-red-500">*</span></label>
-                                        <select value={ruleType} onChange={(e) => setRuleType(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700">
+                                        <select value={ruleType} onChange={(e) => { setRuleType(e.target.value); setRuleGroup('All'); }} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700">
                                             <option value="SERVICES">SERVICES</option>
                                             <option value="DRUGS">DRUGS</option>
                                             <option value="CONSUMABLES">CONSUMABLES</option>
@@ -726,6 +973,30 @@ export const PlanDefinition: React.FC = () => {
                                         <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Class <span className="text-red-500">*</span></label>
                                         <input type="text" value={ruleClass} onChange={(e) => setRuleClass(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700" placeholder="SERVICE_GROUPS" />
                                     </div>
+
+                                    {ruleType === 'SERVICES' && (
+                                        <div>
+                                            <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1 font-semibold text-blue-600">Service Group</label>
+                                            <select value={ruleGroup} onChange={(e) => setRuleGroup(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                                                <option value="All">All Groups</option>
+                                                {serviceGroups.map(g => (
+                                                    <option key={g} value={g}>{g}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {ruleType === 'DRUGS' && (
+                                        <div>
+                                            <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1 font-semibold text-emerald-600">Drug Group</label>
+                                            <select value={ruleGroup} onChange={(e) => setRuleGroup(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                                                <option value="All">All Groups</option>
+                                                {drugGroups.map(g => (
+                                                    <option key={g} value={g}>{g}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
 
                                     <div>
                                         <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Tariff Class</label>
@@ -804,6 +1075,7 @@ export const PlanDefinition: React.FC = () => {
                                         <thead>
                                             <tr className="text-[9px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-200 bg-slate-50/50">
                                                 <th className="px-6 py-2">Type</th>
+                                                <th className="px-6 py-2">Group</th>
                                                 <th className="px-6 py-2">Visit</th>
                                                 <th className="px-6 py-2">Gender</th>
                                                 <th className="px-6 py-2">Class</th>
@@ -817,12 +1089,13 @@ export const PlanDefinition: React.FC = () => {
                                         <tbody className="divide-y divide-slate-100 text-xs text-slate-700 font-bold">
                                             {rulesList.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={9} className="px-6 py-6 text-center text-slate-400 font-medium">No policy rules added yet. Use the card above to add.</td>
+                                                    <td colSpan={10} className="px-6 py-6 text-center text-slate-400 font-medium">No policy rules added yet. Use the card above to add.</td>
                                                 </tr>
                                             ) : (
                                                 rulesList.map(r => (
                                                     <tr key={r.id} className="hover:bg-slate-50/30">
                                                         <td className="px-6 py-2.5 text-blue-600">{r.type}</td>
+                                                        <td className="px-6 py-2.5 text-slate-600">{r.groupName || 'All'}</td>
                                                         <td className="px-6 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 rounded text-[9px]">{r.visitType}</span></td>
                                                         <td className="px-6 py-2.5 text-slate-500">{r.gender}</td>
                                                         <td className="px-6 py-2.5">{r.className}</td>

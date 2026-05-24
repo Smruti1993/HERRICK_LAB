@@ -172,11 +172,13 @@ export interface BillItem {
   quantity: number;
   unitPrice: number;
   discountAmount?: number;
+  discountPercentage?: number;
   taxAmount?: number;
   taxPercentage?: number;
   total: number;
   itemId?: string;
   batchNo?: string;
+  itemType?: string;
 }
 
 export interface Payment {
@@ -198,6 +200,12 @@ export interface Bill {
   paidAmount: number;
   discountAmount?: number;
   taxAmount?: number;
+  roundOff?: number;
+  paymentMode?: string;
+  amountReceived?: number;
+  referenceNo?: string;
+  notes?: string;
+  departmentId?: string;
   items: BillItem[];
   payments: Payment[];
   isPharmacy?: boolean;
@@ -630,5 +638,88 @@ export interface Organization {
   // Class wise tariff
   branchId?: string;
   
+  createdAt?: string;
+}
+
+// --- Insurance & Policy Types ---
+
+export interface PolicyRule {
+  id: string;
+  policyId: string;
+  ruleType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES' | 'ALL';
+  visitType: 'OP' | 'IP' | 'ER' | 'All';
+  gender: string;
+  className: string;
+  tariffClass?: string;
+  tariffValue?: string;
+  amountLimit: number;
+  quantityLimit: number;
+  patientCopay: string; 
+  sponsorPayment: string; 
+  patientDeductible: string;
+  patientDeductibleType: 'Amt' | '%';
+  approvalRequired: boolean;
+  exclude: boolean;
+  active: boolean;
+  aliasCode?: string; // For "Specific Item Code" specificity
+  groupName?: string; // For "Service/Drug Group" specificity (50 points)
+}
+
+export interface InsurancePolicy {
+  id: string;
+  policyNo: string;
+  policyName: string;
+  sponsorType: string;
+  sponsorId: string;
+  insuranceId?: string;
+  startDate: string;
+  endDate: string;
+  active: boolean;
+  patientAmt: number;
+}
+
+export interface PolicyRuleContext {
+  policyId: string;
+  visitType: 'OP' | 'IP' | 'ER';
+  gender: string;
+  item: {
+    type: 'SERVICES' | 'DRUGS' | 'CONSUMABLES';
+    code: string; 
+    className: string; 
+    tariffClass?: string;
+    groupName?: string; // Add groupName for group specific evaluations
+    unitPrice: number;
+    quantity: number;
+  };
+}
+
+export interface AdjudicationResult {
+  matchedRuleId?: string;
+  originalAmount: number;
+  patientPayable: number;
+  sponsorPayable: number;
+  deductibleApplied: number;
+  isExcluded: boolean;
+  approvalRequired: boolean;
+  score: number;
+}
+
+export interface SponsorTariff {
+  id: string;
+  sponsorId: string;
+  itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES';
+  itemCode: string;
+  itemName: string;
+  cptCode?: string;
+  groupName?: string;
+  baseTariff: number;
+  contractType: string; // 'Flat' | 'Discount %' | 'Markup %'
+  tariffAmount: number;
+  sponsorCode?: string;
+  sponsorDescription?: string;
+  className: string;
+  nphiesCode?: string;
+  nphiesDesc?: string;
+  active: boolean;
   createdAt?: string;
 }

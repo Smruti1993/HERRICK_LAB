@@ -81,7 +81,19 @@ create table if not exists bills (
   status text default 'Unpaid', -- 'Unpaid', 'Paid', 'Partial', 'Cancelled'
   total_amount numeric(10,2) default 0,
   paid_amount numeric(10,2) default 0,
-  tax_amount numeric(10,2) default 0
+  tax_amount numeric(10,2) default 0,
+  invoice_no text,
+  discount_amount numeric(10,2) default 0,
+  round_off numeric(10,2) default 0,
+  doctor_id text references employees(id),
+  department_id text references departments(id),
+  payment_mode text,
+  amount_received numeric(10,2) default 0,
+  reference_no text,
+  notes text,
+  created_by text,
+  is_pharmacy boolean default false,
+  prescription_id uuid
 );
 
 -- 8. Bill Items
@@ -95,7 +107,10 @@ create table if not exists bill_items (
   unit_price numeric(10,2) default 0,
   tax_percentage numeric(5,2) default 0,
   tax_amount numeric(10,2) default 0,
-  total numeric(10,2) default 0
+  total numeric(10,2) default 0,
+  item_type text,
+  discount_percentage numeric(5,2) default 0,
+  discount_amount numeric(10,2) default 0
 );
 
 -- 9. Payments
@@ -639,9 +654,12 @@ CREATE TABLE IF NOT EXISTS policy_rules (
     sponsor_payment TEXT DEFAULT '90%',
     patient_deductible TEXT DEFAULT '0',
     patient_deductible_type TEXT DEFAULT 'Amt',
+    alias_code TEXT,
+    alias_name TEXT,
     approval_required BOOLEAN DEFAULT TRUE,
     exclude BOOLEAN DEFAULT FALSE,
     active BOOLEAN DEFAULT TRUE,
+    group_name TEXT DEFAULT 'All',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -659,3 +677,38 @@ CREATE TABLE IF NOT EXISTS policy_patient_max_amounts (
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 45. Sponsor Tariffs
+CREATE TABLE IF NOT EXISTS sponsor_tariffs (
+    id VARCHAR(100) PRIMARY KEY,
+    sponsor_id UUID REFERENCES finance_organizations(id) ON DELETE CASCADE,
+    item_type VARCHAR(50) NOT NULL CHECK (item_type IN ('SERVICES', 'DRUGS', 'CONSUMABLES')),
+    item_code VARCHAR(100) NOT NULL,
+    item_name VARCHAR(255) NOT NULL,
+    cpt_code VARCHAR(100),
+    group_name VARCHAR(100),
+    base_tariff NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    contract_type VARCHAR(50) NOT NULL CHECK (contract_type IN ('Flat', 'Discount %', 'Markup %')),
+    tariff_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    sponsor_code VARCHAR(100),
+    sponsor_description VARCHAR(255),
+    class_name VARCHAR(100) NOT NULL DEFAULT 'A+',
+    nphies_code VARCHAR(100),
+    nphies_desc VARCHAR(255),
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexing for negotiated rate lookup
+CREATE INDEX IF NOT EXISTS idx_sponsor_tariffs_lookup 
+ON sponsor_tariffs (sponsor_id, item_type, item_code, class_name);
+
+-- RLS setup for sponsor_tariffs
+ALTER TABLE sponsor_tariffs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable read access for all users" ON sponsor_tariffs
+    FOR SELECT USING (true);
+
+CREATE POLICY "Enable all write operations for all users" ON sponsor_tariffs
+    FOR ALL TO public USING (true) WITH CHECK (true);
+

@@ -5,7 +5,12 @@ import { Plus, Search, Printer, DollarSign, FileText, Trash2, X, History, Credit
 import { Bill, BillItem, Payment, ServiceDefinition } from '../types';
 
 export const Billing = () => {
-  const { bills, createBill, cancelBill, addPayment, patients, appointments, showToast, serviceDefinitions, serviceTariffs, serviceOrders, employees, departments } = useData();
+  const { 
+    bills, createBill, cancelBill, addPayment, patients, appointments, showToast, 
+    serviceDefinitions, serviceTariffs, serviceOrders, employees, departments,
+    organizations, resolveNegotiatedPrice
+  } = useData();
+
   
   // --- Tabs State ---
   const [activeTab, setActiveTab] = useState('Invoice List');
@@ -37,9 +42,24 @@ export const Billing = () => {
   const [encounterStartType, setEncounterStartType] = useState('New Visit');
   const [invoiceRemarks, setInvoiceRemarks] = useState('');
   
+  // New invoice state properties for redesigned view
+  const [invoiceNo, setInvoiceNo] = useState(() => 'INV-2026-' + Math.floor(10000 + Math.random() * 90000));
+  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDoctor, setSelectedDoctor] = useState('');
+  const [selectedDept, setSelectedDept] = useState('');
+  const [encounterNo, setEncounterNo] = useState(() => 'ENC-2026-' + Math.floor(100000 + Math.random() * 900000));
+  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [paymentMode, setPaymentMode] = useState('Cash');
+  const [amountReceived, setAmountReceived] = useState('0');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [notes, setNotes] = useState('');
+  const [patientSearch, setPatientSearch] = useState('');
+  const [showPatientList, setShowPatientList] = useState(false);
+  const [saveAsPending, setSaveAsPending] = useState(false);
+  
   // Items State
   const [billItems, setBillItems] = useState<Omit<BillItem, 'id'>[]>([
-      { description: 'Consultation Fee', quantity: 1, unitPrice: 50, total: 50 }
+      { description: 'Consultation Fee', quantity: 1, unitPrice: 30, discountPercentage: 0, discountAmount: 0, taxPercentage: 0, taxAmount: 0, total: 30, itemType: 'Service' }
   ]);
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [activeRowIndex, setActiveRowIndex] = useState<number | null>(null);
@@ -88,10 +108,25 @@ export const Billing = () => {
   });
 
   // Derived Totals
-  const patientGrossAmount = billItems.reduce((acc, item) => acc + item.total, 0);
-  const patientNetAmount = patientGrossAmount; // Minus discounts if any
-  const patientPayable = patientNetAmount;
-  const invoiceBalance = patientPayable - collectedAmount;
+  const patientGrossAmount = billItems.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitPrice || 0)), 0);
+  const calculatedDiscount = billItems.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0);
+  const calculatedTax = billItems.reduce((sum, item) => sum + Number(item.taxAmount || 0), 0);
+  const calculatedNet = patientGrossAmount - calculatedDiscount + calculatedTax;
+  
+  // Custom round-off to nearest integer:
+  const totalAmount = Math.ceil(calculatedNet);
+  const roundOff = Number((totalAmount - calculatedNet).toFixed(2));
+  
+  // Balance calculation
+  const balanceAmount = Math.max(0, totalAmount - (paymentMode === 'Credit' ? 0 : Number(amountReceived || 0)));
+  const invoiceBalance = balanceAmount;
+
+  // Sync Amount Received with Total Amount when it changes
+  React.useEffect(() => {
+      if (showCreateModal && paymentMode !== 'Credit') {
+          setAmountReceived(totalAmount.toString());
+      }
+  }, [totalAmount, paymentMode, showCreateModal]);
 
   // --- Handlers: Create Bill ---
   
@@ -99,17 +134,40 @@ export const Billing = () => {
       const newItems = [...billItems];
       const item = { ...newItems[index], [field]: value };
       
-      // Auto calc total
-      if (field === 'quantity' || field === 'unitPrice') {
-          item.total = Number(item.quantity) * Number(item.unitPrice);
-      }
+      const qty = Number(field === 'quantity' ? value : item.quantity || 0);
+      const price = Number(field === 'unitPrice' ? value : item.unitPrice || 0);
+      const discPercent = Number(field === 'discountPercentage' ? value : item.discountPercentage || 0);
+      const taxPercent = Number(field === 'taxPercentage' ? value : item.taxPercentage || 0);
+      
+      const baseSub = qty * price;
+      const discAmount = baseSub * (discPercent / 100);
+      const subAfterDisc = baseSub - discAmount;
+      const taxAmount = subAfterDisc * (taxPercent / 100);
+      const total = subAfterDisc + taxAmount;
+      
+      item.discountAmount = discAmount;
+      item.taxAmount = taxAmount;
+      item.total = Number(total.toFixed(2));
       
       newItems[index] = item;
       setBillItems(newItems);
   };
 
-  const addItem = (description: string = '', price: number = 0) => {
-      setBillItems([...billItems, { description, quantity: 1, unitPrice: price, total: price }]);
+  const addItem = (type: 'Service' | 'Lab Test' | 'Medicine' = 'Service', description: string = '', price: number = 0) => {
+      setBillItems([
+          ...billItems, 
+          { 
+              description, 
+              quantity: 1, 
+              unitPrice: price, 
+              discountPercentage: 0,
+              discountAmount: 0,
+              taxPercentage: type === 'Medicine' ? 12 : 0, 
+              taxAmount: 0,
+              total: price, 
+              itemType: type 
+          }
+      ]);
   };
 
   const removeItem = (index: number) => {
@@ -137,20 +195,35 @@ export const Billing = () => {
 
   // --- Service Search Logic ---
   const getServicePrice = (serviceId: string) => {
-      const tariff = serviceTariffs.find(t => t.serviceId === serviceId && t.status === 'Active');
-      return tariff ? tariff.price : 0;
+      const service = serviceDefinitions.find(s => s.id === serviceId);
+      const serviceCode = service ? service.code : serviceId;
+      const sponsorId = selectedCarePlan && selectedCarePlan !== 'Self Pay' ? selectedCarePlan : null;
+      return resolveNegotiatedPrice(sponsorId, 'SERVICES', serviceCode, 'A+');
   };
 
   const selectService = (index: number, service: ServiceDefinition) => {
       const price = getServicePrice(service.id);
       setBillItems(prev => {
           const newItems = [...prev];
-          const qty = newItems[index].quantity || 1;
+          const item = { ...newItems[index] };
+          
+          const qty = Number(item.quantity || 1);
+          const discPercent = Number(item.discountPercentage || 0);
+          const taxPercent = Number(item.taxPercentage || 0);
+          
+          const baseSub = qty * price;
+          const discAmount = baseSub * (discPercent / 100);
+          const subAfterDisc = baseSub - discAmount;
+          const taxAmount = subAfterDisc * (taxPercent / 100);
+          const total = subAfterDisc + taxAmount;
+          
           newItems[index] = { 
-              ...newItems[index], 
+              ...item, 
               description: service.name, 
               unitPrice: price, 
-              total: price * qty 
+              discountAmount: discAmount,
+              taxAmount: taxAmount,
+              total: Number(total.toFixed(2))
           };
           return newItems;
       });
@@ -165,38 +238,54 @@ export const Billing = () => {
 
       setIsSaving(true);
 
-      // Recalculate totals to ensure data consistency
       const processedItems = billItems.map((item, idx) => ({
-          ...item,
           id: `${Date.now()}-${idx}`,
-          quantity: Number(item.quantity),
-          unitPrice: Number(item.unitPrice),
-          total: Number(item.quantity) * Number(item.unitPrice)
+          description: item.description || 'Service Charges',
+          quantity: Number(item.quantity || 1),
+          unitPrice: Number(item.unitPrice || 0),
+          discountPercentage: Number(item.discountPercentage || 0),
+          discountAmount: Number(item.discountAmount || 0),
+          taxPercentage: Number(item.taxPercentage || 0),
+          taxAmount: Number(item.taxAmount || 0),
+          total: Number(item.total || 0),
+          itemType: item.itemType || 'Service',
+          itemId: item.itemId,
+          batchNo: item.batchNo
       }));
 
-      const totalAmount = processedItems.reduce((sum, item) => sum + item.total, 0);
-      
-      const newBill: Bill = {
+      const finalBill: Bill = {
           id: Date.now().toString(),
+          invoiceNo: invoiceNo,
           patientId: newBillPatient,
-          date: new Date().toISOString(),
-          status: 'Unpaid',
-          totalAmount,
-          paidAmount: 0,
+          appointmentId: linkedOrderIds[0] || undefined, 
+          date: new Date(invoiceDate).toISOString(),
+          status: saveAsPending ? 'Unpaid' : (paymentMode === 'Credit' ? 'Unpaid' : (Number(amountReceived) >= totalAmount ? 'Paid' : 'Partial')),
+          totalAmount: totalAmount,
+          paidAmount: paymentMode === 'Credit' ? 0 : Number(amountReceived),
+          discountAmount: calculatedDiscount,
+          taxAmount: calculatedTax,
+          roundOff: roundOff,
+          paymentMode: paymentMode,
+          amountReceived: paymentMode === 'Credit' ? 0 : Number(amountReceived),
+          referenceNo: paymentMode === 'Credit' ? '' : referenceNo,
+          notes: notes,
+          departmentId: selectedDept || undefined,
+          doctorId: selectedDoctor || undefined,
           items: processedItems,
-          payments: []
+          payments: (paymentMode === 'Credit' || saveAsPending) ? [] : [{
+              id: `${Date.now()}-pay`,
+              date: new Date().toISOString(),
+              amount: Number(amountReceived),
+              method: (paymentMode === 'UPI' || paymentMode === 'Online') ? 'Online' : (paymentMode as any),
+              reference: referenceNo
+          }]
       };
 
-      const success = await createBill(newBill, linkedOrderIds);
+      const success = await createBill(finalBill, linkedOrderIds);
       setIsSaving(false);
 
       if (success) {
-          setShowCreateModal(false);
-          // Reset
-          setNewBillPatient('');
-          setBillItems([{ description: 'Consultation Fee', quantity: 1, unitPrice: 50, total: 50 }]);
-          setInvoiceRemarks('');
-          setLinkedOrderIds([]);
+          handleCloseModal();
       }
   };
 
@@ -204,7 +293,15 @@ export const Billing = () => {
       setShowCreateModal(false);
       setLinkedOrderIds([]);
       setNewBillPatient('');
-      setBillItems([{ description: 'Consultation Fee', quantity: 1, unitPrice: 50, total: 50 }]);
+      setBillItems([{ description: 'Consultation Fee', quantity: 1, unitPrice: 30, discountPercentage: 0, discountAmount: 0, taxPercentage: 0, taxAmount: 0, total: 30, itemType: 'Service' }]);
+      setSelectedDoctor('');
+      setSelectedDept('');
+      setPaymentMode('Cash');
+      setAmountReceived('0');
+      setReferenceNo('');
+      setNotes('');
+      setPatientSearch('');
+      setSaveAsPending(false);
   };
 
   // --- Handlers: Payment ---
@@ -776,317 +873,582 @@ export const Billing = () => {
           </div>
       )}
 
-      {/* NEW COMPLEX CREATE INVOICE MODAL */}
+      {/* REDESIGNED PREMIUM NEW INVOICE MODAL */}
       {showCreateModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-[95vw] h-[90vh] flex flex-col overflow-hidden border border-slate-200">
-                  
-                  {/* 1. Header & Configuration Area */}
-                  <div className="bg-blue-600 text-white p-3 shrink-0 flex justify-between items-center shadow-md">
-                      <div className="flex items-center gap-4 flex-1">
-                          <div className="bg-white/20 p-1.5 rounded-lg">
-                              <FileText className="w-5 h-5 text-white" />
+          <div className="fixed inset-0 z-[60] flex flex-col bg-slate-50 overflow-y-auto animate-in fade-in duration-200">
+              
+              {/* TOP HEADER SECTION */}
+              <div className="bg-white border-b border-slate-200 sticky top-0 z-30 px-6 py-4 flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-3">
+                      <button 
+                        onClick={handleCloseModal}
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+                      >
+                          <ArrowLeft className="w-5 h-5" />
+                      </button>
+                      <div>
+                          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                              New Invoice
+                          </h2>
+                          <div className="flex gap-2 text-xs font-semibold text-slate-400 mt-0.5">
+                              <span>OP Billing</span> • <span>Create New Receipt</span>
                           </div>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                              <select 
-                                className="bg-blue-700 border border-blue-500 text-white text-sm rounded px-3 py-1.5 outline-none focus:ring-2 focus:ring-white/50 w-64 font-medium"
-                                value={newBillPatient}
-                                onChange={e => setNewBillPatient(e.target.value)}
-                              >
-                                  <option value="">Select Patient</option>
-                                  {patients.map(p => <option key={p.id} value={p.id}>{p.firstName} {p.lastName} ({p.phone})</option>)}
-                              </select>
-                              <div className="h-6 w-px bg-blue-500 hidden sm:block"></div>
-                              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer hover:bg-blue-700/50 px-2 py-1 rounded transition-colors">
-                                  <input 
-                                    type="checkbox" 
-                                    className="rounded border-blue-400 bg-blue-700 text-white" 
-                                    checked={ignoreSponsor}
-                                    onChange={e => setIgnoreSponsor(e.target.checked)}
-                                  />
-                                  Ignore Sponsor
-                              </label>
-                              <div className="flex items-center gap-2">
-                                  <span className="text-blue-200 text-xs font-bold uppercase">Care Plans:</span>
-                                  <select 
-                                    className="bg-blue-700 border border-blue-500 text-white text-xs rounded px-2 py-1.5 outline-none w-48"
-                                    value={selectedCarePlan}
-                                    onChange={e => setSelectedCarePlan(e.target.value)}
-                                  >
-                                      <option value="">Select Plan(s)</option>
-                                      <option value="Self Pay">Self Pay</option>
-                                      <option value="Insurance A">Insurance A</option>
-                                  </select>
+                      </div>
+                  </div>
+
+                  {/* CENTER PATIENT SEARCH BAR */}
+                  <div className="relative max-w-lg w-full mx-8">
+                      <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4.5 h-4.5" />
+                          <input 
+                              className="w-full pl-10 pr-4 py-2 bg-slate-50 hover:bg-slate-100/70 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-full text-sm outline-none transition-all shadow-inner placeholder:text-slate-400"
+                              placeholder="Search patient by name, UHID or phone..."
+                              value={patientSearch}
+                              onFocus={() => setShowPatientList(true)}
+                              onChange={e => {
+                                  setPatientSearch(e.target.value);
+                                  setShowPatientList(true);
+                              }}
+                          />
+                      </div>
+                      
+                      {showPatientList && (
+                          <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-xl z-50 max-h-64 overflow-y-auto">
+                              <div className="p-2 border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 rounded-t-xl">
+                                  Patient Results
                               </div>
+                              {patients.filter(p => 
+                                  `${p.firstName} ${p.lastName}`.toLowerCase().includes(patientSearch.toLowerCase()) ||
+                                  p.id.toLowerCase().includes(patientSearch.toLowerCase()) ||
+                                  p.phone.includes(patientSearch)
+                              ).length === 0 ? (
+                                  <div className="px-4 py-3 text-sm text-slate-400 italic">No patients found.</div>
+                              ) : (
+                                  patients.filter(p => 
+                                      `${p.firstName} ${p.lastName}`.toLowerCase().includes(patientSearch.toLowerCase()) ||
+                                      p.id.toLowerCase().includes(patientSearch.toLowerCase()) ||
+                                      p.phone.includes(patientSearch)
+                                  ).map(p => (
+                                      <div 
+                                          key={p.id}
+                                          onClick={() => {
+                                              setNewBillPatient(p.id);
+                                              setPatientSearch(`${p.firstName} ${p.lastName}`);
+                                              setShowPatientList(false);
+                                          }}
+                                          className="px-4 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0"
+                                      >
+                                          <div className="font-semibold text-slate-800">{p.firstName} {p.lastName}</div>
+                                          <div className="text-xs text-slate-500 flex justify-between mt-0.5">
+                                              <span>UHID: UHID-{p.id.slice(-6).toUpperCase()}</span>
+                                              <span>{p.phone}</span>
+                                          </div>
+                                      </div>
+                                  ))
+                              )}
+                          </div>
+                      )}
+                  </div>
+
+                  {/* RIGHT AVATAR / NOTIFICATIONS */}
+                  <div className="flex items-center gap-4">
+                      <div className="relative cursor-pointer p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                          </svg>
+                          <span className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] flex items-center justify-center font-bold">3</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                          <img 
+                            src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=100&h=100&q=80" 
+                            alt="Admin"
+                            className="w-8 h-8 rounded-full object-cover border border-slate-200" 
+                          />
+                          <div className="hidden md:block">
+                              <div className="text-xs font-bold text-slate-700">Admin</div>
+                              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">OPD Admin</div>
                           </div>
                       </div>
-                      <button onClick={handleCloseModal} className="text-blue-200 hover:text-white hover:bg-blue-700 p-1 rounded-full transition-colors">
-                          <X className="w-6 h-6" />
-                      </button>
                   </div>
+              </div>
 
-                  {/* 2. Toolbar Actions */}
-                  <div className="bg-gradient-to-b from-slate-50 to-slate-100 p-2 border-b border-slate-300 flex flex-wrap gap-2 shrink-0 shadow-inner">
-                      <button onClick={() => addItem('', 0)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all border border-blue-700">
-                          <Stethoscope className="w-3.5 h-3.5" /> Add Services
-                      </button>
-                      <button onClick={() => addItem('Package Deal', 100)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all border border-blue-700">
-                          <Package className="w-3.5 h-3.5" /> Add Packages
-                      </button>
-                      <button onClick={() => addItem()} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all border border-blue-700">
-                          <Plus className="w-3.5 h-3.5" /> Add Direct services
-                      </button>
-                      <button onClick={() => addItem('Paracetamol', 5)} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all border border-blue-700">
-                          <Pill className="w-3.5 h-3.5" /> Add Drugs
-                      </button>
+              {/* MAIN CONTENT AREA: TWO COLUMN GRID */}
+              <div className="flex-1 max-w-[1500px] w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  
+                  {/* LEFT COLUMN: Patient Info & Items Grid */}
+                  <div className="lg:col-span-2 space-y-6 flex flex-col">
                       
-                      <div className="h-6 w-px bg-slate-300 mx-1"></div>
-                      
-                      <button className="flex items-center gap-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all">
-                          Diagnosis
-                      </button>
-                      <button className="flex items-center gap-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all">
-                          Unbill Items
-                      </button>
-                      <button className="flex items-center gap-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold px-3 py-1.5 rounded shadow-sm transition-all">
-                          Cancel Items
-                      </button>
-                  </div>
-
-                  {/* 3. Filters & Grid Area */}
-                  <div className="flex-1 flex flex-col min-h-0 bg-slate-50">
-                      {/* Filter Row */}
-                      <div className="bg-white border-b border-slate-200 px-4 py-2 flex flex-wrap items-center gap-4 text-xs">
-                          <button 
-                            onClick={toggleAllSelection} 
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-bold transition-colors"
-                          >
-                              Select All
-                          </button>
+                      {/* 1. PATIENT INFORMATION CARD */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                          <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider mb-4">Patient Information</h3>
                           
-                          <div className="flex items-center gap-2 ml-auto">
-                              <span className="text-slate-500 font-bold">Encounter Type :</span>
-                              <select value={encounterType} onChange={e => setEncounterType(e.target.value)} className="border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 outline-none focus:border-blue-500">
-                                  <option>-- Select --</option>
-                                  <option value="Outpatient">Outpatient</option>
-                                  <option value="Inpatient">Inpatient</option>
-                              </select>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                              <span className="text-slate-500 font-bold">Encounter Start Type :</span>
-                              <select value={encounterStartType} onChange={e => setEncounterStartType(e.target.value)} className="border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 outline-none focus:border-blue-500">
-                                  <option>-- Select --</option>
-                                  <option value="New Visit">New Visit</option>
-                                  <option value="Follow-up">Follow-up</option>
-                              </select>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                              <span className="text-slate-500 font-bold">Encounter End Type :</span>
-                              <select className="border border-slate-300 rounded px-2 py-1 bg-white text-slate-700 outline-none focus:border-blue-500">
-                                  <option>-- Select --</option>
-                                  <option>Home</option>
-                                  <option>Admit</option>
-                              </select>
-                          </div>
-                      </div>
-
-                      {/* Items Grid */}
-                      <div className="flex-1 overflow-auto bg-white">
-                          <table className="w-full text-sm text-left border-collapse">
-                              <thead className="bg-slate-100 text-slate-600 text-xs uppercase sticky top-0 z-10 shadow-sm font-bold">
-                                  <tr>
-                                      <th className="p-3 border-r border-slate-200 w-10 text-center"><Square className="w-4 h-4 mx-auto" /></th>
-                                      <th className="p-3 border-r border-slate-200">Description</th>
-                                      <th className="p-3 border-r border-slate-200 w-24 text-center">Qty</th>
-                                      <th className="p-3 border-r border-slate-200 w-32 text-right">Unit Price</th>
-                                      <th className="p-3 border-r border-slate-200 w-32 text-right">Total</th>
-                                      <th className="p-3 w-16 text-center">Action</th>
-                                  </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                  {billItems.length === 0 ? (
-                                      <tr><td colSpan={6} className="p-12 text-center text-slate-400 italic">No items added. Use the toolbar to add services.</td></tr>
-                                  ) : (
-                                      billItems.map((item, idx) => {
-                                          // Calculate search suggestions for this specific row
-                                          const showSuggestions = activeRowIndex === idx && item.description.length > 0;
-                                          const suggestions = showSuggestions ? serviceDefinitions.filter(s => 
-                                              s.name.toLowerCase().includes(item.description.toLowerCase()) || 
-                                              s.code.toLowerCase().includes(item.description.toLowerCase())
-                                          ).slice(0, 10) : [];
-
-                                          return (
-                                          <tr key={idx} className={`hover:bg-blue-50 transition-colors group ${selectedItems.includes(idx) ? 'bg-blue-50' : ''}`}>
-                                              <td className="p-3 border-r border-slate-200 text-center">
-                                                  <button onClick={() => toggleItemSelection(idx)} className="text-slate-400 hover:text-blue-600">
-                                                      {selectedItems.includes(idx) ? <CheckSquare className="w-4 h-4 mx-auto text-blue-600" /> : <Square className="w-4 h-4 mx-auto" />}
-                                                  </button>
-                                              </td>
-                                              <td className="p-2 border-r border-slate-200 relative">
-                                                  <input 
-                                                      className="w-full bg-transparent outline-none border border-transparent focus:border-blue-300 rounded px-2 py-1 font-medium text-slate-700"
-                                                      placeholder="Item description or search service..."
-                                                      value={item.description}
-                                                      onFocus={() => setActiveRowIndex(idx)}
-                                                      onBlur={() => setTimeout(() => setActiveRowIndex(null), 200)}
-                                                      onChange={e => {
-                                                          updateItem(idx, 'description', e.target.value);
-                                                          setActiveRowIndex(idx);
-                                                      }}
-                                                  />
-                                                  {suggestions.length > 0 && (
-                                                      <div className="absolute top-full left-0 w-full bg-white border border-slate-200 shadow-xl rounded-b-md z-50 max-h-60 overflow-y-auto">
-                                                          {suggestions.map(s => (
-                                                              <div 
-                                                                  key={s.id} 
-                                                                  onClick={() => selectService(idx, s)} 
-                                                                  className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0 group/item"
-                                                              >
-                                                                  <div className="font-medium text-slate-800 group-hover/item:text-blue-700">{s.name}</div>
-                                                                  <div className="flex justify-between text-xs text-slate-500 mt-0.5">
-                                                                      <span className="font-mono bg-slate-100 px-1 rounded">{s.code}</span>
-                                                                      <span className="font-bold text-green-600">${getServicePrice(s.id).toFixed(2)}</span>
-                                                                  </div>
-                                                              </div>
-                                                          ))}
-                                                      </div>
-                                                  )}
-                                              </td>
-                                              <td className="p-2 border-r border-slate-200">
-                                                  <input 
-                                                      type="number" min="1"
-                                                      className="w-full bg-transparent outline-none border border-transparent focus:border-blue-300 rounded px-2 py-1 text-center"
-                                                      value={item.quantity}
-                                                      onChange={e => updateItem(idx, 'quantity', e.target.value)}
-                                                  />
-                                              </td>
-                                              <td className="p-2 border-r border-slate-200">
-                                                  <input 
-                                                      type="number" min="0" step="0.01"
-                                                      className="w-full bg-transparent outline-none border border-transparent focus:border-blue-300 rounded px-2 py-1 text-right font-mono"
-                                                      value={item.unitPrice}
-                                                      onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
-                                                  />
-                                              </td>
-                                              <td className="p-3 border-r border-slate-200 text-right font-bold text-slate-700 font-mono">
-                                                  {item.total.toFixed(2)}
-                                              </td>
-                                              <td className="p-3 text-center">
-                                                  <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-red-500 transition-colors">
-                                                      <Trash2 className="w-4 h-4 mx-auto" />
-                                                  </button>
-                                              </td>
-                                          </tr>
-                                      )})
-                                  )}
-                              </tbody>
-                          </table>
-                      </div>
-                  </div>
-
-                  {/* 4. Bottom Summary & Actions (The Complex Footer) */}
-                  <div className="bg-slate-50 border-t border-slate-300 shrink-0">
-                      
-                      {/* Top Part of Footer: Remarks & Patient Summary */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4">
-                          {/* Remarks */}
-                          <div className="space-y-4">
-                              <div className="text-xs font-bold text-slate-700">Cancellation Summary</div>
-                              <div className="flex gap-4 items-start">
-                                  <div className="flex-1">
-                                      <label className="text-xs font-bold text-slate-500 mb-1 block">Invoice Remarks :</label>
-                                      <textarea 
-                                          className="w-full border border-slate-300 rounded p-2 text-xs h-16 outline-none focus:border-blue-500 resize-none bg-white"
-                                          value={invoiceRemarks}
-                                          onChange={e => setInvoiceRemarks(e.target.value)}
-                                      ></textarea>
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                              {/* Left Avatar + Core Info */}
+                              <div className="md:col-span-4 flex items-center gap-4">
+                                  <div className="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center border border-slate-200 shrink-0 shadow-sm text-slate-400">
+                                      <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                      </svg>
                                   </div>
-                                  <div className="w-1/3">
-                                      <label className="text-xs font-bold text-slate-500 mb-1 block flex justify-between">
-                                          Remarks : <Plus className="w-3 h-3 text-green-600 cursor-pointer" />
-                                      </label>
-                                      <select className="w-full border border-slate-300 rounded p-1 text-xs outline-none bg-white">
-                                          <option>-- Select --</option>
+                                  <div className="min-w-0">
+                                      {newBillPatient ? (
+                                          (() => {
+                                              const p = patients.find(pat => pat.id === newBillPatient);
+                                              if (!p) return null;
+                                              const birthYear = new Date(p.dob).getFullYear();
+                                              const age = new Date().getFullYear() - birthYear;
+                                              return (
+                                                  <>
+                                                      <div className="flex items-center gap-2">
+                                                          <span className="font-extrabold text-slate-800 truncate text-base">{p.firstName} {p.lastName}</span>
+                                                          <span className="bg-green-50 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200">OPD</span>
+                                                      </div>
+                                                      <div className="text-xs text-slate-500 font-semibold space-y-0.5 mt-1 font-mono">
+                                                          <div>UHID: UHID-{p.id.slice(-6).toUpperCase()}</div>
+                                                          <div>{p.gender}, {age} Y</div>
+                                                          <div className="text-slate-400">{p.phone}</div>
+                                                      </div>
+                                                  </>
+                                              );
+                                          })()
+                                      ) : (
+                                          <div className="text-slate-400 text-sm italic font-medium">Select a patient using the top search bar to load details.</div>
+                                      )}
+                                  </div>
+                              </div>
+
+                              {/* Right Forms Fields */}
+                              <div className="md:col-span-8 grid grid-cols-2 gap-4">
+                                  <div>
+                                      <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Visit/Encounter No.</label>
+                                      <input 
+                                        type="text" 
+                                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all"
+                                        value={encounterNo}
+                                        onChange={e => setEncounterNo(e.target.value)}
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Visit Date</label>
+                                      <input 
+                                        type="date" 
+                                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all"
+                                        value={visitDate}
+                                        onChange={e => setVisitDate(e.target.value)}
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Doctor</label>
+                                      <select 
+                                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all cursor-pointer"
+                                        value={selectedDoctor}
+                                        onChange={e => setSelectedDoctor(e.target.value)}
+                                      >
+                                          <option value="">Select Doctor</option>
+                                          {employees.filter(e => e.role === 'Doctor').map(doc => (
+                                              <option key={doc.id} value={doc.id}>Dr. {doc.firstName} {doc.lastName}</option>
+                                          ))}
+                                      </select>
+                                  </div>
+                                  <div>
+                                      <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Department</label>
+                                      <select 
+                                        className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all cursor-pointer"
+                                        value={selectedDept}
+                                        onChange={e => setSelectedDept(e.target.value)}
+                                      >
+                                          <option value="">Select Department</option>
+                                          {departments.map(dept => (
+                                              <option key={dept.id} value={dept.id}>{dept.name}</option>
+                                          ))}
                                       </select>
                                   </div>
                               </div>
                           </div>
-
-                          {/* Patient Summary Box */}
-                          <div className="flex justify-end">
-                              <div className="w-80 border border-blue-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-1.5 text-white text-xs font-bold uppercase">Patient Summary</div>
-                                  <div className="p-2 space-y-1 text-xs">
-                                      <div className="flex justify-between border-b border-dashed border-slate-200 pb-1">
-                                          <span className="font-bold text-slate-700">Patient Gross Amount</span>
-                                          <span className="font-mono text-slate-800">{patientGrossAmount.toFixed(2)}</span>
-                                      </div>
-                                      <div className="flex justify-between border-b border-dashed border-slate-200 pb-1">
-                                          <span className="font-bold text-slate-700">Patient Net Amount</span>
-                                          <span className="font-mono text-slate-800">{patientNetAmount.toFixed(2)}</span>
-                                      </div>
-                                      <div className="flex justify-between pt-1">
-                                          <span className="font-extrabold text-slate-900">Patient Payable</span>
-                                          <span className="font-mono font-bold text-slate-900">{patientPayable.toFixed(2)}</span>
-                                      </div>
-                                  </div>
-                              </div>
-                          </div>
                       </div>
 
-                      {/* Payment Summary Strip (Blue Gradient) */}
-                      <div className="bg-gradient-to-b from-blue-100 to-blue-200 border-y border-blue-300 px-4 py-2 grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-2 text-xs">
-                          <div className="flex justify-between font-bold text-slate-700"><span>Deposits / Credits</span><span className="font-mono text-slate-900">{deposits.toFixed(2)}</span></div>
-                          <div className="flex justify-between font-bold text-slate-700"><span>Adjusted Amount</span><span className="font-mono text-slate-900">0.00</span></div>
-                          <div className="flex justify-between font-bold text-slate-700"><span>Collected Amount</span><span className="font-mono text-slate-900">{collectedAmount.toFixed(2)}</span></div>
-                          <div className="flex justify-between font-bold text-slate-700"><span>Deposit Balance</span><span className="font-mono text-slate-900">0.00</span></div>
-                          <div className="flex justify-between font-bold text-slate-700"><span>Invoice Balance</span><span className="font-mono text-slate-900">{invoiceBalance.toFixed(2)}</span></div>
-                          <div className="flex justify-between font-bold text-red-600"><span>Doc. Suggested Amount.</span><span className="font-mono">0.00</span></div>
-                      </div>
-
-                      {/* Action Bar */}
-                      <div className="bg-slate-100 p-3 flex flex-col md:flex-row justify-between items-center gap-4">
-                          <div className="flex items-center gap-4">
-                              <button className="bg-slate-300 hover:bg-slate-400 text-slate-800 px-4 py-1.5 rounded text-xs font-bold border border-slate-400 shadow-sm transition-colors">
-                                  Adjust Receipt
-                              </button>
-                              <span className="text-xs text-slate-500 italic">No Advance available for the Patient</span>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer">
-                                  Apply Off Duty : <input type="checkbox" className="rounded" />
-                              </label>
+                      {/* 2. ITEMS / SERVICES SELECTION CARD */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
+                          <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+                              <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Items / Services</h3>
                               
-                              <button 
-                                  onClick={handleCreateBill} 
-                                  disabled={isSaving}
-                                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-5 py-1.5 rounded text-xs font-bold shadow-md transition-colors flex items-center gap-1"
-                              >
-                                  {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} 
-                                  {isSaving ? 'Saving...' : 'Save And Approve'}
-                              </button>
-                              
-                              <button className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold shadow-md transition-colors">
-                                  Export
-                              </button>
-                              
-                              <button onClick={handleCloseModal} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold shadow-md transition-colors flex items-center gap-1">
-                                  <ArrowLeft className="w-3.5 h-3.5" /> Back
-                              </button>
-                              
-                              <div className="relative group">
-                                  <button className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-1.5 rounded text-xs font-bold shadow-md transition-colors flex items-center gap-1">
-                                      Print <MoreHorizontal className="w-3.5 h-3.5" />
+                              <div className="flex flex-wrap items-center gap-2">
+                                  <button 
+                                      onClick={() => addItem('Service', 'Consultation Fee', 30)}
+                                      className="flex items-center gap-1 bg-white hover:bg-blue-50 border border-blue-200 hover:border-blue-400 text-blue-600 text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm"
+                                  >
+                                      <Plus className="w-3.5 h-3.5" /> Add Service
+                                  </button>
+                                  <button 
+                                      onClick={() => addItem('Lab Test', 'CBC (Complete Blood Count)', 120)}
+                                      className="flex items-center gap-1 bg-white hover:bg-blue-50 border border-blue-200 hover:border-blue-400 text-blue-600 text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm"
+                                  >
+                                      <Plus className="w-3.5 h-3.5" /> Add Lab Test
+                                  </button>
+                                  <button 
+                                      onClick={() => addItem('Medicine', 'Paracetamol 650mg', 2)}
+                                      className="flex items-center gap-1 bg-white hover:bg-blue-50 border border-blue-200 hover:border-blue-400 text-blue-600 text-xs font-bold px-3 py-2 rounded-xl transition-all shadow-sm"
+                                  >
+                                      <Plus className="w-3.5 h-3.5" /> Add Medicine
+                                  </button>
+                                  <button className="p-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl transition-colors shadow-sm">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                                      </svg>
                                   </button>
                               </div>
+                          </div>
+
+                          {/* Item Grid Table */}
+                          <div className="flex-1 overflow-x-auto min-h-0">
+                              <table className="w-full text-sm text-left border-collapse">
+                                  <thead className="bg-slate-50/70 border-b border-slate-200 text-[11px] font-extrabold text-slate-400 uppercase sticky top-0 z-10">
+                                      <tr>
+                                          <th className="p-3 w-10 text-center">#</th>
+                                          <th className="p-3 w-28">Type</th>
+                                          <th className="p-3">Item / Service</th>
+                                          <th className="p-3 w-20 text-center">Qty</th>
+                                          <th className="p-3 w-28 text-right">Unit Price</th>
+                                          <th className="p-3 w-24 text-center">Discount (%)</th>
+                                          <th className="p-3 w-24 text-center">Tax (%)</th>
+                                          <th className="p-3 w-28 text-right">Amount</th>
+                                          <th className="p-3 w-12 text-center"></th>
+                                      </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                      {billItems.length === 0 ? (
+                                          <tr>
+                                              <td colSpan={9} className="p-12 text-center text-slate-400 italic">
+                                                  No items added yet. Click "+ Add" buttons to start.
+                                              </td>
+                                          </tr>
+                                      ) : (
+                                          billItems.map((item, idx) => {
+                                              const isMedicine = item.itemType === 'Medicine';
+                                              const isLab = item.itemType === 'Lab Test';
+                                              const badgeColor = isMedicine 
+                                                  ? 'bg-purple-50 text-purple-600 border-purple-100' 
+                                                  : (isLab ? 'bg-green-50 text-green-700 border-green-100' : 'bg-blue-50 text-blue-600 border-blue-100');
+
+                                              const showSuggestions = activeRowIndex === idx && item.description.length > 0;
+                                              const suggestions = showSuggestions ? serviceDefinitions.filter(s => 
+                                                  s.name.toLowerCase().includes(item.description.toLowerCase()) || 
+                                                  s.code.toLowerCase().includes(item.description.toLowerCase())
+                                              ).slice(0, 10) : [];
+
+                                              return (
+                                                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                                      <td className="p-3 text-center text-xs font-bold text-slate-400 font-mono">{idx + 1}</td>
+                                                      <td className="p-3">
+                                                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${badgeColor}`}>
+                                                              {item.itemType || 'Service'}
+                                                          </span>
+                                                      </td>
+                                                      <td className="p-2 relative">
+                                                          <input 
+                                                              type="text" 
+                                                              className="w-full bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg px-2 py-1 font-semibold text-slate-700 text-xs"
+                                                              value={item.description}
+                                                              placeholder="Type to search service..."
+                                                              onFocus={() => setActiveRowIndex(idx)}
+                                                              onBlur={() => setTimeout(() => setActiveRowIndex(null), 200)}
+                                                              onChange={e => {
+                                                                  updateItem(idx, 'description', e.target.value);
+                                                                  setActiveRowIndex(idx);
+                                                              }}
+                                                          />
+                                                          {suggestions.length > 0 && (
+                                                              <div className="absolute top-full left-0 w-full bg-white border border-slate-200 shadow-2xl rounded-xl z-50 max-h-60 overflow-y-auto mt-1">
+                                                                  {suggestions.map(s => (
+                                                                      <div 
+                                                                          key={s.id} 
+                                                                          onClick={() => selectService(idx, s)} 
+                                                                          className="px-3 py-2 text-xs hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0"
+                                                                      >
+                                                                          <div className="font-bold text-slate-800">{s.name}</div>
+                                                                          <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
+                                                                              <span className="font-mono bg-slate-100 px-1 rounded">{s.code}</span>
+                                                                              <span className="font-extrabold text-blue-600">${getServicePrice(s.id).toFixed(2)}</span>
+                                                                          </div>
+                                                                      </div>
+                                                                  ))}
+                                                              </div>
+                                                          )}
+                                                      </td>
+                                                      <td className="p-2">
+                                                          <input 
+                                                              type="number" 
+                                                              min="1" 
+                                                              className="w-full bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg px-1 py-1 text-center font-bold text-slate-700 text-xs"
+                                                              value={item.quantity}
+                                                              onChange={e => updateItem(idx, 'quantity', e.target.value)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-2">
+                                                          <div className="relative">
+                                                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">$</span>
+                                                              <input 
+                                                                  type="number" 
+                                                                  min="0" 
+                                                                  step="0.01" 
+                                                                  className="w-full pl-5 pr-1 bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg py-1 text-right font-mono font-bold text-slate-700 text-xs"
+                                                                  value={item.unitPrice}
+                                                                  onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
+                                                              />
+                                                          </div>
+                                                      </td>
+                                                      <td className="p-2">
+                                                          <input 
+                                                              type="number" 
+                                                              min="0" 
+                                                              max="100"
+                                                              className="w-full bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg px-1 py-1 text-center font-mono font-bold text-slate-700 text-xs"
+                                                              value={item.discountPercentage || 0}
+                                                              onChange={e => updateItem(idx, 'discountPercentage', e.target.value)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-2">
+                                                          <input 
+                                                              type="number" 
+                                                              min="0" 
+                                                              max="100"
+                                                              className="w-full bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg px-1 py-1 text-center font-mono font-bold text-slate-700 text-xs"
+                                                              value={item.taxPercentage || 0}
+                                                              onChange={e => updateItem(idx, 'taxPercentage', e.target.value)}
+                                                          />
+                                                      </td>
+                                                      <td className="p-3 text-right font-mono font-extrabold text-slate-800 text-xs">
+                                                          ${(item.total || 0).toFixed(2)}
+                                                      </td>
+                                                      <td className="p-3 text-center">
+                                                          <button 
+                                                            onClick={() => removeItem(idx)}
+                                                            className="text-slate-300 hover:text-red-500 p-1 hover:bg-red-50 rounded-lg transition-colors"
+                                                          >
+                                                              <Trash2 className="w-3.5 h-3.5" />
+                                                          </button>
+                                                      </td>
+                                                  </tr>
+                                              );
+                                          })
+                                      )}
+                                  </tbody>
+                              </table>
+                          </div>
+
+                          {/* Footer Table Buttons */}
+                          <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/30">
+                              <button className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 text-xs font-bold transition-colors">
+                                  <Plus className="w-4 h-4" /> Add Note
+                              </button>
+                              
+                              {billItems.length > 0 && (
+                                  <button 
+                                      onClick={() => setBillItems([])}
+                                      className="flex items-center gap-1.5 text-red-500 hover:text-red-600 text-xs font-bold transition-colors"
+                                  >
+                                      <Trash2 className="w-4 h-4" /> Clear All Items
+                                  </button>
+                              )}
                           </div>
                       </div>
                   </div>
 
+                  {/* RIGHT COLUMN: Invoice Details & Summary Card */}
+                  <div className="space-y-6">
+                      
+                      {/* 1. INVOICE DETAILS */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                          <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider mb-4">Invoice Details</h3>
+                          
+                          <div className="space-y-4">
+                              <div>
+                                  <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Invoice No.</label>
+                                  <div className="relative">
+                                      <input 
+                                        type="text" 
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none pr-8 cursor-not-allowed font-mono"
+                                        value={invoiceNo}
+                                        readOnly
+                                      />
+                                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 cursor-pointer hover:text-slate-600">
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                          </svg>
+                                      </div>
+                                  </div>
+                              </div>
+                              
+                              <div>
+                                  <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Invoice Date</label>
+                                  <input 
+                                    type="date" 
+                                    className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all cursor-pointer"
+                                    value={invoiceDate}
+                                    onChange={e => setInvoiceDate(e.target.value)}
+                                  />
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* 2. INVOICE SUMMARY */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                          <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Invoice Summary</h3>
+                          
+                          <div className="space-y-3 font-semibold text-xs text-slate-500">
+                              <div className="flex justify-between">
+                                  <span>Sub Total</span>
+                                  <span className="text-slate-700 font-mono">${patientGrossAmount.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-red-500">
+                                  <span>Discount</span>
+                                  <span className="font-mono">(${calculatedDiscount.toFixed(2)})</span>
+                              </div>
+                              <div className="flex justify-between text-slate-700">
+                                  <span>Tax</span>
+                                  <span className="font-mono">${calculatedTax.toFixed(2)}</span>
+                              </div>
+                              
+                              <hr className="border-slate-100" />
+                              
+                              <div className="flex justify-between text-slate-800 text-sm font-bold">
+                                  <span>Net Amount</span>
+                                  <span className="font-mono text-slate-900">${calculatedNet.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-[11px] text-slate-400">
+                                  <span>Round Off</span>
+                                  <span className="font-mono">${roundOff.toFixed(2)}</span>
+                              </div>
+                              
+                              <hr className="border-slate-200" />
+                              
+                              <div className="flex justify-between items-center text-blue-600 text-base font-extrabold">
+                                  <span>Total Amount</span>
+                                  <span className="font-mono font-black text-lg">${totalAmount.toFixed(2)}</span>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* 3. PAYMENT DETAILS */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+                          <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">Payment Details</h3>
+                          
+                          <div className="space-y-4">
+                              {/* Payment Mode Selection */}
+                              <div>
+                                  <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Payment Mode *</label>
+                                  <div className="grid grid-cols-3 gap-2">
+                                      {['Cash', 'Card', 'UPI', 'Insurance', 'Credit'].map(mode => (
+                                          <label 
+                                              key={mode}
+                                              className={`flex items-center justify-center gap-1.5 border rounded-xl py-2 px-1 text-xs font-bold cursor-pointer transition-all ${
+                                                  paymentMode === mode 
+                                                  ? 'bg-blue-50 border-blue-500 text-blue-600' 
+                                                  : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                              }`}
+                                          >
+                                              <input 
+                                                  type="radio" 
+                                                  name="payment_mode"
+                                                  className="hidden"
+                                                  checked={paymentMode === mode}
+                                                  onChange={() => setPaymentMode(mode)}
+                                              />
+                                              <span>{mode}</span>
+                                          </label>
+                                      ))}
+                                  </div>
+                              </div>
+
+                              {paymentMode !== 'Credit' && (
+                                  <>
+                                      <div>
+                                          <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Amount Received *</label>
+                                          <div className="relative">
+                                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">$</span>
+                                              <input 
+                                                type="number" 
+                                                className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl pl-8 pr-3 py-2 text-xs font-bold text-slate-700 outline-none transition-all font-mono"
+                                                value={amountReceived}
+                                                onChange={e => setAmountReceived(e.target.value)}
+                                              />
+                                          </div>
+                                      </div>
+                                      
+                                      <div>
+                                          <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Reference No.</label>
+                                          <input 
+                                            type="text" 
+                                            placeholder="Enter reference number (optional)"
+                                            className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400"
+                                            value={referenceNo}
+                                            onChange={e => setReferenceNo(e.target.value)}
+                                          />
+                                      </div>
+                                  </>
+                              )}
+
+                              <div>
+                                  <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Notes</label>
+                                  <textarea 
+                                    placeholder="Enter notes (optional)"
+                                    className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400 h-16 resize-none"
+                                    value={notes}
+                                    onChange={e => setNotes(e.target.value)}
+                                  />
+                              </div>
+
+                              {/* Balance Amount Strip */}
+                              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex justify-between items-center text-xs font-extrabold">
+                                  <span>Balance Amount</span>
+                                  <span className="font-mono text-sm">${balanceAmount.toFixed(2)}</span>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
               </div>
+
+              {/* FOOTER BAR (FULL WIDTH ACTION BLOCK) */}
+              <div className="bg-white border-t border-slate-200 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 sticky bottom-0 z-30 shadow-md">
+                  <label className="flex items-center gap-2.5 text-xs font-bold text-slate-600 cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                        checked={saveAsPending}
+                        onChange={e => setSaveAsPending(e.target.checked)}
+                      />
+                      <span>Save as Pending Invoice</span>
+                  </label>
+
+                  <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                      <button 
+                          onClick={handleCloseModal}
+                          className="flex-1 sm:flex-none border border-slate-200 hover:bg-slate-50 text-slate-600 px-5 py-2.5 rounded-xl text-xs font-bold transition-colors text-center"
+                      >
+                          Cancel
+                      </button>
+                      <button 
+                          onClick={handleCreateBill}
+                          disabled={isSaving || !newBillPatient}
+                          className="flex-1 sm:flex-none border border-slate-200 hover:bg-slate-50 text-slate-700 px-5 py-2.5 rounded-xl text-xs font-bold transition-colors text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                          Save Invoice
+                      </button>
+                      <button 
+                          onClick={async () => {
+                              // Perform standard create and then trigger printing!
+                              const originalSuccess = await handleCreateBill();
+                          }}
+                          disabled={isSaving || !newBillPatient}
+                          className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-100 flex items-center justify-center gap-1.5 disabled:cursor-not-allowed"
+                      >
+                          {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                          Save Invoice & Print
+                      </button>
+                  </div>
+              </div>
+
           </div>
       )}
 

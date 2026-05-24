@@ -117,7 +117,9 @@ export const NAV_ITEMS: NavItem[] = [
         path: '/finance/masters',
         subItems: [
           { label: 'Organization', path: '/finance/masters/organization' },
-          { label: 'Plan Definition', path: '/finance/masters/plan-definition' }
+          { label: 'Plan Definition', path: '/finance/masters/plan-definition' },
+          { label: 'Sponsor Tariff', path: '/finance/masters/sponsor-tariff' }
+
         ]
       }
     ]

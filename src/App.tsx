@@ -26,7 +26,9 @@ import { OPPharmacy } from './pages/OPPharmacy';
 import { DrugReturn } from './pages/DrugReturn';
 import { OrganizationMaster } from './pages/OrganizationMaster';
 import { PlanDefinition } from './pages/PlanDefinition';
+import { SponsorTariff } from './pages/SponsorTariff';
 import { Tax } from './pages/Tax';
+
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
 
@@ -99,7 +101,9 @@ const AppRoutes = () => {
               <Route index element={<Navigate to="masters/organization" replace />} />
               <Route path="masters/organization" element={<OrganizationMaster />} />
               <Route path="masters/plan-definition" element={<PlanDefinition />} />
+              <Route path="masters/sponsor-tariff" element={<SponsorTariff />} />
             </Route>
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
