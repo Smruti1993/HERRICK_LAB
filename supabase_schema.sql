@@ -712,3 +712,289 @@ CREATE POLICY "Enable read access for all users" ON sponsor_tariffs
 CREATE POLICY "Enable all write operations for all users" ON sponsor_tariffs
     FOR ALL TO public USING (true) WITH CHECK (true);
 
+-- 46. Procurement Vendors
+CREATE TABLE IF NOT EXISTS procurement_vendors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    vendor_type TEXT NOT NULL, -- e.g., 'Local', 'International', 'Importer'
+    billing_structure TEXT, -- e.g., 'Direct', 'Group', 'Consignee'
+    currency TEXT NOT NULL DEFAULT 'SAR',
+    credit_period TEXT, -- e.g., '30 Days'
+    rating TEXT, -- e.g., 'A+', 'Gold'
+    payment_term TEXT, -- e.g., 'Net 30', 'Net 60', 'Immediate'
+    supplier_sub_type TEXT, -- e.g., 'Distributor', 'Wholesaler', 'Manufacturer'
+    pan_no TEXT, -- PAN / Tax ID
+    regst_status TEXT NOT NULL, -- e.g., 'Registered', 'Unregistered', 'Suspended'
+    account_group TEXT NOT NULL, -- e.g., 'Accounts Payable', 'Trade Creditors'
+    tds_type TEXT, -- e.g., 'Standard', 'Zero Rate', 'Exempt'
+    export_license TEXT,
+    account TEXT,
+    remarks TEXT,
+    
+    -- Checkboxes
+    active BOOLEAN DEFAULT true,
+    quality_check_required BOOLEAN DEFAULT false,
+    suspended BOOLEAN DEFAULT false,
+    iso_certified BOOLEAN DEFAULT false,
+    is_vat BOOLEAN DEFAULT false,
+
+    -- Bank Details (JSON structure for expandability)
+    bank_info JSONB DEFAULT '{}'::jsonb,
+    
+    -- Registration Details
+    registration_details JSONB DEFAULT '{}'::jsonb,
+
+    -- Business & Rating Details
+    business_info JSONB DEFAULT '{}'::jsonb,
+
+    -- Contact details
+    contact_details JSONB DEFAULT '{}'::jsonb,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 47. Procurement Vendor Terms & Conditions
+CREATE TABLE IF NOT EXISTS procurement_vendor_terms (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE CASCADE,
+    term_code TEXT NOT NULL,
+    term_desc TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexing for fast lookups
+CREATE INDEX IF NOT EXISTS idx_procurement_vendors_code ON procurement_vendors(code);
+CREATE INDEX IF NOT EXISTS idx_procurement_vendor_terms_vendor ON procurement_vendor_terms(vendor_id);
+
+-- 48. Procurement Purchase Orders (Header)
+CREATE TABLE IF NOT EXISTS procurement_purchase_orders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    po_no TEXT UNIQUE NOT NULL,
+    po_type TEXT NOT NULL DEFAULT 'Direct Purchase Order',
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE RESTRICT,
+    store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    ref_doc_date DATE,
+    ref_doc_no TEXT,
+    purchase_organisation TEXT NOT NULL DEFAULT 'Pharmacy',
+    currency_code TEXT NOT NULL DEFAULT 'Saudi Riyal',
+    currency_exchange_rate NUMERIC(10, 4) DEFAULT 1.0,
+    valid_till DATE,
+    discount_amount NUMERIC(12, 2) DEFAULT 0.00,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    tax_code UUID REFERENCES tax_masters(id) ON DELETE SET NULL,
+    is_non_stock BOOLEAN DEFAULT false,
+    account_code TEXT,
+    net_amount NUMERIC(12, 2) DEFAULT 0.00,
+    
+    -- Tabs Data (JSON for flexibility)
+    address_details JSONB DEFAULT '{}'::jsonb,
+    other_details JSONB DEFAULT '{}'::jsonb,
+    imported_items TEXT,
+    
+    status TEXT DEFAULT 'Draft', -- 'Draft', 'Approved', 'Cancelled'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 49. Procurement Purchase Order Items (Line Items)
+CREATE TABLE IF NOT EXISTS procurement_purchase_order_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    po_id UUID REFERENCES procurement_purchase_orders(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    quantity NUMERIC(12, 2) NOT NULL CHECK (quantity > 0),
+    public_price NUMERIC(12, 2) DEFAULT 0.00,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    unit_cost NUMERIC(12, 2) NOT NULL,
+    is_bulk BOOLEAN DEFAULT false,
+    tax_structure TEXT, -- e.g., 'VAT 15%'
+    remarks TEXT,
+    
+    -- Source document tracking references
+    source_doc_num TEXT,
+    source_doc_date DATE,
+    source_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    pending_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    short_close_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexing for quick reference lookups
+CREATE INDEX IF NOT EXISTS idx_procurement_po_vendor ON procurement_purchase_orders(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_po_store ON procurement_purchase_orders(store_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_po_items ON procurement_purchase_order_items(po_id);
+
+-- 50. Procurement Goods Receipt Notes (GRN Header)
+CREATE TABLE IF NOT EXISTS procurement_grns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    grn_no TEXT UNIQUE NOT NULL,
+    grn_type TEXT NOT NULL, -- 'From Expiry Item Return', 'From Purchase Order', 'From Letter of Indent', 'Direct', 'From Consignment'
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE RESTRICT,
+    store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    po_id UUID REFERENCES procurement_purchase_orders(id) ON DELETE SET NULL,
+    gate_entry_date DATE NOT NULL,
+    gate_entry_no TEXT NOT NULL,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    discount_amount NUMERIC(12, 2) DEFAULT 0.00,
+    net_amount NUMERIC(12, 2) DEFAULT 0.00,
+    gross_amount NUMERIC(12, 2) DEFAULT 0.00,
+    billing_structure JSONB DEFAULT '{}'::jsonb,
+    other_details JSONB DEFAULT '{}'::jsonb,
+    status TEXT DEFAULT 'Draft', -- 'Draft', 'Submitted'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 51. Procurement GRN Items (Line Items)
+CREATE TABLE IF NOT EXISTS procurement_grn_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    grn_id UUID REFERENCES procurement_grns(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    locator TEXT,
+    batch_code TEXT NOT NULL,
+    batch_date DATE,
+    expiry_date DATE NOT NULL,
+    po_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    received_quantity NUMERIC(12, 2) NOT NULL CHECK (received_quantity >= 0),
+    accepted_quantity NUMERIC(12, 2) NOT NULL CHECK (accepted_quantity >= 0),
+    rate NUMERIC(12, 2) NOT NULL,
+    public_price NUMERIC(12, 2) DEFAULT 0.00,
+    unit_cost NUMERIC(12, 2) NOT NULL,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    discount_amount NUMERIC(12, 2) DEFAULT 0.00,
+    vat_percentage NUMERIC(5, 2) DEFAULT 15.00,
+    vat_amount NUMERIC(12, 2) DEFAULT 0.00,
+    total_amount NUMERIC(12, 2) NOT NULL,
+    remarks TEXT,
+    is_bulky BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for lightning fast lookups
+CREATE INDEX IF NOT EXISTS idx_procurement_grn_vendor ON procurement_grns(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_grn_store ON procurement_grns(store_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_grn_po ON procurement_grns(po_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_grn_items ON procurement_grn_items(grn_id);
+
+-- 52. Procurement Purchase Receipts (PRN Header)
+CREATE TABLE IF NOT EXISTS procurement_purchase_receipts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    receipt_no TEXT UNIQUE NOT NULL,
+    receipt_date DATE NOT NULL DEFAULT NOW(),
+    grn_id UUID REFERENCES procurement_grns(id) ON DELETE SET NULL,
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE RESTRICT,
+    store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    tax_profile TEXT,
+    net_amount NUMERIC(12, 2) DEFAULT 0.00,
+    address_details JSONB DEFAULT '{}'::jsonb,
+    reference_details JSONB DEFAULT '{}'::jsonb,
+    lc_details JSONB DEFAULT '{}'::jsonb,
+    other_details JSONB DEFAULT '{}'::jsonb,
+    status TEXT DEFAULT 'Draft', -- 'Draft', 'Submitted'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 53. Procurement Purchase Receipt Items (PRN Line Items)
+CREATE TABLE IF NOT EXISTS procurement_purchase_receipt_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    receipt_id UUID REFERENCES procurement_purchase_receipts(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    quantity NUMERIC(12, 2) NOT NULL CHECK (quantity >= 0),
+    remarks TEXT,
+    rate NUMERIC(12, 2) NOT NULL,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    discount_amount NUMERIC(12, 2) DEFAULT 0.00,
+    source_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    pending_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    already_converted_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    batch_details JSONB DEFAULT '{}'::jsonb, -- holds batch code, expiry, locator
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for fast relational lookups
+CREATE INDEX IF NOT EXISTS idx_procurement_prn_vendor ON procurement_purchase_receipts(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_prn_store ON procurement_purchase_receipts(store_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_prn_grn ON procurement_purchase_receipts(grn_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_prn_items ON procurement_purchase_receipt_items(receipt_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 54. Procurement Purchase Returns (Header)
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS procurement_purchase_returns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    return_no VARCHAR(50) UNIQUE NOT NULL,
+    return_date DATE NOT NULL,
+    return_type VARCHAR(50) NOT NULL CHECK (return_type IN ('From Purchase Receipt', 'From GRN', 'From Consignment')),
+    source_grn_id UUID REFERENCES procurement_grns(id) ON DELETE SET NULL,
+    source_prn_id UUID REFERENCES procurement_purchase_receipts(id) ON DELETE SET NULL,
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE RESTRICT,
+    store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    net_amount NUMERIC(14, 2) DEFAULT 0.00,
+    remarks TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Submitted')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 55. Procurement Purchase Return Items (Line Items)
+CREATE TABLE IF NOT EXISTS procurement_purchase_return_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    return_id UUID REFERENCES procurement_purchase_returns(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    quantity NUMERIC(12, 2) NOT NULL CHECK (quantity >= 0),
+    rate NUMERIC(12, 2) NOT NULL,
+    discount_percentage NUMERIC(5, 2) DEFAULT 0.00,
+    discount_amount NUMERIC(12, 2) DEFAULT 0.00,
+    source_quantity NUMERIC(12, 2) DEFAULT 0.00,
+    return_reason TEXT,
+    batch_details JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for Purchase Returns
+CREATE INDEX IF NOT EXISTS idx_procurement_return_vendor ON procurement_purchase_returns(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_return_store ON procurement_purchase_returns(store_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_return_grn ON procurement_purchase_returns(source_grn_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_return_prn ON procurement_purchase_returns(source_prn_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_return_items ON procurement_purchase_return_items(return_id);
+
+
+-- 56. Procurement Expiry Returns (Header)
+CREATE TABLE IF NOT EXISTS procurement_expiry_returns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    doc_no VARCHAR(50) UNIQUE NOT NULL,
+    doc_date DATE NOT NULL,
+    store_id UUID REFERENCES stores(id) ON DELETE RESTRICT,
+    vendor_id UUID REFERENCES procurement_vendors(id) ON DELETE RESTRICT,
+    no_of_days INTEGER NOT NULL,
+    net_amount NUMERIC(14, 2) DEFAULT 0.00,
+    purchase_organisation VARCHAR(100) NOT NULL DEFAULT 'Pharmacy',
+    remarks TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft', 'Submitted')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 57. Procurement Expiry Return Items (Line Items)
+CREATE TABLE IF NOT EXISTS procurement_expiry_return_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    return_id UUID REFERENCES procurement_expiry_returns(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES inventory_items(id) ON DELETE RESTRICT,
+    batch_code VARCHAR(100) NOT NULL,
+    expiry_date DATE NOT NULL,
+    current_stock NUMERIC(12, 2) DEFAULT 0.00,
+    quantity NUMERIC(12, 2) NOT NULL CHECK (quantity >= 0),
+    rate NUMERIC(12, 2) NOT NULL,
+    value NUMERIC(12, 2) NOT NULL,
+    remarks TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Indexes for Expiry Returns
+CREATE INDEX IF NOT EXISTS idx_procurement_expiry_vendor ON procurement_expiry_returns(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_expiry_store ON procurement_expiry_returns(store_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_expiry_items ON procurement_expiry_return_items(return_id);
+
+
+

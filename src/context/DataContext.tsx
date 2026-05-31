@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem
 } from '../types';
 import { 
     getSupabase, 
@@ -142,6 +142,31 @@ interface DataContextType {
   resolveNegotiatedPrice: (sponsorId: string | undefined | null, itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES', itemCodeOrId: string, className?: string) => number;
   getBasePrice: (itemType: 'SERVICES' | 'DRUGS' | 'CONSUMABLES', itemCodeOrId: string) => number;
   
+  vendors: Vendor[];
+  saveVendor: (vendor: Vendor) => Promise<boolean>;
+  deleteVendor: (id: string) => Promise<boolean>;
+
+  purchaseOrders: PurchaseOrder[];
+  savePurchaseOrder: (po: PurchaseOrder) => Promise<boolean>;
+  deletePurchaseOrder: (id: string) => Promise<boolean>;
+
+  grns: GRN[];
+  saveGRN: (grn: GRN) => Promise<boolean>;
+  deleteGRN: (id: string) => Promise<boolean>;
+
+  purchaseReceipts: PurchaseReceipt[];
+  savePurchaseReceipt: (receipt: PurchaseReceipt) => Promise<boolean>;
+  deletePurchaseReceipt: (id: string) => Promise<boolean>;
+
+  purchaseReturns: PurchaseReturn[];
+  savePurchaseReturn: (ret: PurchaseReturn) => Promise<boolean>;
+  deletePurchaseReturn: (id: string) => Promise<boolean>;
+
+  expiryReturns: ExpiryReturn[];
+  saveExpiryReturn: (ret: ExpiryReturn) => Promise<boolean>;
+  deleteExpiryReturn: (id: string) => Promise<boolean>;
+  fetchExpiryItems: (storeId: string, noOfDays: number) => Promise<any[]>;
+
   isLoading: boolean;
   isDbConnected: boolean;
   updateDbConnection: (url: string, key: string) => void;
@@ -206,6 +231,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const saved = localStorage.getItem('medicore_sponsor_tariffs');
       return saved ? JSON.parse(saved) : [];
   });
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [grns, setGrns] = useState<GRN[]>([]);
+  const [purchaseReceipts, setPurchaseReceipts] = useState<PurchaseReceipt[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
+  const [expiryReturns, setExpiryReturns] = useState<ExpiryReturn[]>([]);
 
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
@@ -670,6 +701,314 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     min_stock_level: i.minStockLevel
   });
 
+  const mapVendorFromDb = (v: any, terms: any[] = []): Vendor => ({
+    id: v.id,
+    code: v.code,
+    name: v.name,
+    vendorType: v.vendor_type,
+    billingStructure: v.billing_structure,
+    currency: v.currency,
+    creditPeriod: v.credit_period,
+    rating: v.rating,
+    paymentTerm: v.payment_term,
+    supplierSubType: v.supplier_sub_type,
+    panNo: v.pan_no,
+    regstStatus: v.regst_status,
+    accountGroup: v.account_group,
+    tdsType: v.tds_type,
+    exportLicense: v.export_license,
+    account: v.account,
+    remarks: v.remarks,
+    active: !!v.active,
+    qualityCheckRequired: !!v.quality_check_required,
+    suspended: !!v.suspended,
+    isoCertified: !!v.iso_certified,
+    isVat: !!v.is_vat,
+    bankInfo: v.bank_info || {},
+    registrationDetails: v.registration_details || {},
+    businessInfo: v.business_info || {},
+    contactDetails: v.contact_details || {},
+    terms: terms.map(t => ({ id: t.id, vendorId: t.vendor_id, termCode: t.term_code, termDesc: t.term_desc })),
+    createdAt: v.created_at
+  });
+
+  const mapVendorToDb = (v: Vendor) => ({
+    id: v.id,
+    code: v.code,
+    name: v.name,
+    vendor_type: v.vendorType,
+    billing_structure: v.billingStructure,
+    currency: v.currency,
+    credit_period: v.creditPeriod,
+    rating: v.rating,
+    payment_term: v.paymentTerm,
+    supplier_sub_type: v.supplierSubType,
+    pan_no: v.panNo,
+    regst_status: v.regstStatus,
+    account_group: v.accountGroup,
+    tds_type: v.tdsType,
+    export_license: v.exportLicense,
+    account: v.account,
+    remarks: v.remarks,
+    active: v.active,
+    quality_check_required: v.qualityCheckRequired,
+    suspended: v.suspended,
+    iso_certified: v.isoCertified,
+    is_vat: v.isVat,
+    bank_info: v.bankInfo || {},
+    registration_details: v.registrationDetails || {},
+    business_info: v.businessInfo || {},
+    contact_details: v.contactDetails || {}
+  });
+
+  const mapPOFromDb = (p: any, items: any[] = []): PurchaseOrder => ({
+    id: p.id,
+    poNo: p.po_no,
+    poType: p.po_type,
+    vendorId: p.vendor_id,
+    storeId: p.store_id,
+    refDocDate: p.ref_doc_date,
+    refDocNo: p.ref_doc_no,
+    purchaseOrganisation: p.purchase_organisation,
+    currencyCode: p.currency_code,
+    currencyExchangeRate: Number(p.currency_exchange_rate || 1),
+    validTill: p.valid_till,
+    discountAmount: Number(p.discount_amount || 0),
+    discountPercentage: Number(p.discount_percentage || 0),
+    taxCode: p.tax_code,
+    isNonStock: !!p.is_non_stock,
+    accountCode: p.account_code,
+    netAmount: Number(p.net_amount || 0),
+    addressDetails: p.address_details || {},
+    otherDetails: p.other_details || {},
+    importedItems: p.imported_items || '',
+    status: p.status || 'Draft',
+    items: items.map(i => ({
+      id: i.id,
+      poId: i.po_id,
+      itemId: i.item_id,
+      quantity: Number(i.quantity || 0),
+      publicPrice: Number(i.public_price || 0),
+      discountPercentage: Number(i.discount_percentage || 0),
+      unitCost: Number(i.unit_cost || 0),
+      isBulk: !!i.is_bulk,
+      taxStructure: i.tax_structure,
+      remarks: i.remarks,
+      sourceDocNum: i.source_doc_num,
+      sourceDocDate: i.source_doc_date,
+      sourceQuantity: Number(i.source_quantity || 0),
+      pendingQuantity: Number(i.pending_quantity || 0),
+      shortCloseQuantity: Number(i.short_close_quantity || 0)
+    })),
+    createdAt: p.created_at
+  });
+
+  const mapPOToDb = (p: PurchaseOrder) => ({
+    id: p.id,
+    po_no: p.poNo,
+    po_type: p.poType,
+    vendor_id: p.vendorId,
+    store_id: p.storeId,
+    ref_doc_date: p.refDocDate || null,
+    ref_doc_no: p.refDocNo || null,
+    purchase_organisation: p.purchaseOrganisation,
+    currency_code: p.currencyCode,
+    currency_exchange_rate: p.currencyExchangeRate || 1.0,
+    valid_till: p.validTill || null,
+    discount_amount: p.discountAmount || 0,
+    discount_percentage: p.discountPercentage || 0,
+    tax_code: p.taxCode || null,
+    is_non_stock: p.isNonStock,
+    account_code: p.accountCode || null,
+    net_amount: p.netAmount,
+    address_details: p.addressDetails || {},
+    other_details: p.otherDetails || {},
+    imported_items: p.importedItems || '',
+    status: p.status || 'Draft'
+  });
+
+  const mapGRNFromDb = (g: any, items: any[] = []): GRN => ({
+    id: g.id,
+    grnNo: g.grn_no,
+    grnType: g.grn_type,
+    vendorId: g.vendor_id,
+    storeId: g.store_id,
+    poId: g.po_id || undefined,
+    gateEntryDate: g.gate_entry_date,
+    gateEntryNo: g.gate_entry_no,
+    discountPercentage: Number(g.discount_percentage || 0),
+    discountAmount: Number(g.discount_amount || 0),
+    netAmount: Number(g.net_amount || 0),
+    grossAmount: Number(g.gross_amount || 0),
+    status: g.status || 'Draft',
+    items: items.map(i => ({
+      id: i.id,
+      grnId: i.grn_id,
+      itemId: i.item_id,
+      locator: i.locator,
+      batchCode: i.batch_code,
+      batchDate: i.batch_date,
+      expiryDate: i.expiry_date,
+      poQuantity: Number(i.po_quantity || 0),
+      receivedQuantity: Number(i.received_quantity || 0),
+      acceptedQuantity: Number(i.accepted_quantity || 0),
+      rate: Number(i.rate || 0),
+      publicPrice: Number(i.public_price || 0),
+      unitCost: Number(i.unit_cost || 0),
+      discountPercentage: Number(i.discount_percentage || 0),
+      discountAmount: Number(i.discount_amount || 0),
+      vatPercentage: Number(i.vat_percentage || 15),
+      vatAmount: Number(i.vat_amount || 0),
+      totalAmount: Number(i.total_amount || 0),
+      remarks: i.remarks,
+      isBulky: !!i.is_bulky
+    })),
+    createdAt: g.created_at
+  });
+
+  const mapGRNToDb = (g: GRN) => ({
+    id: g.id,
+    grn_no: g.grnNo,
+    grn_type: g.grnType,
+    vendor_id: g.vendorId,
+    store_id: g.storeId,
+    po_id: g.poId || null,
+    gate_entry_date: g.gateEntryDate,
+    gate_entry_no: g.gateEntryNo,
+    discount_percentage: g.discountPercentage || 0,
+    discount_amount: g.discountAmount || 0,
+    net_amount: g.netAmount,
+    gross_amount: g.grossAmount,
+    status: g.status || 'Draft'
+  });
+
+  const mapPRNFromDb = (p: any, items: any[] = []): PurchaseReceipt => ({
+    id: p.id,
+    receiptNo: p.receipt_no,
+    receiptDate: p.receipt_date,
+    grnId: p.grn_id || undefined,
+    vendorId: p.vendor_id,
+    storeId: p.store_id,
+    taxProfile: p.tax_profile || undefined,
+    netAmount: Number(p.net_amount || 0),
+    addressDetails: p.address_details || {},
+    referenceDetails: p.reference_details || {},
+    lcDetails: p.lc_details || {},
+    otherDetails: p.other_details || {},
+    status: p.status || 'Draft',
+    items: items.map(i => ({
+      id: i.id,
+      receiptId: i.receipt_id,
+      itemId: i.item_id,
+      quantity: Number(i.quantity || 0),
+      remarks: i.remarks || undefined,
+      rate: Number(i.rate || 0),
+      discountPercentage: Number(i.discount_percentage || 0),
+      discountAmount: Number(i.discount_amount || 0),
+      sourceQuantity: Number(i.source_quantity || 0),
+      pendingQuantity: Number(i.pending_quantity || 0),
+      alreadyConvertedQuantity: Number(i.already_converted_quantity || 0),
+      batchDetails: i.batch_details || {}
+    })),
+    createdAt: p.created_at
+  });
+
+  const mapPurchaseReturnFromDb = (r: any, items: any[] = []): PurchaseReturn => ({
+    id: r.id,
+    returnNo: r.return_no,
+    returnDate: r.return_date,
+    returnType: r.return_type,
+    sourceGrnId: r.source_grn_id || undefined,
+    sourcePrnId: r.source_prn_id || undefined,
+    vendorId: r.vendor_id,
+    storeId: r.store_id,
+    netAmount: Number(r.net_amount || 0),
+    remarks: r.remarks || undefined,
+    status: r.status || 'Draft',
+    items: items.map(i => ({
+      id: i.id,
+      returnId: i.return_id,
+      itemId: i.item_id,
+      quantity: Number(i.quantity || 0),
+      rate: Number(i.rate || 0),
+      discountPercentage: Number(i.discount_percentage || 0),
+      discountAmount: Number(i.discount_amount || 0),
+      sourceQuantity: Number(i.source_quantity || 0),
+      returnReason: i.return_reason || undefined,
+      batchDetails: i.batch_details || {}
+    })),
+    createdAt: r.created_at
+  });
+
+  const mapPurchaseReturnToDb = (r: PurchaseReturn) => ({
+    id: r.id,
+    return_no: r.returnNo,
+    return_date: r.returnDate,
+    return_type: r.returnType,
+    source_grn_id: r.sourceGrnId || null,
+    source_prn_id: r.sourcePrnId || null,
+    vendor_id: r.vendorId,
+    store_id: r.storeId,
+    net_amount: r.netAmount,
+    remarks: r.remarks || null,
+    status: r.status || 'Draft'
+  });
+
+  const mapExpiryReturnFromDb = (r: any, items: any[] = []): ExpiryReturn => ({
+    id: r.id,
+    docNo: r.doc_no,
+    docDate: r.doc_date,
+    storeId: r.store_id,
+    vendorId: r.vendor_id,
+    noOfDays: Number(r.no_of_days || 0),
+    netAmount: Number(r.net_amount || 0),
+    purchaseOrganisation: r.purchase_organisation || 'Pharmacy',
+    remarks: r.remarks || undefined,
+    status: r.status || 'Draft',
+    items: items.map(i => ({
+      id: i.id,
+      returnId: i.return_id,
+      itemId: i.item_id,
+      batchCode: i.batch_code,
+      expiryDate: i.expiry_date,
+      currentStock: Number(i.current_stock || 0),
+      quantity: Number(i.quantity || 0),
+      rate: Number(i.rate || 0),
+      value: Number(i.value || 0),
+      remarks: i.remarks || undefined
+    })),
+    createdAt: r.created_at
+  });
+
+  const mapExpiryReturnToDb = (r: ExpiryReturn) => ({
+    id: r.id,
+    doc_no: r.docNo,
+    doc_date: r.docDate,
+    store_id: r.storeId,
+    vendor_id: r.vendorId,
+    no_of_days: r.noOfDays,
+    net_amount: r.netAmount,
+    purchase_organisation: r.purchaseOrganisation,
+    remarks: r.remarks || null,
+    status: r.status || 'Draft'
+  });
+
+  const mapPRNToDb = (p: PurchaseReceipt) => ({
+    id: p.id,
+    receipt_no: p.receiptNo,
+    receipt_date: p.receiptDate,
+    grn_id: p.grnId || null,
+    vendor_id: p.vendorId,
+    store_id: p.storeId,
+    tax_profile: p.taxProfile || null,
+    net_amount: p.netAmount,
+    address_details: p.addressDetails || {},
+    reference_details: p.referenceDetails || {},
+    lc_details: p.lcDetails || {},
+    other_details: p.otherDetails || {},
+    status: p.status || 'Draft'
+  });
+
   const mapPrescriptionItemFromDb = (i: any): PrescriptionItem => ({
       id: i.id,
       prescriptionId: i.prescription_id,
@@ -821,7 +1160,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('tax_masters').select('*'),
           supabase.from('item_tax_mappings').select('*'),
           supabase.from('pharmacy_returns').select('*').order('return_date', { ascending: false }).limit(2000),
-          supabase.from('pharmacy_return_items').select('*').limit(10000)
+          supabase.from('pharmacy_return_items').select('*').limit(10000),
+          supabase.from('procurement_vendors').select('*'),
+          supabase.from('procurement_vendor_terms').select('*'),
+          supabase.from('procurement_purchase_orders').select('*'),
+          supabase.from('procurement_purchase_order_items').select('*'),
+          supabase.from('procurement_grns').select('*'),
+          supabase.from('procurement_grn_items').select('*'),
+          supabase.from('procurement_purchase_receipts').select('*'),
+          supabase.from('procurement_purchase_receipt_items').select('*'),
+          supabase.from('procurement_purchase_returns').select('*'),
+          supabase.from('procurement_purchase_return_items').select('*'),
+          supabase.from('procurement_expiry_returns').select('*'),
+          supabase.from('procurement_expiry_return_items').select('*')
         ]);
 
         const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
@@ -834,24 +1185,69 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'service_tariffs', 'service_orders', 'vital_sign_groups', 'vital_sign_parameters', 'patient_documents', 
             'dental_icd_master', 'inventory_items', 'branches', 'stores', 'store_item_mappings', 
             'inventory_opening_stocks', 'prescriptions', 'prescription_items', 'pharmacy_drug_generics', 'pharmacy_drug_master',
-            'tax_masters', 'item_tax_mappings', 'pharmacy_returns', 'pharmacy_return_items'
+            'tax_masters', 'item_tax_mappings', 'pharmacy_returns', 'pharmacy_return_items',
+            'procurement_vendors', 'procurement_vendor_terms',
+            'procurement_purchase_orders', 'procurement_purchase_order_items',
+            'procurement_grns', 'procurement_grn_items',
+            'procurement_purchase_receipts', 'procurement_purchase_receipt_items',
+            'procurement_purchase_returns', 'procurement_purchase_return_items',
+            'procurement_expiry_returns', 'procurement_expiry_return_items'
         ];
 
         const [
             pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, 
             vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, 
             vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
-            prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes
+            prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes,
+            pvRes, pvtRes, poRes, poiRes, grnRes, grniRes, prnRes, prniRes,
+            prtnRes, prtniRes, exprRes, expriRes
         ] = results;
 
         console.log(`Sync: Fetched ${bRes.data?.length || 0} raw bills from DB.`);
         console.log(`Sync complete. Results: ${results.length} tables.`);
+        let hasSyncErrors = false;
+        let failedToFetchCount = 0;
+        const missingTables: string[] = [];
+        const otherErrors: string[] = [];
+
         results.forEach((r, idx) => {
             if (r && r.error) {
                 console.error(`Sync Failure on table [${tableNames[idx]}]:`, r.error);
-                showToast('error', `Sync Error [${tableNames[idx]}]: ${r.error.message}`);
+                const msg = r.error.message || '';
+                if (msg.includes('Failed to fetch') || msg.includes('TypeError') || msg.includes('network')) {
+                    failedToFetchCount++;
+                } else if (msg.includes('does not exist') || r.error.code === 'PGRST301') {
+                    missingTables.push(tableNames[idx]);
+                } else {
+                    otherErrors.push(`[${tableNames[idx]}]: ${msg}`);
+                }
             }
         });
+
+        if (failedToFetchCount > 0) {
+            hasSyncErrors = true;
+            showToast('error', 'Database connection failed. Please check your network or credentials on the Connection page.');
+        }
+
+        if (missingTables.length > 0) {
+            hasSyncErrors = true;
+            if (missingTables.length > 3) {
+                showToast('error', `Sync Error: ${missingTables.length} tables are missing (including ${missingTables.slice(0, 3).join(', ')}). Please run the SQL schema on the Connection page.`);
+            } else {
+                missingTables.forEach(table => {
+                    showToast('error', `Sync Error: Table [${table}] does not exist. Please run the SQL schema.`);
+                });
+            }
+        }
+
+        if (otherErrors.length > 0) {
+            hasSyncErrors = true;
+            if (otherErrors.length > 3) {
+                showToast('error', `Sync Error: Multiple tables failed to sync. Check console for details.`);
+            } else {
+                otherErrors.forEach(err => showToast('error', err));
+            }
+        }
         
         if (retRes && retRes.data) console.log(`Fetched ${retRes.data.length} pharmacy returns.`);
 
@@ -1066,8 +1462,100 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (local) tariffsData = JSON.parse(local);
         }
         setSponsorTariffs(tariffsData);
+
+        // Load vendors and terms gracefully
+        let vendorsData: Vendor[] = [];
+        if (pvRes && pvRes.data) {
+            const rawVendors = pvRes.data;
+            const rawTerms = pvtRes?.data || [];
+            vendorsData = rawVendors.map((v: any) => {
+                const myTerms = rawTerms.filter((t: any) => t.vendor_id === v.id);
+                return mapVendorFromDb(v, myTerms);
+            });
+        } else {
+            const local = localStorage.getItem('medicore_vendors');
+            if (local) vendorsData = JSON.parse(local);
+        }
+        setVendors(vendorsData);
+
+        // Load purchase orders gracefully
+        let poData: PurchaseOrder[] = [];
+        if (poRes && poRes.data) {
+            const rawPOs = poRes.data;
+            const rawPOItems = poiRes?.data || [];
+            poData = rawPOs.map((p: any) => {
+                const myItems = rawPOItems.filter((i: any) => i.po_id === p.id);
+                return mapPOFromDb(p, myItems);
+            });
+        } else {
+            const local = localStorage.getItem('medicore_purchase_orders');
+            if (local) poData = JSON.parse(local);
+        }
+        setPurchaseOrders(poData);
+
+        // Load GRNs gracefully
+        let grnData: GRN[] = [];
+        if (grnRes && grnRes.data) {
+            const rawGRNs = grnRes.data;
+            const rawGRNItems = grniRes?.data || [];
+            grnData = rawGRNs.map((g: any) => {
+                const myItems = rawGRNItems.filter((i: any) => i.grn_id === g.id);
+                return mapGRNFromDb(g, myItems);
+            });
+        } else {
+            const local = localStorage.getItem('medicore_grns');
+            if (local) grnData = JSON.parse(local);
+        }
+        setGrns(grnData);
+
+        // Load Purchase Receipts gracefully
+        let prnData: PurchaseReceipt[] = [];
+        if (prnRes && prnRes.data) {
+            const rawPRNs = prnRes.data;
+            const rawPRNItems = prniRes?.data || [];
+            prnData = rawPRNs.map((p: any) => {
+                const myItems = rawPRNItems.filter((i: any) => i.receipt_id === p.id);
+                return mapPRNFromDb(p, myItems);
+            });
+        } else {
+            const local = localStorage.getItem('medicore_purchase_receipts');
+            if (local) prnData = JSON.parse(local);
+        }
+        setPurchaseReceipts(prnData);
+
+        // Load Purchase Returns gracefully
+        let returnData: PurchaseReturn[] = [];
+        if (prtnRes && prtnRes.data) {
+            const rawReturns = prtnRes.data;
+            const rawReturnItems = prtniRes?.data || [];
+            returnData = rawReturns.map((r: any) => {
+                const myItems = rawReturnItems.filter((i: any) => i.return_id === r.id);
+                return mapPurchaseReturnFromDb(r, myItems);
+            });
+        } else {
+            const local_returns = localStorage.getItem('medicore_purchase_returns');
+            if (local_returns) returnData = JSON.parse(local_returns);
+        }
+        setPurchaseReturns(returnData);
+
+        // Load Expiry Returns gracefully
+        let expData: ExpiryReturn[] = [];
+        if (exprRes && exprRes.data) {
+            const rawReturns = exprRes.data;
+            const rawReturnItems = expriRes?.data || [];
+            expData = rawReturns.map((r: any) => {
+                const myItems = rawReturnItems.filter((i: any) => i.return_id === r.id);
+                return mapExpiryReturnFromDb(r, myItems);
+            });
+        } else {
+            const local_exp = localStorage.getItem('medicore_expiry_returns');
+            if (local_exp) expData = JSON.parse(local_exp);
+        }
+        setExpiryReturns(expData);
         
-        showToast('success', 'Data synced with database.');
+        if (!hasSyncErrors) {
+            showToast('success', 'Data synced with database.');
+        }
 
       } catch (error: any) {
         console.error("Critical Sync Error:", error);
@@ -1379,6 +1867,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         batchDateMap.set(b, i.batch_start_date);
       });
 
+      // 1b. Get MRP (public_price) and Batch Date from GRN items
+      const { data: grnData } = await getSupabase()
+        .from('procurement_grn_items')
+        .select('batch_code, public_price, rate, batch_date, expiry_date')
+        .eq('item_id', itemId);
+
+      grnData?.forEach(i => {
+        const b = (i.batch_code || '').trim().toUpperCase();
+        if (b) {
+          mrpMap.set(b, Number(i.public_price || 0));
+          rateMap.set(b, Number(i.rate || 0));
+          if (i.expiry_date) expiryMap.set(b, i.expiry_date);
+          if (i.batch_date) batchDateMap.set(b, i.batch_date);
+        }
+      });
+
       // 2. Aggregate current stock from ledger
       const { data: ledgerData } = await getSupabase()
         .from('inventory_stock_ledger')
@@ -1532,6 +2036,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
       if (ledgerError) throw ledgerError;
 
+      // Trigger automatic PO checks if item stock reaches reserve quantity level
+      for (const i of sale.items) {
+        const itemKey = `${sale.storeId}-${i.itemId}`;
+        const val = localBalances.get(itemKey);
+        if (val) {
+          await checkAndAutoRaisePO(sale.storeId, i.itemId, val.quantity);
+        }
+      }
+
       showToast('success', 'Pharmacy Sale completed successfully.');
       setRefreshTrigger(prev => prev + 1);
       return true;
@@ -1660,6 +2173,512 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } else {
       showToast('info', 'Sponsor tariff removed locally.');
+    }
+  };
+
+  const saveVendor = async (vendor: Vendor): Promise<boolean> => {
+    // Optimistic local state update
+    setVendors(prev => {
+      const exists = prev.find(v => v.id === vendor.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(v => v.id === vendor.id ? vendor : v);
+      } else {
+        updated = [...prev, vendor];
+      }
+      localStorage.setItem('medicore_vendors', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbVendor = mapVendorToDb(vendor);
+        const { error } = await supabase.from('procurement_vendors').upsert(dbVendor);
+        if (error) throw error;
+
+        // Save Terms
+        if (vendor.terms) {
+          // Delete old terms for this vendor
+          await supabase.from('procurement_vendor_terms').delete().eq('vendor_id', vendor.id);
+          
+          if (vendor.terms.length > 0) {
+            const dbTerms = vendor.terms.map(t => ({
+              vendor_id: vendor.id,
+              term_code: t.termCode,
+              term_desc: t.termDesc
+            }));
+            const { error: termsError } = await supabase.from('procurement_vendor_terms').insert(dbTerms);
+            if (termsError) throw termsError;
+          }
+        }
+
+        showToast('success', 'Vendor saved successfully to database!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error saving vendor:", err);
+        showToast('error', `Failed to sync vendor to database: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', 'Vendor saved locally.');
+      return true;
+    }
+  };
+
+  const deleteVendor = async (id: string): Promise<boolean> => {
+    setVendors(prev => {
+      const updated = prev.filter(v => v.id !== id);
+      localStorage.setItem('medicore_vendors', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_vendors').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Vendor removed from database.');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error deleting vendor:", err);
+        showToast('error', `Failed to delete vendor from database: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'Vendor removed locally.');
+      return true;
+    }
+  };
+
+  const savePurchaseOrder = async (po: PurchaseOrder): Promise<boolean> => {
+    // Optimistic local state update
+    setPurchaseOrders(prev => {
+      const exists = prev.find(p => p.id === po.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(p => p.id === po.id ? po : p);
+      } else {
+        updated = [po, ...prev];
+      }
+      localStorage.setItem('medicore_purchase_orders', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbPO = mapPOToDb(po);
+        const { error } = await supabase.from('procurement_purchase_orders').upsert(dbPO);
+        if (error) throw error;
+
+        // Save Items
+        if (po.items) {
+          // Delete old items for this PO
+          await supabase.from('procurement_purchase_order_items').delete().eq('po_id', po.id);
+          
+          if (po.items.length > 0) {
+            const dbItems = po.items.map(i => ({
+              id: i.id || crypto.randomUUID(),
+              po_id: po.id,
+              item_id: i.itemId,
+              quantity: i.quantity,
+              public_price: i.publicPrice || 0,
+              discount_percentage: i.discountPercentage || 0,
+              unit_cost: i.unitCost,
+              is_bulk: i.isBulk,
+              tax_structure: i.taxStructure || null,
+              remarks: i.remarks || null,
+              source_doc_num: i.sourceDocNum || null,
+              source_doc_date: i.sourceDocDate || null,
+              source_quantity: i.sourceQuantity || 0,
+              pending_quantity: i.pendingQuantity || 0,
+              short_close_quantity: i.shortCloseQuantity || 0
+            }));
+            const { error: itemsError } = await supabase.from('procurement_purchase_order_items').insert(dbItems);
+            if (itemsError) throw itemsError;
+          }
+        }
+
+        showToast('success', 'Purchase Order saved successfully to database!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error saving purchase order:", err);
+        showToast('error', `Failed to sync purchase order: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', 'Purchase Order saved locally.');
+      return true;
+    }
+  };
+
+  const deletePurchaseOrder = async (id: string): Promise<boolean> => {
+    setPurchaseOrders(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      localStorage.setItem('medicore_purchase_orders', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_purchase_orders').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Purchase Order removed from database.');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error deleting PO:", err);
+        showToast('error', `Failed to delete purchase order: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'Purchase Order removed locally.');
+      return true;
+    }
+  };
+
+  const saveGRN = async (grn: GRN): Promise<boolean> => {
+    // Check if already submitted in state to prevent double stock posting
+    const isAlreadySubmitted = grns.find(g => g.id === grn.id)?.status === 'Submitted';
+
+    // Optimistic local state update
+    setGrns(prev => {
+      const exists = prev.find(g => g.id === grn.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(g => g.id === grn.id ? grn : g);
+      } else {
+        updated = [grn, ...prev];
+      }
+      localStorage.setItem('medicore_grns', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbGRN = mapGRNToDb(grn);
+        const { error } = await supabase.from('procurement_grns').upsert(dbGRN);
+        if (error) throw error;
+
+        // Save Items
+        if (grn.items) {
+          // Delete old items for this GRN
+          await supabase.from('procurement_grn_items').delete().eq('grn_id', grn.id);
+          
+          if (grn.items.length > 0) {
+            const dbItems = grn.items.map(i => ({
+              id: i.id || crypto.randomUUID(),
+              grn_id: grn.id,
+              item_id: i.itemId,
+              locator: i.locator || null,
+              batch_code: i.batchCode,
+              batch_date: i.batchDate || null,
+              expiry_date: i.expiryDate,
+              po_quantity: i.poQuantity || 0,
+              received_quantity: i.receivedQuantity,
+              accepted_quantity: i.acceptedQuantity,
+              rate: i.rate,
+              public_price: i.publicPrice || 0,
+              unit_cost: i.unitCost,
+              discount_percentage: i.discountPercentage || 0,
+              discount_amount: i.discountAmount || 0,
+              vat_percentage: i.vatPercentage || 15,
+              vat_amount: i.vatAmount || 0,
+              total_amount: i.totalAmount,
+              remarks: i.remarks || null,
+              is_bulky: !!i.isBulky
+            }));
+            const { error: itemsError } = await supabase.from('procurement_grn_items').insert(dbItems);
+            if (itemsError) throw itemsError;
+          }
+        }
+
+        // Post stock ledger entries if submitted and not already submitted
+        if (grn.status === 'Submitted' && !isAlreadySubmitted) {
+          for (const i of grn.items || []) {
+            const cleanBatch = (i.batchCode || '').trim().toUpperCase();
+            
+            // Get current store-wide item balance and rate for WAC
+            const { quantity: prevQty, rate: prevRate } = await getItemValuation(grn.storeId, i.itemId);
+            
+            const qtyIn = Number(i.acceptedQuantity || 0);
+            const inRate = Number(i.rate || 0);
+            const newBalance = prevQty + qtyIn;
+
+            // Calculate WAC (Weighted Average Cost)
+            const prevValue = prevQty * prevRate;
+            const newValue = qtyIn * inRate;
+            const newAverageRate = newBalance > 0 ? (prevValue + newValue) / newBalance : inRate;
+            const finalRate = Number(newAverageRate.toFixed(2));
+
+            const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert({
+              store_id: grn.storeId,
+              item_id: i.itemId,
+              transaction_type: 'STOCKIN',
+              ref_type: 'GRN RECEIPT',
+              ref_doc_no: grn.grnNo,
+              ref_doc_date: grn.gateEntryDate,
+              stock_in_quantity: qtyIn,
+              stock_out_quantity: 0,
+              closing_stock: newBalance,
+              closing_stock_rate: finalRate,
+              closing_stock_value: newBalance * finalRate,
+              currency: 'SAR',
+              batch_no: cleanBatch,
+              batch_date: i.batchDate || null,
+              expiry_date: i.expiryDate
+            });
+            if (ledgerError) {
+              console.error("Error writing to ledger for GRN item:", ledgerError);
+            }
+          }
+        }
+
+        showToast('success', 'GRN saved successfully to database!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error saving GRN:", err);
+        showToast('error', `Failed to sync GRN: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', 'GRN saved locally.');
+      return true;
+    }
+  };
+
+  const deleteGRN = async (id: string): Promise<boolean> => {
+    setGrns(prev => {
+      const updated = prev.filter(g => g.id !== id);
+      localStorage.setItem('medicore_grns', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_grns').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'GRN removed from database.');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error deleting GRN:", err);
+        showToast('error', `Failed to delete GRN: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'GRN removed locally.');
+      return true;
+    }
+  };
+
+  const savePurchaseReceipt = async (receipt: PurchaseReceipt): Promise<boolean> => {
+    // Optimistic local state update
+    setPurchaseReceipts(prev => {
+      const exists = prev.find(p => p.id === receipt.id);
+      let updated;
+      if (exists) {
+        updated = prev.map(p => p.id === receipt.id ? receipt : p);
+      } else {
+        updated = [receipt, ...prev];
+      }
+      localStorage.setItem('medicore_purchase_receipts', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbPRN = mapPRNToDb(receipt);
+        const { error } = await supabase.from('procurement_purchase_receipts').upsert(dbPRN);
+        if (error) throw error;
+
+        // Save Items
+        if (receipt.items) {
+          // Delete old items
+          await supabase.from('procurement_purchase_receipt_items').delete().eq('receipt_id', receipt.id);
+          
+          if (receipt.items.length > 0) {
+            const dbItems = receipt.items.map(i => ({
+              id: i.id || crypto.randomUUID(),
+              receipt_id: receipt.id,
+              item_id: i.itemId,
+              quantity: i.quantity,
+              remarks: i.remarks || null,
+              rate: i.rate,
+              discount_percentage: i.discountPercentage || 0,
+              discount_amount: i.discountAmount || 0,
+              source_quantity: i.sourceQuantity || 0,
+              pending_quantity: i.pendingQuantity || 0,
+              already_converted_quantity: i.alreadyConvertedQuantity || 0,
+              batch_details: i.batchDetails || {}
+            }));
+            const { error: itemsError } = await supabase.from('procurement_purchase_receipt_items').insert(dbItems);
+            if (itemsError) throw itemsError;
+          }
+        }
+
+        showToast('success', 'Purchase Receipt saved successfully to database!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error saving Purchase Receipt:", err);
+        showToast('error', `Failed to sync Purchase Receipt: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', 'Purchase Receipt saved locally.');
+      return true;
+    }
+  };
+
+  const deletePurchaseReceipt = async (id: string): Promise<boolean> => {
+    setPurchaseReceipts(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      localStorage.setItem('medicore_purchase_receipts', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_purchase_receipts').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Purchase Receipt removed from database.');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error("Database error deleting Purchase Receipt:", err);
+        showToast('error', `Failed to delete Purchase Receipt: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'Purchase Receipt removed locally.');
+      return true;
+    }
+  };
+
+  const savePurchaseReturn = async (ret: PurchaseReturn): Promise<boolean> => {
+    // Guard: prevent double stock posting
+    const isAlreadySubmitted = purchaseReturns.find(r => r.id === ret.id)?.status === 'Submitted';
+
+    setPurchaseReturns(prev => {
+      const exists = prev.find(r => r.id === ret.id);
+      const updated = exists
+        ? prev.map(r => r.id === ret.id ? ret : r)
+        : [ret, ...prev];
+      localStorage.setItem('medicore_purchase_returns', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbRet = mapPurchaseReturnToDb(ret);
+        const { error } = await supabase.from('procurement_purchase_returns').upsert(dbRet);
+        if (error) throw error;
+
+        if (ret.items) {
+          await supabase.from('procurement_purchase_return_items').delete().eq('return_id', ret.id);
+          if (ret.items.length > 0) {
+            const dbItems = ret.items.map(i => ({
+              id: i.id || crypto.randomUUID(),
+              return_id: ret.id,
+              item_id: i.itemId,
+              quantity: i.quantity,
+              rate: i.rate,
+              discount_percentage: i.discountPercentage || 0,
+              discount_amount: i.discountAmount || 0,
+              source_quantity: i.sourceQuantity || 0,
+              return_reason: i.returnReason || null,
+              batch_details: i.batchDetails || {}
+            }));
+            const { error: ie } = await supabase.from('procurement_purchase_return_items').insert(dbItems);
+            if (ie) throw ie;
+          }
+        }
+
+        // Post STOCKOUT entries to stock ledger (only on first submission)
+        if (ret.status === 'Submitted' && !isAlreadySubmitted) {
+          for (const i of ret.items || []) {
+            const qtyOut = Number(i.quantity || 0);
+            if (qtyOut <= 0) continue;
+
+            // Get current closing stock and WAC rate
+            const { quantity: prevQty, rate: prevRate } = await getItemValuation(ret.storeId, i.itemId);
+            const newBalance = Math.max(0, prevQty - qtyOut);
+
+            const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert({
+              store_id: ret.storeId,
+              item_id: i.itemId,
+              transaction_type: 'STOCKOUT',
+              ref_type: 'PURCHASE RETURN',
+              ref_doc_no: ret.returnNo,
+              ref_doc_date: ret.returnDate,
+              stock_in_quantity: 0,
+              stock_out_quantity: qtyOut,
+              closing_stock: newBalance,
+              closing_stock_rate: prevRate,
+              closing_stock_value: newBalance * prevRate,
+              currency: 'SAR',
+              batch_no: (i.batchDetails?.batchCode || '').trim().toUpperCase() || null,
+              batch_date: null,
+              expiry_date: i.batchDetails?.expiryDate || null
+            });
+            if (ledgerError) {
+              console.error('STOCKOUT ledger error for Purchase Return item:', ledgerError);
+            } else {
+              await checkAndAutoRaisePO(ret.storeId, i.itemId, newBalance);
+            }
+          }
+        }
+
+        showToast('success', ret.status === 'Submitted'
+          ? 'Purchase Return submitted! STOCKOUT entries posted to stock ledger.'
+          : 'Purchase Return saved to database!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error('DB error saving Purchase Return:', err);
+        showToast('error', `Failed to sync Purchase Return: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', ret.status === 'Submitted'
+        ? 'Purchase Return submitted locally. Ledger will sync when DB is connected.'
+        : 'Purchase Return saved locally.');
+      return true;
+    }
+  };
+
+  const deletePurchaseReturn = async (id: string): Promise<boolean> => {
+    setPurchaseReturns(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      localStorage.setItem('medicore_purchase_returns', JSON.stringify(updated));
+      return updated;
+    });
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_purchase_returns').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Purchase Return removed from database.');
+        return true;
+      } catch (err: any) {
+        showToast('error', `Failed to delete Purchase Return: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'Purchase Return removed locally.');
+      return true;
     }
   };
 
@@ -2518,6 +3537,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
               if (ledgerError) throw ledgerError;
               
+              // Check low stock triggers
+              for (const entry of ledgerEntries) {
+                await checkAndAutoRaisePO(entry.store_id, entry.item_id, entry.closing_stock);
+              }
+              
               // Calculate total dispensed amount for this transaction (including tax)
               let transactionTotal = 0;
               let transactionTax = 0;
@@ -2803,6 +3827,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (pricingError) {
             showToast('error', `Item saved, but pricing methods failed: ${pricingError.message}`);
         }
+    }
+
+    // Evaluate if any store's current stock level is already <= the newly set reserved quantity
+    if (item.stock && Number(item.stock.reservedQty || 0) > 0) {
+      const rq = Number(item.stock.reservedQty);
+      for (const st of stores) {
+        const val = await getItemValuation(st.id, item.id);
+        if (val.quantity <= rq) {
+          await checkAndAutoRaisePO(st.id, item.id, val.quantity, item);
+        }
+      }
     }
 
     showToast('success', `Inventory item ${item.itemName} saved.`);
@@ -3429,6 +4464,332 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const checkAndAutoRaisePO = async (storeId: string, itemId: string, newBalance: number, forcedItem?: InventoryItem) => {
+    if (!requireDb()) return;
+    try {
+      const supabase = getSupabase();
+      
+      // 1. Fetch item (from forcedItem or state)
+      const item = forcedItem || inventoryItems.find(i => i.id === itemId);
+      if (!item || !item.stock) return;
+      
+      const reservedQty = Number(item.stock.reservedQty || 0);
+      if (reservedQty <= 0) return; // Trigger is only active if reservedQty is set (> 0)
+      
+      // 2. Check if new balance has reached or is below reserved quantity level
+      if (newBalance > reservedQty) return; 
+      
+      // 3. Prevent duplicate PO generation: check if there's already a Draft PO with this item for this store
+      const draftPOExists = purchaseOrders.some(po => 
+        po.storeId === storeId && 
+        po.status === 'Draft' && 
+        po.items?.some(pi => pi.itemId === itemId)
+      );
+      if (draftPOExists) {
+        console.log(`[Auto-PO Trigger] Draft PO already exists for item "${item.itemName}" in store "${storeId}". Skipping creation.`);
+        return;
+      }
+      
+      // 4. Find the last vendor this item was received from
+      // We query procurement_grn_items and join procurement_grns
+      const { data: grnItemData, error: grnError } = await supabase
+        .from('procurement_grn_items')
+        .select(`
+          grn_id,
+          procurement_grns!inner (
+            id,
+            vendor_id,
+            status
+          )
+        `)
+        .eq('item_id', itemId)
+        .eq('procurement_grns.status', 'Submitted')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      let vendorId = '';
+      if (!grnError && grnItemData && grnItemData.length > 0) {
+        const grnRow = grnItemData[0].procurement_grns as any;
+        if (grnRow) {
+          vendorId = grnRow.vendor_id;
+        }
+      }
+      
+      // Fallback: If no GRN exists, use the first vendor from the list
+      if (!vendorId && vendors.length > 0) {
+        vendorId = vendors[0].id;
+      }
+      
+      if (!vendorId) {
+        console.warn(`[Auto-PO Trigger] Could not resolve a vendor for auto PO for item "${item.itemName}".`);
+        return;
+      }
+      
+      // 5. Build and save the Draft Purchase Order
+      const poId = crypto.randomUUID();
+      const poNo = `AUTO-PO-${Date.now().toString().slice(-8)}`;
+      const costRate = Number(item.stock.itemRate || 10);
+      
+      // Order standard quantity: 10 times the reserved quantity or minimum 50
+      const reorderQty = Math.max(50, reservedQty * 10);
+      const lineCost = reorderQty * costRate;
+      
+      // Resolve tax for the item: if item is not mapped to a tax, no tax is calculated
+      const taxMapping = itemTaxMappings.find(m => m.itemId === itemId);
+      const activeTax = taxMapping ? taxMasters.find(t => t.id === taxMapping.taxId && t.status === 'Active') : null;
+      const vatPct = activeTax ? Number(activeTax.percentage ?? 0) : 0;
+      const taxStructure = activeTax ? `${activeTax.taxName} (${activeTax.percentage}%)` : '';
+      
+      const lineVat = lineCost * (vatPct / 100);
+      const totalAmount = lineCost + lineVat;
+ 
+      const autoPO: PurchaseOrder = {
+        id: poId,
+        poNo: poNo,
+        poType: 'Direct Purchase Order',
+        vendorId: vendorId,
+        storeId: storeId,
+        purchaseOrganisation: 'Pharmacy',
+        currencyCode: 'Saudi Riyal',
+        currencyExchangeRate: 1.0,
+        isNonStock: false,
+        netAmount: Number(totalAmount.toFixed(2)),
+        status: 'Draft',
+        items: [{
+          id: crypto.randomUUID(),
+          poId: poId,
+          itemId: itemId,
+          itemCode: item.itemCode,
+          itemName: item.itemName,
+          quantity: reorderQty,
+          unitCost: costRate,
+          isBulk: false,
+          taxStructure: taxStructure,
+          remarks: `Auto PO: Stock reached reserve limit of ${reservedQty} (Current: ${newBalance})`
+        }],
+        createdAt: new Date().toISOString()
+      };
+      
+      // Insert in database & state
+      const success = await savePurchaseOrder(autoPO);
+      if (success) {
+        showToast('info', `[Trigger Alert] Draft PO ${poNo} raised dynamically for item "${item.itemName}" with last vendor (Stock: ${newBalance} <= Reserve: ${reservedQty}).`);
+      }
+    } catch (err: any) {
+      console.error("[Auto-PO Trigger Error]", err);
+    }
+  };
+
+  const fetchExpiryItems = async (storeId: string, noOfDays: number) => {
+    if (!requireDb()) return [];
+    try {
+      const supabase = getSupabase();
+      
+      const { data: ledgerData, error: ledgerError } = await supabase
+        .from('inventory_stock_ledger')
+        .select('item_id, batch_no, stock_in_quantity, stock_out_quantity, expiry_date, closing_stock_rate')
+        .eq('store_id', storeId);
+ 
+      if (ledgerError) throw ledgerError;
+      if (!ledgerData || ledgerData.length === 0) return [];
+ 
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() + noOfDays);
+      cutoffDate.setHours(23, 59, 59, 999);
+ 
+      const stockMap = new Map<string, { itemId: string; batchNo: string; currentStock: number; expiryDate?: string; ledgerRate?: number }>();
+ 
+      ledgerData.forEach(row => {
+        const itemId = row.item_id;
+        const batchNo = (row.batch_no || '').trim().toUpperCase();
+        if (!itemId || !batchNo) return;
+ 
+        const key = `${itemId}-${batchNo}`;
+        const existing = stockMap.get(key) || { itemId, batchNo, currentStock: 0, expiryDate: row.expiry_date, ledgerRate: 0 };
+        existing.currentStock += Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0);
+        if (row.expiry_date) existing.expiryDate = row.expiry_date;
+        if (Number(row.closing_stock_rate || 0) > 0) {
+          existing.ledgerRate = Number(row.closing_stock_rate);
+        }
+        stockMap.set(key, existing);
+      });
+ 
+      const candidates = Array.from(stockMap.values()).filter(c => {
+        if (c.currentStock <= 0) return false;
+        if (!c.expiryDate) return false;
+        const exp = new Date(c.expiryDate);
+        return exp <= cutoffDate;
+      });
+ 
+      if (candidates.length === 0) return [];
+ 
+      const itemIds = Array.from(new Set(candidates.map(c => c.itemId)));
+      
+      const { data: itemsData } = await supabase
+        .from('inventory_items')
+        .select('id, item_code, item_name')
+        .in('id', itemIds);
+ 
+      const { data: openingData } = await supabase
+        .from('inventory_opening_stock_items')
+        .select('item_id, batch_no, mrp, rate')
+        .in('item_id', itemIds);
+ 
+      const itemsMap = new Map(itemsData?.map(i => [i.id, i]));
+      
+      const rateMap = new Map<string, { mrp: number; rate: number }>();
+      openingData?.forEach(o => {
+        const key = `${o.item_id}-${(o.batch_no || '').trim().toUpperCase()}`;
+        rateMap.set(key, { mrp: Number(o.mrp || 0), rate: Number(o.rate || 0) });
+      });
+ 
+      return candidates.map(c => {
+        const itemInfo = itemsMap.get(c.itemId);
+        
+        // 1. Try opening stock batch rate first
+        const rateInfo = rateMap.get(`${c.itemId}-${c.batchNo}`);
+        let rate = rateInfo ? (rateInfo.mrp > 0 ? rateInfo.mrp : rateInfo.rate) : 0;
+        
+        // 2. Fallback to latest transaction closing_stock_rate from the ledger
+        if (!rate && c.ledgerRate) {
+          rate = c.ledgerRate;
+        }
+        
+        // 3. Fallback to standard inventory item cost rate in memory
+        if (!rate) {
+          const invItem = inventoryItems.find(inv => inv.id === c.itemId);
+          rate = invItem?.stock?.itemRate || 0;
+        }
+ 
+        return {
+          itemId: c.itemId,
+          itemCode: itemInfo?.item_code || 'UNK',
+          itemName: itemInfo?.item_name || 'Unknown Item',
+          batchCode: c.batchNo,
+          expiryDate: c.expiryDate,
+          currentStock: c.currentStock,
+          rate: rate || 0
+        };
+      });
+    } catch (err) {
+      console.error('Error fetching expiry items:', err);
+      return [];
+    }
+  };
+
+  const saveExpiryReturn = async (ret: ExpiryReturn): Promise<boolean> => {
+    const isAlreadySubmitted = expiryReturns.find(r => r.id === ret.id)?.status === 'Submitted';
+
+    setExpiryReturns(prev => {
+      const exists = prev.find(r => r.id === ret.id);
+      const updated = exists
+        ? prev.map(r => r.id === ret.id ? ret : r)
+        : [ret, ...prev];
+      localStorage.setItem('medicore_expiry_returns', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const dbRet = mapExpiryReturnToDb(ret);
+        const { error } = await supabase.from('procurement_expiry_returns').upsert(dbRet);
+        if (error) throw error;
+
+        if (ret.items) {
+          await supabase.from('procurement_expiry_return_items').delete().eq('return_id', ret.id);
+          if (ret.items.length > 0) {
+            const dbItems = ret.items.map(i => ({
+              id: i.id || crypto.randomUUID(),
+              return_id: ret.id,
+              item_id: i.itemId,
+              batch_code: i.batchCode,
+              expiry_date: i.expiryDate,
+              current_stock: i.currentStock,
+              quantity: i.quantity,
+              rate: i.rate,
+              value: i.value,
+              remarks: i.remarks || null
+            }));
+            const { error: ie } = await supabase.from('procurement_expiry_return_items').insert(dbItems);
+            if (ie) throw ie;
+          }
+        }
+
+        // Post STOCKOUT entries to stock ledger on submission
+        if (ret.status === 'Submitted' && !isAlreadySubmitted) {
+          for (const i of ret.items || []) {
+            const qtyOut = Number(i.quantity || 0);
+            if (qtyOut <= 0) continue;
+
+            const { quantity: prevQty, rate: prevRate } = await getItemValuation(ret.storeId, i.itemId);
+            const newBalance = Math.max(0, prevQty - qtyOut);
+
+            const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert({
+              store_id: ret.storeId,
+              item_id: i.itemId,
+              transaction_type: 'STOCKOUT',
+              ref_type: 'EXPIRY RETURN',
+              ref_doc_no: ret.docNo,
+              ref_doc_date: ret.docDate,
+              stock_in_quantity: 0,
+              stock_out_quantity: qtyOut,
+              closing_stock: newBalance,
+              closing_stock_rate: prevRate,
+              closing_stock_value: newBalance * prevRate,
+              currency: 'SAR',
+              batch_no: (i.batchCode || '').trim().toUpperCase(),
+              batch_date: null,
+              expiry_date: i.expiryDate
+            });
+            if (ledgerError) throw ledgerError;
+            await checkAndAutoRaisePO(ret.storeId, i.itemId, newBalance);
+          }
+        }
+
+        showToast('success', ret.status === 'Submitted'
+          ? 'Expiry Return submitted! STOCKOUT entries posted.'
+          : 'Expiry Return saved!');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        console.error('Error saving expiry return:', err);
+        showToast('error', `Failed to save Expiry Return: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('success', ret.status === 'Submitted'
+        ? 'Expiry Return submitted locally.'
+        : 'Expiry Return saved locally.');
+      return true;
+    }
+  };
+
+  const deleteExpiryReturn = async (id: string): Promise<boolean> => {
+    setExpiryReturns(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      localStorage.setItem('medicore_expiry_returns', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected) {
+      const supabase = getSupabase();
+      try {
+        const { error } = await supabase.from('procurement_expiry_returns').delete().eq('id', id);
+        if (error) throw error;
+        showToast('info', 'Expiry Return removed from database.');
+        setRefreshTrigger(prev => prev + 1);
+        return true;
+      } catch (err: any) {
+        showToast('error', `Failed to delete: ${err.message}`);
+        return false;
+      }
+    } else {
+      showToast('info', 'Expiry Return removed locally.');
+      return true;
+    }
+  };
+
   return (
     <DataContext.Provider value={{
       user, login, loginDemo, logout,
@@ -3458,6 +4819,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       organizations, saveOrganization, deleteOrganization,
       sponsorTariffs, saveSponsorTariff, saveSponsorTariffBatch, deleteSponsorTariff, resolveNegotiatedPrice, getBasePrice,
       vitalSignGroups, vitalSignParameters, addVitalSignGroup, saveVitalSignParameter, deleteVitalSignParameter,
+      vendors, saveVendor, deleteVendor,
+      purchaseOrders, savePurchaseOrder, deletePurchaseOrder,
+      grns, saveGRN, deleteGRN,
+      purchaseReceipts, savePurchaseReceipt, deletePurchaseReceipt,
+      purchaseReturns, savePurchaseReturn, deletePurchaseReturn,
+      expiryReturns, saveExpiryReturn, deleteExpiryReturn, fetchExpiryItems,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
 

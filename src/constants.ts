@@ -94,13 +94,24 @@ export const NAV_ITEMS: NavItem[] = [
     ]
   },
 
-  // Procurement Section
   {
     label: 'Procurement',
     path: '/procurement',
     icon: ShoppingCart,
     category: 'Procurement',
     subItems: [
+      {
+        label: 'Masters',
+        path: '/procurement/masters',
+        subItems: [
+          { label: 'Vendor Master', path: '/procurement/vendor-master' }
+        ]
+      },
+      { label: 'Purchase Order', path: '/procurement/purchase-order' },
+      { label: 'Goods Receipt Note (GRN)', path: '/procurement/grn' },
+      { label: 'Purchase Receipt', path: '/procurement/purchase-receipt' },
+      { label: 'Purchase Return', path: '/procurement/purchase-return' },
+      { label: 'Expiry Item Return', path: '/procurement/expiry-return' },
       { label: 'Tax Management', path: '/procurement/tax' }
     ]
   },

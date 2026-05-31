@@ -723,3 +723,308 @@ export interface SponsorTariff {
   active: boolean;
   createdAt?: string;
 }
+
+export interface VendorTerm {
+  id?: string;
+  vendorId?: string;
+  termCode: string;
+  termDesc: string;
+}
+
+export interface VendorBankInfo {
+  bankName?: string;
+  accountNumber?: string;
+  iban?: string;
+  swiftCode?: string;
+}
+
+export interface VendorRegistration {
+  crNumber?: string;
+  vatNumber?: string;
+  crExpiry?: string;
+  vatExpiry?: string;
+}
+
+export interface VendorBusinessInfo {
+  website?: string;
+  annualTurnover?: string;
+  distributorLink?: string;
+}
+
+export interface VendorContact {
+  contactPerson?: string;
+  email?: string;
+  mobile?: string;
+  designation?: string;
+}
+
+export interface Vendor {
+  id: string;
+  code: string;
+  name: string;
+  vendorType: string;
+  billingStructure?: string;
+  currency: string;
+  creditPeriod?: string;
+  rating?: string;
+  paymentTerm?: string;
+  supplierSubType?: string;
+  panNo?: string;
+  regstStatus: string;
+  accountGroup: string;
+  tdsType?: string;
+  exportLicense?: string;
+  account?: string;
+  remarks?: string;
+  
+  // Checkboxes
+  active: boolean;
+  qualityCheckRequired: boolean;
+  suspended: boolean;
+  isoCertified: boolean;
+  isVat: boolean;
+
+  // Embedded details
+  bankInfo?: VendorBankInfo;
+  registrationDetails?: VendorRegistration;
+  businessInfo?: VendorBusinessInfo;
+  contactDetails?: VendorContact;
+
+  // Loaded Terms & Conditions list
+  terms?: VendorTerm[];
+  createdAt?: string;
+}
+
+export interface POAddressDetails {
+  billingAddress?: string;
+  shippingAddress?: string;
+}
+
+export interface POOtherDetails {
+  deliveryTerms?: string;
+  shipmentMode?: string;
+  paymentMethod?: string;
+}
+
+export interface POTerm {
+  termCode: string;
+  termDesc: string;
+}
+
+export interface PurchaseOrderItem {
+  id?: string;
+  poId?: string;
+  itemId: string;
+  itemName?: string;
+  itemCode?: string;
+  quantity: number;
+  publicPrice?: number;
+  discountPercentage?: number;
+  unitCost: number;
+  isBulk: boolean;
+  taxStructure?: string;
+  remarks?: string;
+
+  // Source document details
+  sourceDocNum?: string;
+  sourceDocDate?: string;
+  sourceQuantity?: number;
+  pendingQuantity?: number;
+  shortCloseQuantity?: number;
+
+  // Added search details
+  isFoc?: boolean;
+  unit?: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  poNo: string;
+  poType: string;
+  vendorId: string;
+  storeId: string;
+  refDocDate?: string;
+  refDocNo?: string;
+  purchaseOrganisation: string;
+  currencyCode: string;
+  currencyExchangeRate?: number;
+  validTill?: string;
+  discountAmount?: number;
+  discountPercentage?: number;
+  taxCode?: string;
+  isNonStock: boolean;
+  accountCode?: string;
+  netAmount: number;
+
+  // Detailed Tabs
+  addressDetails?: POAddressDetails;
+  otherDetails?: POOtherDetails;
+  importedItems?: string;
+  terms?: POTerm[]; // Added terms & conditions support
+
+  status: 'Draft' | 'Approved' | 'Cancelled';
+  items?: PurchaseOrderItem[];
+  createdAt?: string;
+}
+
+export interface GRNItem {
+  id?: string;
+  grnId?: string;
+  itemId: string;
+  itemName?: string;
+  itemCode?: string;
+  locator?: string;
+  batchCode: string;
+  batchDate?: string;
+  expiryDate: string;
+  poQuantity?: number;
+  receivedQuantity: number;
+  acceptedQuantity: number;
+  rate: number;
+  publicPrice?: number;
+  unitCost: number;
+  discountPercentage?: number;
+  discountAmount?: number;
+  vatPercentage?: number;
+  vatAmount?: number;
+  totalAmount: number;
+  remarks?: string;
+  isBulky: boolean;
+}
+
+export interface GRN {
+  id: string;
+  grnNo: string;
+  grnType: 'From Expiry Item Return' | 'From Purchase Order' | 'From Letter of Indent' | 'Direct' | 'From Consignment';
+  vendorId: string;
+  storeId: string;
+  poId?: string;
+  gateEntryDate: string;
+  gateEntryNo: string;
+  discountPercentage?: number;
+  discountAmount?: number;
+  netAmount: number;
+  grossAmount: number;
+  status: 'Draft' | 'Submitted';
+  items?: GRNItem[];
+  createdAt?: string;
+}
+
+export interface PurchaseReceiptItem {
+  id?: string;
+  receiptId?: string;
+  itemId: string;
+  itemName?: string;
+  itemCode?: string;
+  quantity: number;
+  remarks?: string;
+  rate: number;
+  discountPercentage?: number;
+  discountAmount?: number;
+  sourceQuantity?: number;
+  pendingQuantity?: number;
+  alreadyConvertedQuantity?: number;
+  batchDetails?: {
+    batchCode?: string;
+    expiryDate?: string;
+    locator?: string;
+  };
+}
+
+export interface PurchaseReceipt {
+  id: string;
+  receiptNo: string;
+  receiptDate: string;
+  grnId?: string;
+  vendorId: string;
+  storeId: string;
+  taxProfile?: string;
+  netAmount: number;
+  addressDetails?: {
+    billingAddress?: string;
+    shippingAddress?: string;
+  };
+  referenceDetails?: {
+    refNo?: string;
+    refDate?: string;
+  };
+  lcDetails?: {
+    lcNo?: string;
+    lcDate?: string;
+  };
+  otherDetails?: {
+    paymentTerm?: string;
+    remarks?: string;
+  };
+  status: 'Draft' | 'Submitted';
+  items?: PurchaseReceiptItem[];
+  createdAt?: string;
+}
+
+export type PurchaseReturnType = 'From Purchase Receipt' | 'From GRN' | 'From Consignment';
+
+export interface PurchaseReturnItem {
+  id?: string;
+  returnId?: string;
+  itemId: string;
+  itemName?: string;
+  itemCode?: string;
+  quantity: number;
+  rate: number;
+  discountPercentage?: number;
+  discountAmount?: number;
+  sourceQuantity?: number;
+  returnReason?: string;
+  batchDetails?: {
+    batchCode?: string;
+    expiryDate?: string;
+    locator?: string;
+  };
+}
+
+export interface PurchaseReturn {
+  id: string;
+  returnNo: string;
+  returnDate: string;
+  returnType: PurchaseReturnType;
+  sourceGrnId?: string;
+  sourcePrnId?: string;
+  vendorId: string;
+  storeId: string;
+  netAmount: number;
+  remarks?: string;
+  status: 'Draft' | 'Submitted';
+  items?: PurchaseReturnItem[];
+  createdAt?: string;
+}
+
+export interface ExpiryReturnItem {
+  id?: string;
+  returnId?: string;
+  itemId: string;
+  itemCode?: string;
+  itemName?: string;
+  batchCode: string;
+  expiryDate: string;
+  currentStock: number;
+  quantity: number;
+  rate: number;
+  value: number;
+  remarks?: string;
+}
+
+export interface ExpiryReturn {
+  id: string;
+  docNo: string;
+  docDate: string;
+  storeId: string;
+  vendorId: string;
+  noOfDays: number;
+  netAmount: number;
+  purchaseOrganisation: string;
+  remarks?: string;
+  status: 'Draft' | 'Submitted';
+  items?: ExpiryReturnItem[];
+  createdAt?: string;
+}
+

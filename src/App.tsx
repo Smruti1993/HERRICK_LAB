@@ -28,6 +28,12 @@ import { OrganizationMaster } from './pages/OrganizationMaster';
 import { PlanDefinition } from './pages/PlanDefinition';
 import { SponsorTariff } from './pages/SponsorTariff';
 import { Tax } from './pages/Tax';
+import { VendorMaster } from './pages/VendorMaster';
+import { PurchaseOrderPage } from './pages/PurchaseOrder';
+import { GRNPage } from './pages/GRN';
+import { PurchaseReceiptPage } from './pages/PurchaseReceipt';
+import { PurchaseReturnPage } from './pages/PurchaseReturn';
+import { ExpiryItemReturnPage } from './pages/ExpiryItemReturn';
 
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
@@ -94,8 +100,14 @@ const AppRoutes = () => {
               <Route path="drug-return" element={<DrugReturn />} />
             </Route>
             <Route path="procurement">
-              <Route index element={<Navigate to="tax" replace />} />
+              <Route index element={<Navigate to="vendor-master" replace />} />
+              <Route path="vendor-master" element={<VendorMaster />} />
               <Route path="tax" element={<Tax />} />
+              <Route path="purchase-order" element={<PurchaseOrderPage />} />
+              <Route path="grn" element={<GRNPage />} />
+              <Route path="purchase-receipt" element={<PurchaseReceiptPage />} />
+              <Route path="purchase-return" element={<PurchaseReturnPage />} />
+              <Route path="expiry-return" element={<ExpiryItemReturnPage />} />
             </Route>
             <Route path="finance">
               <Route index element={<Navigate to="masters/organization" replace />} />
