@@ -7,6 +7,7 @@ import {
 import { useData } from '../context/DataContext';
 import { BatchSelectionModal } from '../components/pharmacy/BatchSelectionModal';
 import { PharmacyInvoiceReport } from '../components/pharmacy/PharmacyInvoiceReport';
+import { parseGS1 } from '../utils/gs1Parser';
 
 export const OPPharmacy: React.FC = () => {
     const { 
@@ -40,6 +41,7 @@ export const OPPharmacy: React.FC = () => {
     const [autoFocusScanner, setAutoFocusScanner] = useState(true);
     const [scannerFocused, setScannerFocused] = useState(false);
     const scannerInputRef = React.useRef<HTMLInputElement>(null);
+    const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
 
     // Auto-focus barcode scanner
     useEffect(() => {
@@ -147,15 +149,48 @@ export const OPPharmacy: React.FC = () => {
             return;
         }
 
+        console.log("GS1 Debug - Scanned Query:", query);
+        console.log("GS1 Debug - Parsed GS1 (JSON):", JSON.stringify(parseGS1(query)));
+        console.log("GS1 Debug - Database Inventory Items (JSON):", JSON.stringify(inventoryItems.map(i => ({ code: i.itemCode, name: i.itemName, gtin: i.gtin }))));
+
+        // Parse query with GS1 parser
+        const parsedGS1 = parseGS1(query);
+        const hasParsedGtin = !!parsedGS1.gtin;
+        const searchGtin = parsedGS1.gtin || query;
+        const searchBatchNo = parsedGS1.batch;
+
+        // A query is considered a valid standard barcode if:
+        // - it was successfully parsed by GS1 (meaning it had AI 01/02 and a 14-digit GTIN)
+        // - OR if it is a standard EAN/UPC/GS1 numeric barcode: strictly numeric with length between 8 and 14 digits.
+        const isStandardBarcode = hasParsedGtin || (/^\d+$/.test(query) && query.length >= 8 && query.length <= 14);
+
         // Find item matching scanned code (GTIN or itemCode)
+        // Clean leading zeros from GTIN for robust comparison
+        const cleanQuery = searchGtin.replace(/^0+/, '');
         const matchedItem = inventoryItems.find(
-            i =>
-                i.isActive !== false &&
-                (i.gtin === query || i.itemCode?.toLowerCase() === query.toLowerCase())
+            i => {
+                if (i.isActive === false) return false;
+
+                // 1. Check direct item code match (case-insensitive)
+                if (i.itemCode?.toLowerCase() === query.toLowerCase() || i.itemCode?.toLowerCase() === searchGtin.toLowerCase()) {
+                    return true;
+                }
+
+                // 2. Check GTIN match (ONLY if the scanned query is a valid standard barcode format)
+                if (isStandardBarcode && i.gtin) {
+                    const cleanItemGtin = i.gtin.replace(/^0+/, '');
+                    if (cleanItemGtin === cleanQuery) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
         );
 
         if (!matchedItem) {
             showToast('error', `No active item found matching barcode/code "${query}".`);
+            setLastGS1Scan(null);
             setBarcodeQuery('');
             return;
         }
@@ -170,8 +205,20 @@ export const OPPharmacy: React.FC = () => {
                 'error',
                 `Item "${matchedItem.itemName}" is not part of this pending prescription.`
             );
+            setLastGS1Scan(null);
             setBarcodeQuery('');
             return;
+        }
+
+        // Set last GS1 scan state for UI display if GS1 data parsed successfully and contains batch/expiry info
+        if (parsedGS1.gtin && (parsedGS1.batch || parsedGS1.expiry)) {
+            setLastGS1Scan({
+                gtin: parsedGS1.gtin,
+                batch: parsedGS1.batch,
+                expiry: parsedGS1.expiry
+            });
+        } else {
+            setLastGS1Scan(null);
         }
 
         // Fetch batches
@@ -189,7 +236,30 @@ export const OPPharmacy: React.FC = () => {
         const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
         const baseQtyRequired = prescItem.totalQty * salesCF;
 
-        const chosenBatch = sortedBatches.find(b => b.currentStock >= baseQtyRequired);
+        // Try to match parsed GS1 batch number first
+        let chosenBatch = null;
+        let matchedByGS1Batch = false;
+
+        if (searchBatchNo) {
+            chosenBatch = sortedBatches.find(
+                b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase() && b.currentStock >= baseQtyRequired
+            );
+            if (chosenBatch) {
+                matchedByGS1Batch = true;
+            } else {
+                const batchExists = sortedBatches.some(b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase());
+                if (batchExists) {
+                    showToast('info', `Parsed batch "${searchBatchNo}" has insufficient stock in store. Selecting FIFO batch.`);
+                } else {
+                    showToast('info', `Parsed batch "${searchBatchNo}" not found in stock. Selecting FIFO batch.`);
+                }
+            }
+        }
+
+        // Fallback to FIFO
+        if (!chosenBatch) {
+            chosenBatch = sortedBatches.find(b => b.currentStock >= baseQtyRequired);
+        }
 
         if (!chosenBatch) {
             showToast(
@@ -221,10 +291,11 @@ export const OPPharmacy: React.FC = () => {
             }
         }));
 
-        showToast(
-            'success',
-            `Auto-selected Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`
-        );
+        const successMessage = matchedByGS1Batch 
+            ? `Successfully matched Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`
+            : `Auto-selected FIFO Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`;
+
+        showToast('success', successMessage);
         setBarcodeQuery('');
     };
 
@@ -408,40 +479,64 @@ export const OPPharmacy: React.FC = () => {
                         </div>
 
                         {/* Barcode Scanner Bar */}
-                        <div className="px-6 py-3 bg-slate-100/50 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0">
-                            <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
-                                <div className="relative group">
-                                    <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 group-hover:text-blue-600 transition-colors" />
-                                    <input
-                                        ref={scannerInputRef}
-                                        id="op-pharmacy-barcode-input"
-                                        type="text"
-                                        className="w-full pl-9 pr-24 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 font-medium transition-all"
-                                        placeholder="Scan drug barcode (GTIN) or item code..."
-                                        value={barcodeQuery}
-                                        onChange={e => setBarcodeQuery(e.target.value)}
-                                        onFocus={() => setScannerFocused(true)}
-                                        onBlur={() => setScannerFocused(false)}
-                                    />
-                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-                                        <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
-                                            {scannerFocused ? 'Ready' : 'Click to Scan'}
-                                        </span>
+                        <div className="px-6 py-3 bg-slate-100/50 border-b border-slate-200 flex flex-col gap-2 shrink-0">
+                            <div className="flex items-center justify-between gap-4">
+                                <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
+                                    <div className="relative group">
+                                        <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 group-hover:text-blue-600 transition-colors" />
+                                        <input
+                                            ref={scannerInputRef}
+                                            id="op-pharmacy-barcode-input"
+                                            type="text"
+                                            className="w-full pl-9 pr-24 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 font-medium transition-all"
+                                            placeholder="Scan drug barcode (GTIN) or item code..."
+                                            value={barcodeQuery}
+                                            onChange={e => setBarcodeQuery(e.target.value)}
+                                            onFocus={() => setScannerFocused(true)}
+                                            onBlur={() => setScannerFocused(false)}
+                                        />
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                                            <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
+                                                {scannerFocused ? 'Ready' : 'Click to Scan'}
+                                            </span>
+                                        </div>
                                     </div>
+                                </form>
+                                <div className="flex items-center gap-4">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                            checked={autoFocusScanner}
+                                            onChange={e => setAutoFocusScanner(e.target.checked)}
+                                        />
+                                        <span className="text-xs font-semibold text-slate-500">Auto-Focus Scanner</span>
+                                    </label>
                                 </div>
-                            </form>
-                            <div className="flex items-center gap-4">
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                        checked={autoFocusScanner}
-                                        onChange={e => setAutoFocusScanner(e.target.checked)}
-                                    />
-                                    <span className="text-xs font-semibold text-slate-500">Auto-Focus Scanner</span>
-                                </label>
                             </div>
+
+                            {lastGS1Scan && (
+                                <div className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 flex items-center gap-4 max-w-md animate-in fade-in slide-in-from-top-1 duration-200">
+                                    <span className="font-bold uppercase tracking-wider text-emerald-600 bg-emerald-100/50 px-1.5 py-0.5 rounded text-[9px]">GS1 Parsed</span>
+                                    {lastGS1Scan.gtin && (
+                                        <span>GTIN: <span className="font-bold text-emerald-900">{lastGS1Scan.gtin}</span></span>
+                                    )}
+                                    {lastGS1Scan.batch && (
+                                        <span>Batch: <span className="font-bold text-emerald-900">{lastGS1Scan.batch}</span></span>
+                                    )}
+                                    {lastGS1Scan.expiry && (
+                                        <span>Expiry: <span className="font-bold text-emerald-900">{lastGS1Scan.expiry}</span></span>
+                                    )}
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setLastGS1Scan(null)} 
+                                        className="ml-auto hover:text-emerald-950 font-bold"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         {/* Order Items Table */}
