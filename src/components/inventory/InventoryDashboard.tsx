@@ -26,16 +26,22 @@ const StockBar = ({ current, restock }: { current: number; restock: number }) =>
     );
 };
 
-const MetricCard = ({ label, value, icon: Icon, iconBg, suffix = '' }: {
+const MetricCard = ({ label, value, icon: Icon, iconBg, suffix = '', onClick, isActive }: {
     label: string; value: string | number; icon: React.ElementType; iconBg: string; suffix?: string;
+    onClick?: () => void; isActive?: boolean;
 }) => (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 flex items-center gap-3 shadow-sm hover:shadow transition-shadow">
+    <div 
+        onClick={onClick}
+        className={`bg-white border rounded-xl p-3 flex items-center gap-3 shadow-sm transition-all duration-200 select-none ${
+            onClick ? 'cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-[0.98]' : ''
+        } ${isActive ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-200'}`}
+    >
         <div className={`p-2 rounded-lg ${iconBg} flex-shrink-0`}>
             <Icon className="w-4 h-4 text-white" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider leading-none mb-0.5">{label}</p>
-            <p className="text-lg font-bold text-slate-800 leading-tight">{suffix}{typeof value === 'number' ? value.toLocaleString() : value}</p>
+            <p className="text-lg font-bold text-slate-800 leading-tight truncate">{suffix}{typeof value === 'number' ? value.toLocaleString() : value}</p>
         </div>
     </div>
 );
@@ -48,6 +54,7 @@ export const InventoryDashboard: React.FC = () => {
     const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
     const [loading, setLoading] = useState(false);
     const [categoryFilter, setCategoryFilter] = useState<string>('');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'low' | 'out'>('all');
 
     const load = useCallback(async (storeId: string) => {
         if (!storeId) return;
@@ -70,9 +77,15 @@ export const InventoryDashboard: React.FC = () => {
         if (selectedStoreId) load(selectedStoreId);
     }, [selectedStoreId, load]);
 
-    const inStockCount  = metrics ? metrics.itemsDetails.filter(i => i.currentStock >= i.restockLevel && i.restockLevel > 0).length : 0;
-    const lowStockCount = metrics ? metrics.lowStockItems : 0;
-    const outCount      = metrics ? metrics.outOfStock : 0;
+    const getItemStatus = (item: any) => {
+        if (item.currentStock <= 0) return 'out';
+        if (item.restockLevel > 0 && item.currentStock < item.restockLevel) return 'low';
+        return 'ok';
+    };
+
+    const inStockCount  = metrics ? metrics.itemsDetails.filter(i => getItemStatus(i) === 'ok').length : 0;
+    const lowStockCount = metrics ? metrics.itemsDetails.filter(i => getItemStatus(i) === 'low').length : 0;
+    const outCount      = metrics ? metrics.itemsDetails.filter(i => getItemStatus(i) === 'out').length : 0;
     const total         = metrics ? metrics.totalProducts : 1;
 
     const pieData = [
@@ -85,6 +98,10 @@ export const InventoryDashboard: React.FC = () => {
     const categories = Array.from(new Set((metrics?.itemsDetails || []).map(i => i.itemCategory)));
     const filteredItems = (metrics?.itemsDetails || [])
         .filter(i => !categoryFilter || i.itemCategory === categoryFilter)
+        .filter(i => {
+            if (statusFilter === 'all') return true;
+            return getItemStatus(i) === statusFilter;
+        })
         .sort((a, b) => a.currentStock - b.currentStock);
     const storeName = activeStores.find(s => s.id === selectedStoreId)?.storeName || '—';
 
@@ -118,10 +135,37 @@ export const InventoryDashboard: React.FC = () => {
 
             {/* Metric Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <MetricCard label="Total Products" value={metrics?.totalProducts ?? '—'} icon={Package}       iconBg="bg-blue-500" />
-                <MetricCard label="Low Stock Items" value={metrics?.lowStockItems ?? '—'} icon={AlertTriangle} iconBg="bg-amber-400" />
-                <MetricCard label="Out of Stock"    value={metrics?.outOfStock    ?? '—'} icon={XCircle}       iconBg="bg-red-400" />
-                <MetricCard label="Total Value"     value={metrics ? Number(metrics.totalValue).toFixed(0) : '—'} icon={TrendingUp} iconBg="bg-green-500" suffix="$" />
+                <MetricCard 
+                    label="Total Products" 
+                    value={metrics?.totalProducts ?? '—'} 
+                    icon={Package} 
+                    iconBg="bg-blue-500" 
+                    onClick={() => setStatusFilter('all')}
+                    isActive={statusFilter === 'all'}
+                />
+                <MetricCard 
+                    label="Low Stock Items" 
+                    value={metrics?.lowStockItems ?? '—'} 
+                    icon={AlertTriangle} 
+                    iconBg="bg-amber-400" 
+                    onClick={() => setStatusFilter(prev => prev === 'low' ? 'all' : 'low')}
+                    isActive={statusFilter === 'low'}
+                />
+                <MetricCard 
+                    label="Out of Stock" 
+                    value={metrics?.outOfStock    ?? '—'} 
+                    icon={XCircle} 
+                    iconBg="bg-red-400" 
+                    onClick={() => setStatusFilter(prev => prev === 'out' ? 'all' : 'out')}
+                    isActive={statusFilter === 'out'}
+                />
+                <MetricCard 
+                    label="Total Value" 
+                    value={metrics ? Number(metrics.totalValue).toFixed(0) : '—'} 
+                    icon={TrendingUp} 
+                    iconBg="bg-green-500" 
+                    suffix="$" 
+                />
             </div>
 
             {/* Body: table + chart side by side */}
@@ -131,20 +175,51 @@ export const InventoryDashboard: React.FC = () => {
                 <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                     {/* Card header */}
                     <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
-                        <span className="text-sm font-semibold text-slate-800">Store Inventory</span>
-                        {categories.length > 0 && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-800">Store Inventory</span>
+                            {statusFilter !== 'all' && (
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                                    statusFilter === 'low' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                    Filtered by: {statusFilter === 'low' ? 'Low Stock' : 'Out of Stock'}
+                                    <button 
+                                        onClick={() => setStatusFilter('all')}
+                                        className="hover:text-black font-bold ml-0.5 text-[8px] focus:outline-none"
+                                        title="Clear Filter"
+                                    >
+                                        ✕
+                                    </button>
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {categories.length > 0 && (
+                                <div className="relative">
+                                    <select
+                                        className="text-[11px] border border-slate-200 rounded-md pl-2 pr-5 py-1 bg-white appearance-none outline-none focus:ring-1 focus:ring-blue-500"
+                                        value={categoryFilter}
+                                        onChange={e => setCategoryFilter(e.target.value)}
+                                    >
+                                        <option value="">All Categories</option>
+                                        {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <ChevronDown className="pointer-events-none absolute right-1 top-1.5 w-3 h-3 text-slate-400" />
+                                </div>
+                            )}
+
                             <div className="relative">
                                 <select
-                                    className="text-xs border border-slate-200 rounded-md px-2 py-1 pr-5 bg-white appearance-none outline-none"
-                                    value={categoryFilter}
-                                    onChange={e => setCategoryFilter(e.target.value)}
+                                    className="text-[11px] border border-slate-200 rounded-md pl-2 pr-5 py-1 bg-white appearance-none outline-none focus:ring-1 focus:ring-blue-500"
+                                    value={statusFilter}
+                                    onChange={e => setStatusFilter(e.target.value as any)}
                                 >
-                                    <option value="">All Categories</option>
-                                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                    <option value="all">All Statuses</option>
+                                    <option value="low">Low Stock</option>
+                                    <option value="out">Out of Stock</option>
                                 </select>
                                 <ChevronDown className="pointer-events-none absolute right-1 top-1.5 w-3 h-3 text-slate-400" />
                             </div>
-                        )}
+                        </div>
                     </div>
 
                     {/* Banner — compact */}
@@ -181,9 +256,25 @@ export const InventoryDashboard: React.FC = () => {
                                         <RefreshCw className="w-4 h-4 animate-spin mx-auto mb-1 text-blue-400" />Loading…
                                     </td></tr>
                                 ) : filteredItems.length === 0 ? (
-                                    <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-400 text-xs">
-                                        No stock movements found. Save an Opening Stock entry first.
-                                    </td></tr>
+                                    <tr>
+                                        <td colSpan={5} className="px-3 py-10 text-center text-slate-400 text-xs">
+                                            {statusFilter === 'low' ? (
+                                                <div className="flex flex-col items-center gap-1.5 py-4">
+                                                    <span className="text-emerald-500 font-semibold text-sm">🎉 All items are fully stocked!</span>
+                                                    <span className="text-slate-400">No low stock items found in this store.</span>
+                                                </div>
+                                            ) : statusFilter === 'out' ? (
+                                                <div className="flex flex-col items-center gap-1.5 py-4">
+                                                    <span className="text-emerald-500 font-semibold text-sm">👍 No out-of-stock items!</span>
+                                                    <span className="text-slate-400">Every item has active inventory in this store.</span>
+                                                </div>
+                                            ) : categoryFilter ? (
+                                                <div className="py-4">No items found in category "{categoryFilter}".</div>
+                                            ) : (
+                                                <div className="py-4">No stock movements found. Save an Opening Stock entry first.</div>
+                                            )}
+                                        </td>
+                                    </tr>
                                 ) : filteredItems.map((item, i) => {
                                     let badge = 'bg-green-100 text-green-700';
                                     let label = 'In Stock';

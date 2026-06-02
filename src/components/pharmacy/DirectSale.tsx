@@ -3,7 +3,7 @@ import { useData } from '../../context/DataContext';
 import { 
   ShoppingCart, Plus, Trash2, Search, Save, 
   User, Store, Pill, Calendar, Globe, Hash,
-  AlertCircle
+  AlertCircle, Barcode
 } from 'lucide-react';
 import { DirectSale as DirectSaleType, DirectSaleItem } from '../../types';
 
@@ -33,6 +33,13 @@ export const DirectSale: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Scanner state
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [autoFocusScanner, setAutoFocusScanner] = useState(true);
+  const [incrementOnRescan, setIncrementOnRescan] = useState(true);
+  const [scannerFocused, setScannerFocused] = useState(false);
+  const scannerInputRef = useRef<HTMLInputElement>(null);
+
   // Search references for items
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
   const [itemQuery, setItemQuery] = useState('');
@@ -52,6 +59,36 @@ export const DirectSale: React.FC = () => {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // Auto-focus barcode scanner
+  useEffect(() => {
+    if (autoFocusScanner && scannerInputRef.current) {
+      scannerInputRef.current.focus();
+    }
+  }, [selectedStore, items.length, autoFocusScanner]);
+
+  // Global blur listener to restore focus to scanner if checked
+  useEffect(() => {
+    if (!autoFocusScanner) return;
+    const handleBlur = (e: FocusEvent) => {
+      const target = e.relatedTarget as HTMLElement;
+      if (
+        scannerInputRef.current &&
+        (!target ||
+          (target.tagName !== 'INPUT' &&
+            target.tagName !== 'SELECT' &&
+            target.tagName !== 'TEXTAREA'))
+      ) {
+        setTimeout(() => {
+          if (scannerInputRef.current) {
+            scannerInputRef.current.focus();
+          }
+        }, 150);
+      }
+    };
+    document.addEventListener('focusout', handleBlur);
+    return () => document.removeEventListener('focusout', handleBlur);
+  }, [autoFocusScanner]);
 
   const addItemRow = () => {
     const newItem: DirectSaleItem = {
@@ -124,6 +161,133 @@ export const DirectSale: React.FC = () => {
       totalPrice: Number((basePrice + taxAmount).toFixed(2))
     };
     setItems(newItems);
+  };
+
+  const handleBarcodeScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const query = barcodeQuery.trim();
+    if (!query) return;
+
+    if (!selectedStore) {
+      setError('Please select a store first.');
+      setBarcodeQuery('');
+      return;
+    }
+
+    setError('');
+
+    // Find item matching GTIN or Item Code
+    const matchedItem = inventoryItems.find(
+      i =>
+        i.isActive !== false &&
+        (i.gtin === query || i.itemCode?.toLowerCase() === query.toLowerCase())
+    );
+
+    if (matchedItem) {
+      // Verify store item mapping
+      const isMapped = storeItemMappings.some(
+        m => m.storeId === selectedStore && m.itemId === matchedItem.id
+      );
+      if (!isMapped) {
+        setError(`Item "${matchedItem.itemName}" is not mapped to the selected store.`);
+        setBarcodeQuery('');
+        return;
+      }
+
+      // Check if item is already present in current list
+      const existingIndex = items.findIndex(item => item.itemId === matchedItem.id);
+      if (existingIndex > -1 && incrementOnRescan) {
+        // Increment quantity
+        updateItemQty(existingIndex, items[existingIndex].quantity + 1);
+        setBarcodeQuery('');
+        return;
+      }
+
+      // Fetch batches
+      const batches = await fetchBatchDetails(selectedStore, matchedItem.id);
+      
+      // Auto-select FIFO batch (first batch with stock, or first batch if all empty)
+      const sortedBatches = [...batches].sort((a, b) => {
+        if (!a.expiryDate) return 1;
+        if (!b.expiryDate) return -1;
+        return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+      });
+
+      const activeBatch = sortedBatches.find(b => b.currentStock > 0) || sortedBatches[0];
+      const batchNo = activeBatch ? activeBatch.batchNo : '';
+
+      // Find an empty row or append
+      const emptyRowIndex = items.findIndex(item => !item.itemId);
+      const targetIndex = emptyRowIndex > -1 ? emptyRowIndex : items.length;
+
+      const newItem: DirectSaleItem = {
+        itemId: matchedItem.id,
+        itemCode: matchedItem.itemCode,
+        itemName: matchedItem.itemName,
+        batchNo: batchNo,
+        quantity: 1,
+        unit: matchedItem.salesUom || matchedItem.baseUom || 'EACH',
+        unitPrice: 0,
+        totalPrice: 0
+      };
+
+      let updatedItems = [...items];
+      if (emptyRowIndex > -1) {
+        updatedItems[emptyRowIndex] = newItem;
+      } else {
+        updatedItems.push(newItem);
+      }
+
+      setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
+
+      if (activeBatch) {
+        const isSalesUom = newItem.unit?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
+
+        const mapping = itemTaxMappings.find(m => m.itemId === matchedItem.id);
+        const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+        const taxPercent = tax?.percentage || 0;
+
+        const unitPrice = activeBatch.mrp * salesCF;
+        const basePrice = unitPrice * 1;
+        const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+
+        updatedItems[targetIndex] = {
+          ...newItem,
+          batchNo: batchNo,
+          batchDate: activeBatch.batchDate,
+          unitPrice: unitPrice,
+          costRate: activeBatch.rate,
+          expiryDate: activeBatch.expiryDate,
+          totalPrice: Number((basePrice + taxAmount).toFixed(2))
+        };
+      }
+      setItems(updatedItems);
+      setActiveSearchIndex(null);
+      setItemQuery('');
+      setShowItemDropdown(false);
+    } else {
+      // Check if it's a batch number scanned directly for any item already selected
+      let batchMatched = false;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.itemId && !item.batchNo) {
+          const batches = rowBatches[i] || [];
+          const foundBatch = batches.find(b => b.batchNo === query);
+          if (foundBatch) {
+            handleSelectBatch(i, query);
+            batchMatched = true;
+            break;
+          }
+        }
+      }
+
+      if (!batchMatched) {
+        setError(`No active item matches barcode/code "${query}".`);
+      }
+    }
+
+    setBarcodeQuery('');
   };
 
   const handleSelectUom = (index: number, unit: string) => {
@@ -448,6 +612,54 @@ export const DirectSale: React.FC = () => {
                </button>
             </div>
           </div>
+
+          {/* Barcode Scanner Bar */}
+          {selectedStore && (
+            <div className="px-4 py-2 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between gap-4">
+              <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
+                <div className="relative group">
+                  <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-400 group-hover:text-violet-600 transition-colors" />
+                  <input
+                    ref={scannerInputRef}
+                    id="direct-sale-barcode-input"
+                    type="text"
+                    className="w-full pl-9 pr-24 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white placeholder-slate-400 font-medium"
+                    placeholder="Scan drug barcode (GTIN) or item code..."
+                    value={barcodeQuery}
+                    onChange={e => setBarcodeQuery(e.target.value)}
+                    onFocus={() => setScannerFocused(true)}
+                    onBlur={() => setScannerFocused(false)}
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
+                      {scannerFocused ? 'Ready' : 'Click to Scan'}
+                    </span>
+                  </div>
+                </div>
+              </form>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-3 h-3 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                    checked={autoFocusScanner}
+                    onChange={e => setAutoFocusScanner(e.target.checked)}
+                  />
+                  <span className="text-[10px] font-semibold text-slate-500">Auto-Focus</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="w-3 h-3 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                    checked={incrementOnRescan}
+                    onChange={e => setIncrementOnRescan(e.target.checked)}
+                  />
+                  <span className="text-[10px] font-semibold text-slate-500">Increment Qty on Rescan</span>
+                </label>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 overflow-auto">
              <table className="w-full text-xs">

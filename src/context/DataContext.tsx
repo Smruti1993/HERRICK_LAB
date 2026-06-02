@@ -88,7 +88,7 @@ interface DataContextType {
   saveOpeningStock: (stock: OpeningStock) => Promise<void>;
   
   saveDirectSale: (sale: DirectSale) => Promise<boolean>;
-  fetchBatchDetails: (storeId: string, itemId: string) => Promise<Array<{ batchNo: string, currentStock: number, mrp: number, expiryDate?: string }>>;
+  fetchBatchDetails: (storeId: string, itemId: string) => Promise<Array<{ batchNo: string, currentStock: number, mrp: number, rate: number, batchDate?: string, expiryDate?: string }>>;
   
   fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
   fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
@@ -622,8 +622,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     purchaseInventoryAcc: i.purchase_inventory_acc,
     costOfSalesAcc: i.cost_of_sales_acc,
     saleAccount: i.sale_account,
-    reorderLevel: i.reorder_level ?? undefined,
-    minStockLevel: i.min_stock_level ?? undefined,
+    reorderLevel: i.reorder_level ?? 50,
+    minStockLevel: i.min_stock_level ?? 10,
     createdAt: i.created_at,
     updatedAt: i.updated_at,
     stock: (i.stock && i.stock.length > 0) ? mapInventoryStockFromDb(i.stock[0]) : (i.stock && !Array.isArray(i.stock) ? mapInventoryStockFromDb(i.stock) : undefined),
@@ -1821,11 +1821,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
              totalValue += (agg.lastValue); // Roughly. Note: In real scenarios value is QTY * avg rate.
              
              const info = inventoryItems.find(i => i.id === itemId);
-             // Use reorder_level stored in the item master — no hardcoded fallback
-             const restockLevel = info?.reorderLevel ?? 0;
+             // Use min_stock_level stored in the item master as the threshold for low stock alert
+             const minStock = info?.minStockLevel ?? 10;
              
              if (currentStock <= 0) outOfStock++;
-             else if (restockLevel > 0 && currentStock < restockLevel) lowStockItems++;
+             else if (minStock > 0 && currentStock < minStock) lowStockItems++;
              
              itemsDetails.push({
                  itemId,
@@ -1833,7 +1833,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  itemCategory: info?.itemCategory || 'General',
                  itemName: info?.itemName || 'Unknown Item',
                  currentStock,
-                 restockLevel
+                 restockLevel: minStock
              });
           });
           

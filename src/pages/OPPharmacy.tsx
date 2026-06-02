@@ -2,14 +2,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, Clock, CheckCircle, AlertCircle, Pill, 
   Calendar, User, ShoppingBag,
-  Printer, Package, History
+  Printer, Package, History, Barcode
 } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { BatchSelectionModal } from '../components/pharmacy/BatchSelectionModal';
 import { PharmacyInvoiceReport } from '../components/pharmacy/PharmacyInvoiceReport';
 
 export const OPPharmacy: React.FC = () => {
-    const { prescriptions, inventoryItems, patients, showToast, stores, dispensePrescription, employees, bills, appointments } = useData();
+    const { 
+        prescriptions, inventoryItems, patients, showToast, stores, 
+        dispensePrescription, employees, bills, appointments,
+        itemTaxMappings, taxMasters, fetchBatchDetails
+    } = useData();
     
     const [selectedStoreId, setSelectedStoreId] = useState<string>('');
     useEffect(() => {
@@ -30,6 +34,42 @@ export const OPPharmacy: React.FC = () => {
     const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }>>({});
     const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number, unit?: string } | null>(null);
     const [generatedInvoiceId, setGeneratedInvoiceId] = useState<string | null>(null);
+
+    // Barcode scanner state
+    const [barcodeQuery, setBarcodeQuery] = useState('');
+    const [autoFocusScanner, setAutoFocusScanner] = useState(true);
+    const [scannerFocused, setScannerFocused] = useState(false);
+    const scannerInputRef = React.useRef<HTMLInputElement>(null);
+
+    // Auto-focus barcode scanner
+    useEffect(() => {
+        if (autoFocusScanner && scannerInputRef.current) {
+            scannerInputRef.current.focus();
+        }
+    }, [selectedPrescriptionId, autoFocusScanner]);
+
+    // Global blur listener to restore focus to scanner if checked
+    useEffect(() => {
+        if (!autoFocusScanner) return;
+        const handleBlur = (e: FocusEvent) => {
+            const target = e.relatedTarget as HTMLElement;
+            if (
+                scannerInputRef.current &&
+                (!target ||
+                    (target.tagName !== 'INPUT' &&
+                        target.tagName !== 'SELECT' &&
+                        target.tagName !== 'TEXTAREA'))
+            ) {
+                setTimeout(() => {
+                    if (scannerInputRef.current) {
+                        scannerInputRef.current.focus();
+                    }
+                }, 150);
+            }
+        };
+        document.addEventListener('focusout', handleBlur);
+        return () => document.removeEventListener('focusout', handleBlur);
+    }, [autoFocusScanner]);
 
     const selectedPrescription = useMemo(() => 
         prescriptions.find(p => p.id === selectedPrescriptionId), 
@@ -88,6 +128,104 @@ export const OPPharmacy: React.FC = () => {
             setSelectedBatches(prev => ({ ...prev, [activeBatchItem.id]: batchInfo }));
         }
         setActiveBatchItem(null);
+    };
+
+    const handleBarcodeScan = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const query = barcodeQuery.trim();
+        if (!query) return;
+
+        if (!selectedStoreId) {
+            showToast('error', 'Please select a store first.');
+            setBarcodeQuery('');
+            return;
+        }
+
+        if (!selectedPrescription) {
+            showToast('error', 'Please select a prescription order first.');
+            setBarcodeQuery('');
+            return;
+        }
+
+        // Find item matching scanned code (GTIN or itemCode)
+        const matchedItem = inventoryItems.find(
+            i =>
+                i.isActive !== false &&
+                (i.gtin === query || i.itemCode?.toLowerCase() === query.toLowerCase())
+        );
+
+        if (!matchedItem) {
+            showToast('error', `No active item found matching barcode/code "${query}".`);
+            setBarcodeQuery('');
+            return;
+        }
+
+        // Find prescription item in pending state
+        const prescItem = selectedPrescription.items.find(
+            item => item.itemId === matchedItem.id && item.status !== 'Dispensed'
+        );
+
+        if (!prescItem) {
+            showToast(
+                'error',
+                `Item "${matchedItem.itemName}" is not part of this pending prescription.`
+            );
+            setBarcodeQuery('');
+            return;
+        }
+
+        // Fetch batches
+        const batches = await fetchBatchDetails(selectedStoreId, matchedItem.id);
+
+        // Sort by expiry (FIFO)
+        const sortedBatches = [...batches].sort((a, b) => {
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+        });
+
+        // Conversion factors
+        const isSalesUom = prescItem.units?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
+        const baseQtyRequired = prescItem.totalQty * salesCF;
+
+        const chosenBatch = sortedBatches.find(b => b.currentStock >= baseQtyRequired);
+
+        if (!chosenBatch) {
+            showToast(
+                'error',
+                `Insufficient stock for "${matchedItem.itemName}". Required: ${baseQtyRequired} in store.`
+            );
+            setBarcodeQuery('');
+            return;
+        }
+
+        // Tax calculation
+        const itemMapping = itemTaxMappings.find(m => m.itemId === matchedItem.id);
+        const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+        const taxPercent = taxMaster?.percentage || 0;
+
+        const baseAmount = chosenBatch.rate * baseQtyRequired;
+        const taxAmt = Number((baseAmount * (taxPercent / 100)).toFixed(2));
+
+        setSelectedBatches(prev => ({
+            ...prev,
+            [prescItem.id]: {
+                batchNo: chosenBatch.batchNo,
+                rate: chosenBatch.rate,
+                batchDate: chosenBatch.batchDate,
+                expiryDate: chosenBatch.expiryDate,
+                baseAmount: Number(baseAmount.toFixed(2)),
+                taxAmount: taxAmt,
+                amount: Number((baseAmount + taxAmt).toFixed(2))
+            }
+        }));
+
+        showToast(
+            'success',
+            `Auto-selected Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`
+        );
+        setBarcodeQuery('');
     };
 
     const handleFinalDispense = async () => {
@@ -266,6 +404,43 @@ export const OPPharmacy: React.FC = () => {
                                 >
                                     <CheckCircle className="w-5 h-5" /> Confirm Dispensing
                                 </button>
+                            </div>
+                        </div>
+
+                        {/* Barcode Scanner Bar */}
+                        <div className="px-6 py-3 bg-slate-100/50 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0">
+                            <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
+                                <div className="relative group">
+                                    <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 group-hover:text-blue-600 transition-colors" />
+                                    <input
+                                        ref={scannerInputRef}
+                                        id="op-pharmacy-barcode-input"
+                                        type="text"
+                                        className="w-full pl-9 pr-24 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 font-medium transition-all"
+                                        placeholder="Scan drug barcode (GTIN) or item code..."
+                                        value={barcodeQuery}
+                                        onChange={e => setBarcodeQuery(e.target.value)}
+                                        onFocus={() => setScannerFocused(true)}
+                                        onBlur={() => setScannerFocused(false)}
+                                    />
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                                        <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
+                                            {scannerFocused ? 'Ready' : 'Click to Scan'}
+                                        </span>
+                                    </div>
+                                </div>
+                            </form>
+                            <div className="flex items-center gap-4">
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                        checked={autoFocusScanner}
+                                        onChange={e => setAutoFocusScanner(e.target.checked)}
+                                    />
+                                    <span className="text-xs font-semibold text-slate-500">Auto-Focus Scanner</span>
+                                </label>
                             </div>
                         </div>
 

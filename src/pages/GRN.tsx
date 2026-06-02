@@ -578,7 +578,12 @@ export const GRNPage: React.FC = () => {
                       onChange={(e) => handlePOChange(e.target.value)}
                     >
                       <option value="">-- Choose Purchase Order --</option>
-                      {purchaseOrders.filter(p => p.status === 'Approved').map(p => (
+                      {purchaseOrders.filter(p => 
+                        p.status === 'Approved' && 
+                        (!vendorId || p.vendorId === vendorId) && 
+                        (!storeId || p.storeId === storeId) &&
+                        (!grns.some(g => g.poId === p.id && g.id !== editingGRNId))
+                      ).map(p => (
                         <option key={p.id} value={p.id}>{p.poNo} - Net: {p.netAmount} SAR ({vendors.find(v => v.id === p.vendorId)?.name})</option>
                       ))}
                     </select>

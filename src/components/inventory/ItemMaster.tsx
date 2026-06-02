@@ -47,6 +47,8 @@ export const ItemMaster = () => {
         salesConversionFactor: 1,
         defaultPricingMethod: 'MRP',
         defaultMarkupPercentage: 0.0,
+        reorderLevel: 50,
+        minStockLevel: 10,
         branch: '',
         purchaseInventoryAcc: '',
         costOfSalesAcc: '',
@@ -637,6 +639,26 @@ export const ItemMaster = () => {
                                                         className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 transition-all border-slate-300"
                                                         checked={form.stock.isBulky}
                                                         onChange={e => setForm({ ...form, stock: { ...form.stock!, isBulky: e.target.checked } })}
+                                                    />
+                                                </div>
+
+                                                <div className="flex items-center gap-4">
+                                                    <label className="w-32 text-xs font-bold text-slate-500 uppercase tracking-wider">Reorder Level</label>
+                                                    <input 
+                                                        type="number"
+                                                        className="flex-1 h-10 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                                        value={form.reorderLevel ?? ''}
+                                                        onChange={e => setForm({ ...form, reorderLevel: e.target.value ? Number(e.target.value) : undefined })}
+                                                    />
+                                                </div>
+
+                                                <div className="flex items-center gap-4">
+                                                    <label className="w-32 text-xs font-bold text-slate-500 uppercase tracking-wider">Min Stock Level</label>
+                                                    <input 
+                                                        type="number"
+                                                        className="flex-1 h-10 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                                        value={form.minStockLevel ?? ''}
+                                                        onChange={e => setForm({ ...form, minStockLevel: e.target.value ? Number(e.target.value) : undefined })}
                                                     />
                                                 </div>
                                             </div>
