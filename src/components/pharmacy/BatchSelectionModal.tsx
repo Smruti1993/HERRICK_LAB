@@ -7,6 +7,7 @@ interface BatchSelectionModalProps {
     itemId: string;
     itemName: string;
     requiredQty: number;
+    unit?: string;
     onClose: () => void;
     onSelect: (batch: { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }) => void;
 }
@@ -16,10 +17,11 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
     itemId,
     itemName,
     requiredQty,
+    unit,
     onClose,
     onSelect
 }) => {
-    const { fetchBatchDetails, itemTaxMappings, taxMasters } = useData();
+    const { fetchBatchDetails, itemTaxMappings, taxMasters, inventoryItems } = useData();
     const [batches, setBatches] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [loading, setLoading] = useState(true);
@@ -82,13 +84,18 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                         <div className="flex justify-center p-8 text-slate-400">Loading batches...</div>
                     ) : filteredBatches.length > 0 ? (
                         <div className="grid gap-3">
-                            {filteredBatches.map(batch => {
-                                const isInsufficient = batch.currentStock < requiredQty;
+                             {filteredBatches.map(batch => {
+                                const itemDef = inventoryItems.find(inv => inv.id === itemId);
+                                const isSalesUom = unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                                const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+                                const baseQtyRequired = requiredQty * salesCF;
+                                const isInsufficient = batch.currentStock < baseQtyRequired;
                                 return (
                                     <button 
                                         key={batch.batchNo}
                                         onClick={() => {
-                                            const baseAmount = batch.rate * requiredQty;
+                                            const baseAmount = batch.rate * baseQtyRequired;
                                             const taxAmt = Number((baseAmount * (taxPercent / 100)).toFixed(2));
                                             onSelect({ 
                                                 batchNo: batch.batchNo, 

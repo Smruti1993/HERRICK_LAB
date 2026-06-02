@@ -390,6 +390,8 @@ export interface InventoryItem {
   // Accounts and Sales Info
   purchaseUom: string;
   salesUom: string;
+  purchaseConversionFactor: number;
+  salesConversionFactor: number;
   defaultPricingMethod: string;
   defaultMarkupPercentage: number;
   branch?: string;
@@ -481,6 +483,7 @@ export interface DirectSaleItem {
   costRate?: number;
   totalPrice: number;
   expiryDate?: string;
+  unit?: string;
 }
 
 export interface DirectSale {

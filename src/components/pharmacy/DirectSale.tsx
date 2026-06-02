@@ -81,6 +81,7 @@ export const DirectSale: React.FC = () => {
       itemCode: item.itemCode,
       itemName: item.itemName,
       batchNo: '', // Reset batch
+      unit: item.salesUom || item.baseUom || 'EACH', // Default to sales UOM if configured
       unitPrice: 0,
       totalPrice: 0
     };
@@ -101,19 +102,51 @@ export const DirectSale: React.FC = () => {
     if (!batchData) return;
 
     const newItems = [...items];
+    const itemDef = inventoryItems.find(inv => inv.id === newItems[index].itemId);
+    const isSalesUom = newItems[index].unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+    const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
     const mapping = itemTaxMappings.find(m => m.itemId === newItems[index].itemId);
     const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
     const taxPercent = tax?.percentage || 0;
-    const basePrice = batchData.mrp * newItems[index].quantity;
+
+    const unitPrice = batchData.mrp * salesCF;
+    const basePrice = unitPrice * newItems[index].quantity;
     const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
 
     newItems[index] = {
       ...newItems[index],
       batchNo: batchNo,
       batchDate: batchData.batchDate,
-      unitPrice: batchData.mrp,
+      unitPrice: unitPrice,
       costRate: batchData.rate,
       expiryDate: batchData.expiryDate,
+      totalPrice: Number((basePrice + taxAmount).toFixed(2))
+    };
+    setItems(newItems);
+  };
+
+  const handleSelectUom = (index: number, unit: string) => {
+    const newItems = [...items];
+    const itemDef = inventoryItems.find(inv => inv.id === newItems[index].itemId);
+    const isSalesUom = unit.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+    const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+    const batchData = rowBatches[index]?.find(b => b.batchNo === newItems[index].batchNo);
+    const baseRate = batchData ? batchData.mrp : 0;
+    const unitPrice = baseRate * salesCF;
+
+    const mapping = itemTaxMappings.find(m => m.itemId === newItems[index].itemId);
+    const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+    const taxPercent = tax?.percentage || 0;
+
+    const basePrice = newItems[index].quantity * unitPrice;
+    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+
+    newItems[index] = {
+      ...newItems[index],
+      unit: unit,
+      unitPrice: unitPrice,
       totalPrice: Number((basePrice + taxAmount).toFixed(2))
     };
     setItems(newItems);
@@ -422,6 +455,7 @@ export const DirectSale: React.FC = () => {
                    <tr>
                       <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">#</th>
                       <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px] w-1/3">Drug / Description</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">UOM</th>
                       <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">Batch No.</th>
                       <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
                       <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
@@ -434,7 +468,7 @@ export const DirectSale: React.FC = () => {
                 <tbody className="divide-y divide-slate-50">
                    {items.length === 0 ? (
                      <tr>
-                        <td colSpan={8} className="py-20 text-center">
+                        <td colSpan={10} className="py-20 text-center">
                            <div className="flex flex-col items-center gap-2 text-slate-300">
                              <Pill className="w-10 h-10 opacity-20" />
                              <p className="font-medium text-xs">No drugs added. Select a store and click "Add Drug Row".</p>
@@ -480,6 +514,45 @@ export const DirectSale: React.FC = () => {
                            </div>
                         </td>
                         <td className="px-4 py-3">
+                           {(() => {
+                                const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                                const options: string[] = [];
+                                
+                                let base = (itemDef?.baseUom || '').trim().toUpperCase();
+                                let sales = (itemDef?.salesUom || '').trim().toUpperCase();
+                                
+                                // Sensible fallbacks if data is missing or mismatched
+                                if (!base) {
+                                    if (sales === 'STRIP') base = 'TABLET';
+                                    else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
+                                    else base = 'EACH';
+                                }
+                                if (!sales) {
+                                    sales = base;
+                                }
+                                if (base === sales && Number(itemDef?.salesConversionFactor || 1) > 1) {
+                                    if (sales === 'STRIP') base = 'TABLET';
+                                    else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
+                                    else base = 'EACH';
+                                }
+
+                                if (base) options.push(base);
+                                if (sales && sales !== base) options.push(sales);
+                                return (
+                                    <select
+                                        className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white font-bold text-slate-700"
+                                        value={item.unit || ''}
+                                        disabled={!item.itemId}
+                                        onChange={e => handleSelectUom(idx, e.target.value)}
+                                    >
+                                        {options.map(opt => (
+                                            <option key={opt} value={opt}>{opt}</option>
+                                        ))}
+                                    </select>
+                                );
+                           })()}
+                        </td>
+                        <td className="px-4 py-3">
                            <select 
                              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white"
                              value={item.batchNo}
@@ -494,9 +567,18 @@ export const DirectSale: React.FC = () => {
                         </td>
                         <td className="px-4 py-3 text-center font-bold">
                            {item.batchNo ? (
-                             <span className="text-violet-600 bg-violet-50 px-2 py-1 rounded text-[10px]">
-                                {rowBatches[idx]?.find(b => b.batchNo === item.batchNo)?.currentStock || 0}
-                             </span>
+                             (() => {
+                                 const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                                 const isSalesUom = item.unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                                 const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                                 const rawStock = rowBatches[idx]?.find(b => b.batchNo === item.batchNo)?.currentStock || 0;
+                                 const displayStock = Math.floor(rawStock / salesCF);
+                                 return (
+                                     <span className="text-violet-600 bg-violet-50 px-2 py-1 rounded text-[10px]">
+                                         {displayStock}
+                                     </span>
+                                 );
+                             })()
                            ) : <span className="text-slate-200">-</span>}
                         </td>
                         <td className="px-4 py-3">

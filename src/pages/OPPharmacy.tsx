@@ -28,7 +28,7 @@ export const OPPharmacy: React.FC = () => {
     });
     const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
     const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }>>({});
-    const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number } | null>(null);
+    const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number, unit?: string } | null>(null);
     const [generatedInvoiceId, setGeneratedInvoiceId] = useState<string | null>(null);
 
     const selectedPrescription = useMemo(() => 
@@ -75,12 +75,12 @@ export const OPPharmacy: React.FC = () => {
         });
     }, [prescriptions, searchQuery, statusFilter, patients, fromDate, toDate]);
 
-    const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number) => {
+    const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number, unit?: string) => {
         if (!selectedStoreId) {
             showToast('error', 'Please select a store first.');
             return;
         }
-        setActiveBatchItem({ id: itemRecId, itemId, itemName, reqQty });
+        setActiveBatchItem({ id: itemRecId, itemId, itemName, reqQty, unit });
     };
 
     const handleBatchSelected = (batchInfo: any) => {
@@ -327,14 +327,14 @@ export const OPPharmacy: React.FC = () => {
                                                                 </span>
                                                             ) : selectedBatches[item.id] ? (
                                                                 <button 
-                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty)}
+                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty, item.units)}
                                                                     className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 hover:bg-blue-100 transition-colors border border-blue-200"
                                                                 >
                                                                     <CheckCircle className="w-3.5 h-3.5" /> Batch {selectedBatches[item.id].batchNo}
                                                                 </button>
                                                             ) : (
                                                                 <button 
-                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty)}
+                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty, item.units)}
                                                                     className="px-4 py-2 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
                                                                 >
                                                                     <Package className="w-4 h-4" /> Select Batch
@@ -439,6 +439,7 @@ export const OPPharmacy: React.FC = () => {
                     itemId={activeBatchItem.itemId}
                     itemName={activeBatchItem.itemName}
                     requiredQty={activeBatchItem.reqQty}
+                    unit={activeBatchItem.unit}
                     storeId={selectedStoreId}
                     onClose={() => setActiveBatchItem(null)}
                     onSelect={handleBatchSelected}

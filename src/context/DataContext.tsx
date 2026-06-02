@@ -614,6 +614,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     drugSubGroups: i.drug_sub_groups,
     purchaseUom: i.purchase_uom,
     salesUom: i.sales_uom,
+    purchaseConversionFactor: Number(i.purchase_conversion_factor || 1),
+    salesConversionFactor: Number(i.sales_conversion_factor || 1),
     defaultPricingMethod: i.default_pricing_method,
     defaultMarkupPercentage: i.default_markup_percentage,
     branch: i.branch,
@@ -691,6 +693,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     drug_sub_groups: i.drugSubGroups,
     purchase_uom: i.purchaseUom,
     sales_uom: i.salesUom,
+    purchase_conversion_factor: i.purchaseConversionFactor || 1,
+    sales_conversion_factor: i.salesConversionFactor || 1,
     default_pricing_method: i.defaultPricingMethod,
     default_markup_percentage: i.defaultMarkupPercentage,
     branch: i.branch,
@@ -2000,11 +2004,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           currentAverageRate = val.rate;
         }
 
+        // Resolve Sales Conversion Factor (e.g. 1 STRIP = 10 Tablets)
+        const itemDef = inventoryItems.find(inv => inv.id === i.itemId);
+        const isSalesUom = i.unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
         // Batch-Specific Validation
         const batchBalance = await getBatchStockBalance(sale.storeId, i.itemId, cleanBatch);
-        const qty = Number(i.quantity || 0);
+        const qty = Number(i.quantity || 0) * salesCF;
         if (batchBalance < qty) {
-            const itemDef = inventoryItems.find(inv => inv.id === i.itemId);
             throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${itemDef?.itemName || i.itemId} (Available in batch: ${batchBalance}, Required: ${qty})`);
         }
 
@@ -2407,8 +2415,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Get current store-wide item balance and rate for WAC
             const { quantity: prevQty, rate: prevRate } = await getItemValuation(grn.storeId, i.itemId);
             
-            const qtyIn = Number(i.acceptedQuantity || 0);
-            const inRate = Number(i.rate || 0);
+            // Resolve Purchase Conversion Factor (e.g. 1 BOX = 100 Tablets)
+            const itemDef = inventoryItems.find(item => item.id === i.itemId);
+            const purchaseCF = Number(itemDef?.purchaseConversionFactor || 1);
+
+            const qtyIn = Number(i.acceptedQuantity || 0) * purchaseCF;
+            const inRate = Number(i.rate || 0) / purchaseCF;
             const newBalance = prevQty + qtyIn;
 
             // Calculate WAC (Weighted Average Cost)
@@ -3488,7 +3500,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   
                   // 1. Batch Specific Validation
                   const currentBatchBalance = await getBatchStockBalance(storeId, item.itemId, cleanBatch);
-                  const qty = Number(item.totalQty || 0);
+                  
+                  // Resolve Sales Conversion Factor (e.g. 1 STRIP = 10 Tablets)
+                  const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                  const isSalesUom = item.units?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                  const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+                  const qty = Number(item.totalQty || 0) * salesCF;
                   if (currentBatchBalance < qty) {
                       throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${item.itemName} (Available in batch: ${currentBatchBalance}, Required: ${qty})`);
                   }

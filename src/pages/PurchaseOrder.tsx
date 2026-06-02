@@ -63,17 +63,19 @@ export const PurchaseOrderPage: React.FC = () => {
   const [modalPublicPrice, setModalPublicPrice] = useState(0);
   const [modalDiscount, setModalDiscount] = useState(0.0);
 
-  // Sync selected modal item's details (stock, rate)
+  // Sync selected modal item's details (stock, rate, purchase UOM)
   useEffect(() => {
     if (modalItemId) {
       const selectedItem = inventoryItems.find(i => i.id === modalItemId);
       if (selectedItem) {
         setModalCurrentStock(selectedItem.stock?.reservedQty || 0);
         setModalPublicPrice(selectedItem.stock?.itemRate || 0);
+        setModalUnit(selectedItem.purchaseUom || 'BOX');
       }
     } else {
       setModalCurrentStock(0);
       setModalPublicPrice(0);
+      setModalUnit('BOX');
     }
   }, [modalItemId, inventoryItems]);
 
@@ -1375,12 +1377,16 @@ export const PurchaseOrderPage: React.FC = () => {
                     value={modalUnit}
                     onChange={(e) => setModalUnit(e.target.value)}
                   >
-                    <option value="Box">Box</option>
-                    <option value="Pcs">Pcs</option>
-                    <option value="Tablet">Tablet</option>
-                    <option value="Vial">Vial</option>
-                    <option value="Ampoule">Ampoule</option>
-                    <option value="Bottle">Bottle</option>
+                    <option value="EACH">EACH</option>
+                    <option value="BOX">BOX</option>
+                    <option value="PACK">PACK</option>
+                    <option value="STRIP">STRIP</option>
+                    <option value="TABLET">TABLET</option>
+                    <option value="CAPSULE">CAPSULE</option>
+                    <option value="VIAL">VIAL</option>
+                    <option value="AMPOULE">AMPOULE</option>
+                    <option value="BOTTLE">BOTTLE</option>
+                    <option value="ML">ML</option>
                   </select>
                 </div>
               </div>

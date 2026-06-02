@@ -331,6 +331,8 @@ create table if not exists inventory_items (
   drug_sub_groups text,
   purchase_uom text default 'EACH',
   sales_uom text default 'EACH',
+  purchase_conversion_factor numeric(12,4) default 1.0 check (purchase_conversion_factor > 0),
+  sales_conversion_factor numeric(12,4) default 1.0 check (sales_conversion_factor > 0),
   default_pricing_method text default 'MRP',
   default_markup_percentage numeric(10,2) default 0,
   branch text, -- Optional singluar branch reference

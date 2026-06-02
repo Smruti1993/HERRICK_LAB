@@ -43,6 +43,8 @@ export const ItemMaster = () => {
         drugSubGroups: '',
         purchaseUom: 'EACH',
         salesUom: 'EACH',
+        purchaseConversionFactor: 1,
+        salesConversionFactor: 1,
         defaultPricingMethod: 'MRP',
         defaultMarkupPercentage: 0.0,
         branch: '',
@@ -339,8 +341,16 @@ export const ItemMaster = () => {
                                         value={form.baseUom}
                                         onChange={e => setForm({ ...form, baseUom: e.target.value })}
                                     >
-                                        <option>EACH</option>
-                                        <option>PACK</option>
+                                        <option value="EACH">EACH</option>
+                                        <option value="BOX">BOX</option>
+                                        <option value="PACK">PACK</option>
+                                        <option value="STRIP">STRIP</option>
+                                        <option value="TABLET">TABLET</option>
+                                        <option value="CAPSULE">CAPSULE</option>
+                                        <option value="VIAL">VIAL</option>
+                                        <option value="AMPOULE">AMPOULE</option>
+                                        <option value="BOTTLE">BOTTLE</option>
+                                        <option value="ML">ML</option>
                                     </select>
                                 </div>
                                 <div>
@@ -350,8 +360,16 @@ export const ItemMaster = () => {
                                         value={form.trackUom}
                                         onChange={e => setForm({ ...form, trackUom: e.target.value })}
                                     >
-                                        <option>EACH</option>
-                                        <option>PACK</option>
+                                        <option value="EACH">EACH</option>
+                                        <option value="BOX">BOX</option>
+                                        <option value="PACK">PACK</option>
+                                        <option value="STRIP">STRIP</option>
+                                        <option value="TABLET">TABLET</option>
+                                        <option value="CAPSULE">CAPSULE</option>
+                                        <option value="VIAL">VIAL</option>
+                                        <option value="AMPOULE">AMPOULE</option>
+                                        <option value="BOTTLE">BOTTLE</option>
+                                        <option value="ML">ML</option>
                                     </select>
                                 </div>
 
@@ -443,16 +461,38 @@ export const ItemMaster = () => {
                                     {activeSubTab === 'Accounts and Sales Info.' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                                             <div className="space-y-6">
-                                                <div>
+                                                <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
                                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Purchase UOM <span className="text-red-500">*</span></label>
                                                     <select
-                                                        className="w-full h-10 px-4 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        className="w-full h-10 px-4 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                                         value={form.purchaseUom}
                                                         onChange={e => setForm({ ...form, purchaseUom: e.target.value })}
                                                     >
-                                                        <option>EACH</option>
-                                                        <option>PACK</option>
+                                                        <option value="EACH">EACH</option>
+                                                        <option value="BOX">BOX</option>
+                                                        <option value="PACK">PACK</option>
+                                                        <option value="STRIP">STRIP</option>
+                                                        <option value="TABLET">TABLET</option>
+                                                        <option value="CAPSULE">CAPSULE</option>
+                                                        <option value="VIAL">VIAL</option>
+                                                        <option value="AMPOULE">AMPOULE</option>
+                                                        <option value="BOTTLE">BOTTLE</option>
+                                                        <option value="ML">ML</option>
                                                     </select>
+                                                </div>
+                                                <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Purchase Conversion Factor <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        type="number"
+                                                        min="0.0001"
+                                                        step="any"
+                                                        className="w-full h-10 px-4 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        value={form.purchaseConversionFactor || ''}
+                                                        onChange={e => setForm({ ...form, purchaseConversionFactor: parseFloat(e.target.value) || 1 })}
+                                                    />
+                                                    <p className="text-[10px] text-slate-400 mt-1.5 italic">
+                                                        * 1 {form.purchaseUom || 'BOX'} = {form.purchaseConversionFactor || 1} {form.baseUom || 'EACH'}(s)
+                                                    </p>
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Default Pricing Method</label>
@@ -467,16 +507,38 @@ export const ItemMaster = () => {
                                                 </div>
                                             </div>
                                             <div className="space-y-6">
-                                                <div>
+                                                <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
                                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sales UOM <span className="text-red-500">*</span></label>
                                                     <select
-                                                        className="w-full h-10 px-4 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        className="w-full h-10 px-4 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                                         value={form.salesUom}
                                                         onChange={e => setForm({ ...form, salesUom: e.target.value })}
                                                     >
-                                                        <option>EACH</option>
-                                                        <option>PACK</option>
+                                                        <option value="EACH">EACH</option>
+                                                        <option value="BOX">BOX</option>
+                                                        <option value="PACK">PACK</option>
+                                                        <option value="STRIP">STRIP</option>
+                                                        <option value="TABLET">TABLET</option>
+                                                        <option value="CAPSULE">CAPSULE</option>
+                                                        <option value="VIAL">VIAL</option>
+                                                        <option value="AMPOULE">AMPOULE</option>
+                                                        <option value="BOTTLE">BOTTLE</option>
+                                                        <option value="ML">ML</option>
                                                     </select>
+                                                </div>
+                                                <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
+                                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sales Conversion Factor <span className="text-red-500">*</span></label>
+                                                    <input
+                                                        type="number"
+                                                        min="0.0001"
+                                                        step="any"
+                                                        className="w-full h-10 px-4 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        value={form.salesConversionFactor || ''}
+                                                        onChange={e => setForm({ ...form, salesConversionFactor: parseFloat(e.target.value) || 1 })}
+                                                    />
+                                                    <p className="text-[10px] text-slate-400 mt-1.5 italic">
+                                                        * 1 {form.salesUom || 'STRIP'} = {form.salesConversionFactor || 1} {form.baseUom || 'EACH'}(s)
+                                                    </p>
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Default Markup Percentage</label>
@@ -824,9 +886,10 @@ export const ItemMaster = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-xs font-medium text-slate-600">Base: {item.baseUom}</span>
-                                                        <span className="text-xs font-medium text-slate-600">Track: {item.trackUom}</span>
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-xs font-bold text-slate-700">Base: {item.baseUom}</span>
+                                                        <span className="text-[10px] font-medium text-slate-500">Pur: {item.purchaseUom} (1={item.purchaseConversionFactor || 1})</span>
+                                                        <span className="text-[10px] font-medium text-slate-500">Sal: {item.salesUom} (1={item.salesConversionFactor || 1})</span>
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 font-medium text-slate-600 text-xs">{item.itemCategory}</td>
