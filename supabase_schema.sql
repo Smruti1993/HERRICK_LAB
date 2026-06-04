@@ -721,7 +721,8 @@ CREATE TABLE IF NOT EXISTS procurement_vendors (
     name TEXT NOT NULL,
     vendor_type TEXT NOT NULL, -- e.g., 'Local', 'International', 'Importer'
     billing_structure TEXT, -- e.g., 'Direct', 'Group', 'Consignee'
-    currency TEXT NOT NULL DEFAULT 'SAR',
+    currency TEXT NOT NULL DEFAULT 'INR',
+    address TEXT,
     credit_period TEXT, -- e.g., '30 Days'
     rating TEXT, -- e.g., 'A+', 'Gold'
     payment_term TEXT, -- e.g., 'Net 30', 'Net 60', 'Immediate'
@@ -844,6 +845,7 @@ CREATE TABLE IF NOT EXISTS procurement_grns (
     gross_amount NUMERIC(12, 2) DEFAULT 0.00,
     billing_structure JSONB DEFAULT '{}'::jsonb,
     other_details JSONB DEFAULT '{}'::jsonb,
+    invoice_no TEXT,
     status TEXT DEFAULT 'Draft', -- 'Draft', 'Submitted'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -868,6 +870,9 @@ CREATE TABLE IF NOT EXISTS procurement_grn_items (
     discount_amount NUMERIC(12, 2) DEFAULT 0.00,
     vat_percentage NUMERIC(5, 2) DEFAULT 15.00,
     vat_amount NUMERIC(12, 2) DEFAULT 0.00,
+    cgst_amount NUMERIC(12, 2) DEFAULT 0.00,
+    sgst_amount NUMERIC(12, 2) DEFAULT 0.00,
+    igst_amount NUMERIC(12, 2) DEFAULT 0.00,
     total_amount NUMERIC(12, 2) NOT NULL,
     remarks TEXT,
     is_bulky BOOLEAN DEFAULT false,
@@ -998,5 +1003,113 @@ CREATE INDEX IF NOT EXISTS idx_procurement_expiry_vendor ON procurement_expiry_r
 CREATE INDEX IF NOT EXISTS idx_procurement_expiry_store ON procurement_expiry_returns(store_id);
 CREATE INDEX IF NOT EXISTS idx_procurement_expiry_items ON procurement_expiry_return_items(return_id);
 
+-- Alterations for Vendor Address & Currency (SAR to INR)
+ALTER TABLE procurement_vendors ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE procurement_vendors ALTER COLUMN currency SET DEFAULT 'INR';
 
+-- 58. Finance Chart of Accounts
+CREATE TABLE IF NOT EXISTS finance_chart_of_accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    account_type VARCHAR(50) NOT NULL, -- 'Asset', 'Liability', 'Equity', 'Revenue', 'Expense'
+    account_group VARCHAR(100),
+    balance_nature VARCHAR(10) NOT NULL CHECK (balance_nature IN ('Debit', 'Credit')),
+    system_purpose TEXT,
+    parent_id UUID REFERENCES finance_chart_of_accounts(id) ON DELETE SET NULL,
+    is_group BOOLEAN DEFAULT false,
+    description TEXT,
+    status VARCHAR(20) DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
+CREATE INDEX IF NOT EXISTS idx_chart_of_accounts_code ON finance_chart_of_accounts(code);
+CREATE INDEX IF NOT EXISTS idx_chart_of_accounts_parent ON finance_chart_of_accounts(parent_id);
+
+-- RLS setup for finance_chart_of_accounts
+ALTER TABLE finance_chart_of_accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON finance_chart_of_accounts FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON finance_chart_of_accounts FOR ALL TO public USING (true) WITH CHECK (true);
+
+-- Seed Parent Accounts
+INSERT INTO finance_chart_of_accounts (code, name, account_type, account_group, balance_nature, is_group, description)
+VALUES 
+('100000', 'Assets', 'Asset', 'Assets', 'Debit', true, 'Asset group accounts'),
+('200000', 'Liabilities', 'Liability', 'Liabilities', 'Credit', true, 'Liability group accounts'),
+('400000', 'Income', 'Revenue', 'Revenue', 'Credit', true, 'Revenue group accounts'),
+('500000', 'Expenses', 'Expense', 'Expenses', 'Debit', true, 'Expense group accounts')
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed Sub-group Accounts
+INSERT INTO finance_chart_of_accounts (code, name, account_type, account_group, balance_nature, is_group, description, parent_id)
+VALUES 
+('110000', 'Cash & Bank', 'Asset', 'Assets', 'Debit', true, 'Cash and bank group', (SELECT id FROM finance_chart_of_accounts WHERE code = '100000')),
+('130000', 'Duties & Taxes Receivable', 'Asset', 'Assets', 'Debit', true, 'Duties and taxes group', (SELECT id FROM finance_chart_of_accounts WHERE code = '100000')),
+('220000', 'Duties & Taxes Payable', 'Liability', 'Liabilities', 'Credit', true, 'Duties and taxes payable group', (SELECT id FROM finance_chart_of_accounts WHERE code = '200000'))
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed Active Ledger Accounts
+INSERT INTO finance_chart_of_accounts (code, name, account_type, account_group, balance_nature, is_group, system_purpose, parent_id)
+VALUES 
+('510000', 'Medicine Purchase A/C', 'Expense', 'Expenses', 'Debit', false, 'Captures the net factory-cost of medicines coming into the warehouse before taxes.', (SELECT id FROM finance_chart_of_accounts WHERE code = '500000')),
+('131000', 'Input CGST (Provisional)', 'Asset', 'Assets', 'Debit', false, 'Parks the central government tax portion paid to vendors. Locked from tax deductions.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('132000', 'Input SGST (Provisional)', 'Asset', 'Assets', 'Debit', false, 'Parks the state government tax portion paid to vendors. Locked from tax deductions.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('133000', 'Input CGST (Approved)', 'Asset', 'Assets', 'Debit', false, 'The verified central tax vault. Unlocked by matching excel files to reduce tax liabilities.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('134000', 'Input SGST (Approved)', 'Asset', 'Assets', 'Debit', false, 'The verified state tax vault. Unlocked by matching excel files to reduce tax liabilities.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('210000', 'Accounts Payable Ledger', 'Liability', 'Liabilities', 'Credit', false, 'Tracks the live, un-truncated debt owed to each specific wholesale pharmaceutical distributor.', (SELECT id FROM finance_chart_of_accounts WHERE code = '200000')),
+('410000', 'Pharmacy Sales Revenue', 'Revenue', 'Revenue', 'Credit', false, 'Stores the base earnings extracted backward from retail medicine shelf-sales.', (SELECT id FROM finance_chart_of_accounts WHERE code = '400000')),
+('221000', 'Output CGST Liability', 'Liability', 'Liabilities', 'Credit', false, 'Accumulates the central tax slice collected from patients. Owed to the state treasury.', (SELECT id FROM finance_chart_of_accounts WHERE code = '220000')),
+('222000', 'Output SGST Liability', 'Liability', 'Liabilities', 'Credit', false, 'Accumulates the state tax slice collected from patients. Owed to the state treasury.', (SELECT id FROM finance_chart_of_accounts WHERE code = '220000')),
+('580000', 'Tax Variance Purchase Loss', 'Expense', 'Expenses', 'Debit', false, 'A specialized write-off account to absorb losses caused by internal human data-entry typos.', (SELECT id FROM finance_chart_of_accounts WHERE code = '500000')),
+('111000', 'Cash Account', 'Asset', 'Assets', 'Debit', false, 'Tracks physical hard cash collections inside the pharmacy''s retail counter drawer.', (SELECT id FROM finance_chart_of_accounts WHERE code = '110000')),
+('112000', 'Bank Clearing Account', 'Asset', 'Assets', 'Debit', false, 'Tracks digital payment collections (UPI scans, Credit Cards, NetBanking transfers).', (SELECT id FROM finance_chart_of_accounts WHERE code = '110000'))
+ON CONFLICT (code) DO NOTHING;
+
+-- Seed IGST Chart of Account sub-groups / active accounts
+INSERT INTO finance_chart_of_accounts (code, name, account_type, account_group, balance_nature, is_group, description, parent_id)
+VALUES 
+('135000', 'Input IGST (Provisional)', 'Asset', 'Assets', 'Debit', false, 'Parks the integrated government tax portion paid to interstate vendors. Locked from tax deductions.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('136000', 'Input IGST (Approved)', 'Asset', 'Assets', 'Debit', false, 'The verified integrated tax vault. Unlocked by matching excel files to reduce tax liabilities.', (SELECT id FROM finance_chart_of_accounts WHERE code = '130000')),
+('223000', 'Output IGST Liability', 'Liability', 'Liabilities', 'Credit', false, 'Accumulates the integrated tax slice collected from interstate patients. Owed to the treasury.', (SELECT id FROM finance_chart_of_accounts WHERE code = '220000'))
+ON CONFLICT (code) DO NOTHING;
+
+-- 59. Finance Journal Vouchers (Header)
+CREATE TABLE IF NOT EXISTS finance_journal_vouchers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    voucher_no VARCHAR(50) UNIQUE NOT NULL,
+    voucher_date DATE NOT NULL,
+    ref_type VARCHAR(50) NOT NULL, -- 'GRN', 'PHARMACY_SALE', 'OP_DISPENSE', 'MANUAL'
+    ref_doc_id UUID,               -- reference ID (e.g. GRN ID or Bill ID)
+    ref_doc_no VARCHAR(100),       -- reference number (e.g. GRN number or Bill number)
+    narration TEXT,
+    total_debit NUMERIC(14, 2) DEFAULT 0.00,
+    total_credit NUMERIC(14, 2) DEFAULT 0.00,
+    status VARCHAR(20) DEFAULT 'Draft' CHECK (status IN ('Draft', 'Posted')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 60. Finance Journal Voucher Items (Lines)
+CREATE TABLE IF NOT EXISTS finance_journal_voucher_items (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    voucher_id UUID REFERENCES finance_journal_vouchers(id) ON DELETE CASCADE,
+    account_id UUID REFERENCES finance_chart_of_accounts(id) ON DELETE RESTRICT,
+    posting_nature VARCHAR(10) NOT NULL CHECK (posting_nature IN ('Debit', 'Credit')),
+    amount NUMERIC(14, 2) NOT NULL CHECK (amount >= 0),
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_journal_vouchers_no ON finance_journal_vouchers(voucher_no);
+CREATE INDEX IF NOT EXISTS idx_journal_voucher_items_hdr ON finance_journal_voucher_items(voucher_id);
+
+-- RLS setup for finance_journal_vouchers & items
+ALTER TABLE finance_journal_vouchers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE finance_journal_voucher_items ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable read access for all users" ON finance_journal_vouchers FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON finance_journal_vouchers FOR ALL TO public USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable read access for all users" ON finance_journal_voucher_items FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON finance_journal_voucher_items FOR ALL TO public USING (true) WITH CHECK (true);

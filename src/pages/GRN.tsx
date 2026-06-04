@@ -7,6 +7,41 @@ import {
   DollarSign, ShoppingCart, ShoppingBag, Calendar, Layers, Activity, Truck, Grid, BookOpen
 } from 'lucide-react';
 
+const STATE_CODES: { [key: string]: string } = {
+  '01': 'Jammu & Kashmir',
+  '02': 'Himachal Pradesh',
+  '03': 'Punjab',
+  '04': 'Chandigarh',
+  '05': 'Uttarakhand',
+  '06': 'Haryana',
+  '07': 'Delhi',
+  '08': 'Rajasthan',
+  '09': 'Uttar Pradesh',
+  '10': 'Bihar',
+  '19': 'West Bengal',
+  '27': 'Maharashtra',
+  '29': 'Karnataka',
+  '33': 'Tamil Nadu',
+  '36': 'Telangana',
+  '37': 'Andhra Pradesh',
+};
+
+const getVendorGstDetails = (vendor: any) => {
+  const gstin = vendor.registrationDetails?.vatNumber || '';
+  const stateCode = gstin ? gstin.slice(0, 2) : '';
+  const state = STATE_CODES[stateCode] || 'N/A';
+  const address = vendor.address || '';
+  const hasGst = !!gstin || vendor.isVat;
+  
+  return {
+    gstin,
+    stateCode,
+    state,
+    address,
+    hasGst
+  };
+};
+
 export const GRNPage: React.FC = () => {
   const { 
     grns, saveGRN, deleteGRN,
@@ -38,6 +73,8 @@ export const GRNPage: React.FC = () => {
   const [grossAmount, setGrossAmount] = useState(0);
   const [netAmount, setNetAmount] = useState(0);
   const [status, setStatus] = useState<'Draft' | 'Submitted'>('Draft');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [vendorTab, setVendorTab] = useState<'gst' | 'location'>('gst');
 
   // Bottom Tabs state
   const [bottomTab, setBottomTab] = useState<'items' | 'billing' | 'other'>('items');
@@ -58,6 +95,9 @@ export const GRNPage: React.FC = () => {
 
   // Selected Vendor Detail Panel helper
   const selectedVendor = vendors.find(v => v.id === vendorId);
+  const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '', gstin: '', state: '', address: '', hasGst: false };
+  const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+  const currencySymbol = 'INR';
 
   // Sync selected modal item's price
   useEffect(() => {
@@ -116,6 +156,32 @@ export const GRNPage: React.FC = () => {
     setNetAmount(Number(finalNet.toFixed(2)));
   }, [items, discountAmount, discountPercentage]);
 
+  // React to vendor change to update GST breakdown on all items
+  useEffect(() => {
+    if (items.length === 0) return;
+    const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '' };
+    const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+
+    setItems(prev => prev.map(item => {
+      const lineCost = Number(item.acceptedQuantity || 0) * Number(item.rate || 0);
+      const lineDisc = Number(item.discountAmount || 0);
+      const afterDisc = Math.max(0, lineCost - lineDisc);
+      const vatPct = Number(item.vatPercentage ?? 0);
+      const vatAmt = afterDisc * (vatPct / 100);
+      
+      const cgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const sgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const igstAmount = isIntrastate ? 0 : Number(vatAmt.toFixed(2));
+      
+      return {
+        ...item,
+        cgstAmount,
+        sgstAmount,
+        igstAmount
+      };
+    }));
+  }, [vendorId]);
+
   // React to GRN Type change
   useEffect(() => {
     if (grnType !== 'From Purchase Order') {
@@ -133,6 +199,10 @@ export const GRNPage: React.FC = () => {
       setVendorId(po.vendorId);
       setStoreId(po.storeId);
       
+      const vendor = vendors.find(v => v.id === po.vendorId);
+      const vendorGst = vendor ? getVendorGstDetails(vendor) : { stateCode: '' };
+      const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+
       // Import items from PO
       const imported = (po.items || []).map(pi => {
         const item = inventoryItems.find(inv => inv.id === pi.itemId);
@@ -143,6 +213,10 @@ export const GRNPage: React.FC = () => {
         const vatPct = resolveItemTaxPercentage(pi.itemId);
         const vatAmt = ((qty * rate) - discAmt) * (vatPct / 100);
         const total = (qty * rate) - discAmt + vatAmt;
+
+        const cgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+        const sgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+        const igstAmount = isIntrastate ? 0 : Number(vatAmt.toFixed(2));
 
         return {
           itemId: pi.itemId,
@@ -161,6 +235,9 @@ export const GRNPage: React.FC = () => {
           discountAmount: Number(discAmt.toFixed(2)),
           vatPercentage: vatPct,
           vatAmount: Number(vatAmt.toFixed(2)),
+          cgstAmount,
+          sgstAmount,
+          igstAmount,
           totalAmount: Number(total.toFixed(2)),
           remarks: pi.remarks || '',
           isBulky: pi.isBulk || false
@@ -190,12 +267,16 @@ export const GRNPage: React.FC = () => {
     setGrossAmount(0);
     setNetAmount(0);
     setStatus('Draft');
+    setInvoiceNo('');
     setItems([]);
     setActiveItemIndex(null);
   };
 
   // Trigger grid edits
   const updateItemRow = (index: number, field: keyof GRNItem, value: any) => {
+    const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '' };
+    const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+
     setItems(prev => prev.map((item, idx) => {
       if (idx === index) {
         let updated = { ...item, [field]: value };
@@ -230,6 +311,17 @@ export const GRNPage: React.FC = () => {
           updated.vatAmount = Number(vatAmt.toFixed(2));
           updated.totalAmount = Number(total.toFixed(2));
           updated.unitCost = Number(unitCost.toFixed(2));
+
+          // GST breakdown
+          if (isIntrastate) {
+            updated.cgstAmount = Number((vatAmt / 2).toFixed(2));
+            updated.sgstAmount = Number((vatAmt / 2).toFixed(2));
+            updated.igstAmount = 0;
+          } else {
+            updated.cgstAmount = 0;
+            updated.sgstAmount = 0;
+            updated.igstAmount = Number(vatAmt.toFixed(2));
+          }
         }
         
         return updated;
@@ -262,6 +354,9 @@ export const GRNPage: React.FC = () => {
       return;
     }
 
+    const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '' };
+    const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+
     const qty = modalQuantity;
     const rate = modalRate;
     const vatPct = resolveItemTaxPercentage(modalItemId);
@@ -286,6 +381,9 @@ export const GRNPage: React.FC = () => {
       discountAmount: 0,
       vatPercentage: vatPct,
       vatAmount: Number(vatAmt.toFixed(2)),
+      cgstAmount: isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0,
+      sgstAmount: isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0,
+      igstAmount: isIntrastate ? 0 : Number(vatAmt.toFixed(2)),
       totalAmount: Number(total.toFixed(2)),
       remarks: '',
       isBulky: false
@@ -350,6 +448,7 @@ export const GRNPage: React.FC = () => {
       grossAmount,
       status: finalStatus,
       items,
+      invoiceNo: invoiceNo || undefined,
       createdAt: new Date().toISOString()
     };
 
@@ -379,6 +478,7 @@ export const GRNPage: React.FC = () => {
     setGrossAmount(grn.grossAmount);
     setNetAmount(grn.netAmount);
     setStatus(grn.status);
+    setInvoiceNo(grn.invoiceNo || '');
     setItems(grn.items || []);
     if (grn.items && grn.items.length > 0) {
       setActiveItemIndex(0);
@@ -491,7 +591,7 @@ export const GRNPage: React.FC = () => {
                             {g.status}
                           </span>
                         </td>
-                        <td className="px-8 py-4.5 font-bold text-slate-800">{g.netAmount} SAR</td>
+                        <td className="px-8 py-4.5 font-bold text-slate-800">{g.netAmount} INR</td>
                         <td className="px-8 py-4.5 text-right">
                           <div className="flex justify-end gap-2.5 opacity-80 group-hover:opacity-100 transition-all">
                             <button 
@@ -584,7 +684,7 @@ export const GRNPage: React.FC = () => {
                         (!storeId || p.storeId === storeId) &&
                         (!grns.some(g => g.poId === p.id && g.id !== editingGRNId))
                       ).map(p => (
-                        <option key={p.id} value={p.id}>{p.poNo} - Net: {p.netAmount} SAR ({vendors.find(v => v.id === p.vendorId)?.name})</option>
+                        <option key={p.id} value={p.id}>{p.poNo} - Net: {p.netAmount} {currencySymbol} ({vendors.find(v => v.id === p.vendorId)?.name})</option>
                       ))}
                     </select>
                   </div>
@@ -662,11 +762,80 @@ export const GRNPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="text-xs text-slate-500 flex flex-col gap-1.5 mt-2">
-                      <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-slate-400" /> Saudi Arabia</div>
-                      <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-slate-400" /> {selectedVendor.contactDetails?.contactPerson || 'Primary Agent'}</div>
-                      <div className="flex items-center gap-2"><Award className="w-3.5 h-3.5 text-slate-400" /> VAT Registered: <span className="font-extrabold text-slate-700">{selectedVendor.isVat ? 'Yes' : 'No'}</span></div>
+                    {/* Tab Switcher */}
+                    <div className="flex border-b border-slate-100 text-xs mt-1">
+                      <button 
+                        type="button"
+                        onClick={() => setVendorTab('gst')}
+                        className={`flex-1 py-1.5 font-bold text-center border-b-2 transition-all ${
+                          vendorTab === 'gst' 
+                            ? 'border-emerald-600 text-emerald-700' 
+                            : 'border-transparent text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        GST Details
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setVendorTab('location')}
+                        className={`flex-1 py-1.5 font-bold text-center border-b-2 transition-all ${
+                          vendorTab === 'location' 
+                            ? 'border-emerald-600 text-emerald-700' 
+                            : 'border-transparent text-slate-400 hover:text-slate-600'
+                        }`}
+                      >
+                        Location
+                      </button>
                     </div>
+
+                    {vendorTab === 'gst' ? (
+                      <div className="text-xs text-slate-500 flex flex-col gap-1.5 mt-2">
+                        {(() => {
+                          const gstDetails = getVendorGstDetails(selectedVendor);
+                          return (
+                            <>
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Vendor Address</span>
+                                <div className="text-slate-700 font-semibold mt-0.5">{gstDetails.address}</div>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">State Code</span>
+                                <div className="text-slate-700 font-semibold mt-0.5">{gstDetails.stateCode ? `${gstDetails.stateCode} (${gstDetails.state})` : 'N/A'}</div>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">State</span>
+                                <div className="text-slate-700 font-semibold mt-0.5">{gstDetails.state}</div>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">GSTIN Registered</span>
+                                <div className="text-slate-700 font-bold mt-0.5">{gstDetails.hasGst ? 'Yes' : 'No'}</div>
+                              </div>
+                              {gstDetails.gstin && (
+                                <div>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase">GSTIN</span>
+                                  <div className="text-slate-800 font-mono font-black tracking-wider mt-0.5">{gstDetails.gstin}</div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 flex flex-col gap-1.5 mt-2">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Billing Address</span>
+                          <div className="text-slate-700 font-semibold mt-0.5">{getVendorGstDetails(selectedVendor).address}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Primary Contact Agent</span>
+                          <div className="text-slate-700 font-semibold mt-0.5">{selectedVendor.contactDetails?.contactPerson || 'Primary Agent'}</div>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Country</span>
+                          <div className="text-slate-700 font-semibold mt-0.5">India</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -751,9 +920,16 @@ export const GRNPage: React.FC = () => {
                           <th className="py-2.5 px-3">Unit Cost</th>
                           <th className="py-2.5 px-3">Discount %</th>
                           <th className="py-2.5 px-3">Discount Amt</th>
-                          <th className="py-2.5 px-3">Vat %</th>
-                          <th className="py-2.5 px-3">Vat Amt</th>
-                          <th className="py-2.5 px-3 font-bold text-slate-800">Total Amt</th>
+                          <th className="py-2.5 px-3">GST Slab %</th>
+                          {isIntrastate ? (
+                            <>
+                              <th className="py-2.5 px-3">SGST Amt</th>
+                              <th className="py-2.5 px-3">CGST Amt</th>
+                            </>
+                          ) : (
+                            <th className="py-2.5 px-3">IGST Amt</th>
+                          )}
+                          <th className="py-2.5 px-3 font-bold text-slate-800">Total Amt ({currencySymbol})</th>
                           <th className="py-2.5 px-3">Remarks</th>
                           <th className="py-2.5 px-3 text-center">Bulky</th>
                           <th className="py-2.5 px-3 text-right">Action</th>
@@ -836,7 +1012,7 @@ export const GRNPage: React.FC = () => {
                                 onChange={(e) => updateItemRow(idx, 'publicPrice', Number(e.target.value))}
                               />
                             </td>
-                            <td className="py-3 px-3 font-bold text-slate-500">{i.unitCost} SAR</td>
+                            <td className="py-3 px-3 font-bold text-slate-500">{i.unitCost} {currencySymbol}</td>
                             <td className="py-3 px-3">
                               <input 
                                 type="number"
@@ -858,16 +1034,27 @@ export const GRNPage: React.FC = () => {
                               />
                             </td>
                             <td className="py-3 px-3">
-                              <input 
-                                type="number"
-                                min="0"
-                                className="w-12 px-2 py-1 border border-slate-200 rounded-lg outline-none text-xs focus:border-emerald-500 font-medium"
+                              <select 
+                                className="w-16 px-1 py-1 border border-slate-200 rounded-lg outline-none text-xs focus:border-emerald-500 font-bold"
                                 value={i.vatPercentage ?? 0}
                                 onChange={(e) => updateItemRow(idx, 'vatPercentage', Number(e.target.value))}
-                              />
+                              >
+                                <option value="0">0%</option>
+                                <option value="5">5%</option>
+                                <option value="12">12%</option>
+                                <option value="18">18%</option>
+                                <option value="28">28%</option>
+                              </select>
                             </td>
-                            <td className="py-3 px-3 text-slate-500">{i.vatAmount} SAR</td>
-                            <td className="py-3 px-3 font-extrabold text-slate-800">{i.totalAmount} SAR</td>
+                            {isIntrastate ? (
+                              <>
+                                <td className="py-3 px-3 text-slate-500">{i.sgstAmount ?? 0} {currencySymbol}</td>
+                                <td className="py-3 px-3 text-slate-500">{i.cgstAmount ?? 0} {currencySymbol}</td>
+                              </>
+                            ) : (
+                              <td className="py-3 px-3 text-slate-500">{i.igstAmount ?? 0} {currencySymbol}</td>
+                            )}
+                            <td className="py-3 px-3 font-extrabold text-slate-800">{i.totalAmount} {currencySymbol}</td>
                             <td className="py-3 px-3">
                               <input 
                                 type="text"
@@ -918,9 +1105,9 @@ export const GRNPage: React.FC = () => {
                   
                   <div className="flex justify-between items-center text-sm font-semibold text-slate-600">
                     <span>Gross Material Amount:</span>
-                    <span className="font-bold text-slate-800">{grossAmount} SAR</span>
+                    <span className="font-bold text-slate-800">{grossAmount} {currencySymbol}</span>
                   </div>
-
+ 
                   <div className="flex items-center gap-3">
                     <div className="flex-1 flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-slate-400 uppercase">Discount Percentage %</label>
@@ -945,21 +1132,34 @@ export const GRNPage: React.FC = () => {
                       />
                     </div>
                   </div>
-
+ 
                   <div className="p-4.5 bg-emerald-50/50 rounded-2xl border border-emerald-100 flex justify-between items-center mt-3">
                     <div>
-                      <div className="font-bold text-emerald-800 text-sm">Receipt Net Total (after VAT)</div>
+                      <div className="font-bold text-emerald-800 text-sm">Receipt Net Total (after GST)</div>
                       <div className="text-xs text-emerald-500 font-semibold mt-0.5">Adjusted valuation calculated dynamically</div>
                     </div>
-                    <div className="text-2xl font-black text-emerald-700 tracking-tight">{netAmount} SAR</div>
+                    <div className="text-2xl font-black text-emerald-700 tracking-tight">{netAmount} {currencySymbol}</div>
                   </div>
                 </div>
               )}
-
+ 
               {bottomTab === 'other' && (
                 <div className="flex flex-col gap-4 animate-in fade-in duration-200">
                   <h3 className="text-base font-extrabold text-slate-800 border-b border-slate-100 pb-2">Transit / Delivery Particulars</h3>
                   
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Invoice Number</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. INV-2026-DL789"
+                        className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-700 font-semibold text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:text-slate-400 placeholder:font-normal font-semibold"
+                        value={invoiceNo}
+                        onChange={(e) => setInvoiceNo(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   <div className="flex flex-col gap-2">
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Gate Checkpoint / Security Remarks</label>
                     <textarea 
@@ -1070,7 +1270,7 @@ export const GRNPage: React.FC = () => {
                   />
                 </div>
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Purchase Cost Rate (SAR)</label>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Purchase Cost Rate ({currencySymbol})</label>
                   <input 
                     type="number"
                     min="0"

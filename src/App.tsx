@@ -34,6 +34,8 @@ import { GRNPage } from './pages/GRN';
 import { PurchaseReceiptPage } from './pages/PurchaseReceipt';
 import { PurchaseReturnPage } from './pages/PurchaseReturn';
 import { ExpiryItemReturnPage } from './pages/ExpiryItemReturn';
+import { ChartOfAccounts } from './pages/ChartOfAccounts';
+import { JournalVouchers } from './pages/JournalVouchers';
 
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
@@ -114,6 +116,8 @@ const AppRoutes = () => {
               <Route path="masters/organization" element={<OrganizationMaster />} />
               <Route path="masters/plan-definition" element={<PlanDefinition />} />
               <Route path="masters/sponsor-tariff" element={<SponsorTariff />} />
+              <Route path="masters/chart-of-accounts" element={<ChartOfAccounts />} />
+              <Route path="transactions/journal-vouchers" element={<JournalVouchers />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

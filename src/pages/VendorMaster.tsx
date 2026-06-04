@@ -20,7 +20,8 @@ export const VendorMaster: React.FC = () => {
   const [name, setName] = useState('');
   const [vendorType, setVendorType] = useState('Local');
   const [billingStructure, setBillingStructure] = useState('Direct');
-  const [currency, setCurrency] = useState('SAR');
+  const [currency, setCurrency] = useState('INR');
+  const [address, setAddress] = useState('');
   const [creditPeriod, setCreditPeriod] = useState('');
   const [rating, setRating] = useState('');
   const [paymentTerm, setPaymentTerm] = useState('Net 30');
@@ -64,7 +65,7 @@ export const VendorMaster: React.FC = () => {
     setName('');
     setVendorType('Local');
     setBillingStructure('Direct');
-    setCurrency('SAR');
+    setCurrency('INR');
     setCreditPeriod('');
     setRating('');
     setPaymentTerm('Net 30');
@@ -76,6 +77,7 @@ export const VendorMaster: React.FC = () => {
     setExportLicense('');
     setAccount('');
     setRemarks('');
+    setAddress('');
     setActive(true);
     setQualityCheckRequired(false);
     setSuspended(false);
@@ -110,6 +112,7 @@ export const VendorMaster: React.FC = () => {
     setExportLicense(vendor.exportLicense || '');
     setAccount(vendor.account || '');
     setRemarks(vendor.remarks || '');
+    setAddress(vendor.address || '');
     setActive(vendor.active);
     setQualityCheckRequired(vendor.qualityCheckRequired);
     setSuspended(vendor.suspended);
@@ -156,6 +159,7 @@ export const VendorMaster: React.FC = () => {
       exportLicense,
       account,
       remarks,
+      address: address.trim(),
       active,
       qualityCheckRequired,
       suspended,
@@ -415,6 +419,7 @@ export const VendorMaster: React.FC = () => {
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
                 >
+                  <option value="INR">INR (Indian Rupee)</option>
                   <option value="SAR">SAR (Saudi Riyal)</option>
                   <option value="USD">USD (US Dollar)</option>
                   <option value="EUR">EUR (Euro)</option>
@@ -542,6 +547,17 @@ export const VendorMaster: React.FC = () => {
                   className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold text-slate-700 placeholder:text-slate-400"
                   value={account}
                   onChange={(e) => setAccount(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Address</label>
+                <textarea 
+                  placeholder="Vendor business address..."
+                  rows={2}
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold text-slate-700 placeholder:text-slate-400"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
                 />
               </div>
 
@@ -996,7 +1012,7 @@ export const VendorMaster: React.FC = () => {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Annual Turnover</label>
                     <input 
                       type="text"
-                      placeholder="e.g. SAR 5,000,000"
+                      placeholder="e.g. INR 5,000,000"
                       className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold text-slate-700"
                       value={businessInfo.annualTurnover || ''}
                       onChange={(e) => setBusinessInfo({ ...businessInfo, annualTurnover: e.target.value })}

@@ -768,6 +768,7 @@ export interface Vendor {
   vendorType: string;
   billingStructure?: string;
   currency: string;
+  address?: string;
   creditPeriod?: string;
   rating?: string;
   paymentTerm?: string;
@@ -890,6 +891,9 @@ export interface GRNItem {
   discountAmount?: number;
   vatPercentage?: number;
   vatAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   totalAmount: number;
   remarks?: string;
   isBulky: boolean;
@@ -910,6 +914,7 @@ export interface GRN {
   grossAmount: number;
   status: 'Draft' | 'Submitted';
   items?: GRNItem[];
+  invoiceNo?: string;
   createdAt?: string;
 }
 
@@ -1031,3 +1036,47 @@ export interface ExpiryReturn {
   createdAt?: string;
 }
 
+export interface ChartOfAccount {
+  id: string;
+  code: string;
+  name: string;
+  accountType: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+  accountGroup?: string;
+  balanceNature: 'Debit' | 'Credit';
+  systemPurpose?: string;
+  parentId?: string;
+  isGroup: boolean;
+  description?: string;
+  status: 'Active' | 'Inactive';
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface JournalVoucherItem {
+  id: string;
+  voucherId?: string;
+  accountId: string;
+  postingNature: 'Debit' | 'Credit';
+  amount: number;
+  description?: string;
+  
+  // Frontend virtual helper fields
+  accountCode?: string;
+  accountName?: string;
+}
+
+export interface JournalVoucher {
+  id: string;
+  voucherNo: string;
+  voucherDate: string;
+  refType: 'GRN' | 'PHARMACY_SALE' | 'OP_DISPENSE' | 'MANUAL';
+  refDocId?: string;
+  refDocNo?: string;
+  narration?: string;
+  totalDebit: number;
+  totalCredit: number;
+  status: 'Draft' | 'Posted';
+  items?: JournalVoucherItem[];
+  createdAt?: string;
+  updatedAt?: string;
+}

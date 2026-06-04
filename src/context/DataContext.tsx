@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem
 } from '../types';
 import { 
     getSupabase, 
@@ -167,6 +167,29 @@ interface DataContextType {
   deleteExpiryReturn: (id: string) => Promise<boolean>;
   fetchExpiryItems: (storeId: string, noOfDays: number) => Promise<any[]>;
 
+  chartOfAccounts: ChartOfAccount[];
+  saveChartOfAccount: (coa: ChartOfAccount) => Promise<boolean>;
+  deleteChartOfAccount: (id: string) => Promise<boolean>;
+
+  journalVouchers: JournalVoucher[];
+  saveJournalVoucher: (jv: JournalVoucher) => Promise<boolean>;
+  deleteJournalVoucher: (id: string) => Promise<boolean>;
+  postAutoJournalVoucher: (
+    type: 'GRN' | 'PHARMACY_SALE' | 'OP_DISPENSE',
+    refDocId: string,
+    refDocNo: string,
+    amountDetails: {
+      net: number;
+      cgst?: number;
+      sgst?: number;
+      igst?: number;
+      tax?: number;
+      gross?: number;
+      partyName?: string;
+      description?: string;
+    }
+  ) => Promise<boolean>;
+
   isLoading: boolean;
   isDbConnected: boolean;
   updateDbConnection: (url: string, key: string) => void;
@@ -237,6 +260,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [purchaseReceipts, setPurchaseReceipts] = useState<PurchaseReceipt[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
   const [expiryReturns, setExpiryReturns] = useState<ExpiryReturn[]>([]);
+  const [chartOfAccounts, setChartOfAccounts] = useState<ChartOfAccount[]>(() => {
+    const local = localStorage.getItem('medicore_chart_of_accounts');
+    if (local) return JSON.parse(local);
+    return [
+      { id: 'coa-root-1', code: '100000', name: 'Assets', accountType: 'Asset', balanceNature: 'Debit', isGroup: true, description: 'Asset group accounts', status: 'Active' },
+      { id: 'coa-root-2', code: '200000', name: 'Liabilities', accountType: 'Liability', balanceNature: 'Credit', isGroup: true, description: 'Liability group accounts', status: 'Active' },
+      { id: 'coa-root-3', code: '400000', name: 'Income', accountType: 'Revenue', balanceNature: 'Credit', isGroup: true, description: 'Revenue group accounts', status: 'Active' },
+      { id: 'coa-root-4', code: '500000', name: 'Expenses', accountType: 'Expense', balanceNature: 'Debit', isGroup: true, description: 'Expense group accounts', status: 'Active' },
+      
+      { id: 'coa-sub-1', code: '110000', name: 'Cash & Bank', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-root-1', isGroup: true, description: 'Cash and bank group', status: 'Active' },
+      { id: 'coa-sub-2', code: '130000', name: 'Duties & Taxes Receivable', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-root-1', isGroup: true, description: 'Duties and taxes group', status: 'Active' },
+      { id: 'coa-sub-3', code: '220000', name: 'Duties & Taxes Payable', accountType: 'Liability', balanceNature: 'Credit', parentId: 'coa-root-2', isGroup: true, description: 'Duties and taxes payable group', status: 'Active' },
+      
+      { id: 'coa-item-1', code: '510000', name: 'Medicine Purchase A/C', accountType: 'Expense', balanceNature: 'Debit', parentId: 'coa-root-4', isGroup: false, systemPurpose: 'Captures the net factory-cost of medicines coming into the warehouse before taxes.', status: 'Active' },
+      { id: 'coa-item-2', code: '131000', name: 'Input CGST (Provisional)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'Parks the central government tax portion paid to vendors. Locked from tax deductions.', status: 'Active' },
+      { id: 'coa-item-3', code: '132000', name: 'Input SGST (Provisional)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'Parks the state government tax portion paid to vendors. Locked from tax deductions.', status: 'Active' },
+      { id: 'coa-item-4', code: '133000', name: 'Input CGST (Approved)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'The verified central tax vault. Unlocked by matching excel files to reduce tax liabilities.', status: 'Active' },
+      { id: 'coa-item-5', code: '134000', name: 'Input SGST (Approved)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'The verified state tax vault. Unlocked by matching excel files to reduce tax liabilities.', status: 'Active' },
+      { id: 'coa-item-6', code: '210000', name: 'Accounts Payable Ledger', accountType: 'Liability', balanceNature: 'Credit', parentId: 'coa-root-2', isGroup: false, systemPurpose: 'Tracks the live, un-truncated debt owed to each specific wholesale pharmaceutical distributor.', status: 'Active' },
+      { id: 'coa-item-7', code: '410000', name: 'Pharmacy Sales Revenue', accountType: 'Revenue', balanceNature: 'Credit', parentId: 'coa-root-3', isGroup: false, systemPurpose: 'Stores the base earnings extracted backward from retail medicine shelf-sales.', status: 'Active' },
+      { id: 'coa-item-8', code: '221000', name: 'Output CGST Liability', accountType: 'Liability', balanceNature: 'Credit', parentId: 'coa-sub-3', isGroup: false, systemPurpose: 'Accumulates the central tax slice collected from patients. Owed to the state treasury.', status: 'Active' },
+      { id: 'coa-item-9', code: '222000', name: 'Output SGST Liability', accountType: 'Liability', balanceNature: 'Credit', parentId: 'coa-sub-3', isGroup: false, systemPurpose: 'Accumulates the state tax slice collected from patients. Owed to the state treasury.', status: 'Active' },
+      { id: 'coa-item-10', code: '580000', name: 'Tax Variance Purchase Loss', accountType: 'Expense', balanceNature: 'Debit', parentId: 'coa-root-4', isGroup: false, systemPurpose: 'A specialized write-off account to absorb losses caused by internal human data-entry typos.', status: 'Active' },
+      { id: 'coa-item-11', code: '111000', name: 'Cash Account', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-1', isGroup: false, systemPurpose: 'Tracks physical hard cash collections inside the pharmacy\'s retail counter drawer.', status: 'Active' },
+      { id: 'coa-item-12', code: '112000', name: 'Bank Clearing Account', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-1', isGroup: false, systemPurpose: 'Tracks digital payment collections (UPI scans, Credit Cards, NetBanking transfers).', status: 'Active' },
+      { id: '13500000-1350-4000-8000-000000135000', code: '135000', name: 'Input IGST (Provisional)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'Parks the integrated government tax portion paid to interstate vendors. Locked from tax deductions.', status: 'Active' },
+      { id: '13600000-1360-4000-8000-000000136000', code: '136000', name: 'Input IGST (Approved)', accountType: 'Asset', balanceNature: 'Debit', parentId: 'coa-sub-2', isGroup: false, systemPurpose: 'The verified integrated tax vault. Unlocked by matching excel files to reduce tax liabilities.', status: 'Active' },
+      { id: '22300000-2230-4000-8000-000000223000', code: '223000', name: 'Output IGST Liability', accountType: 'Liability', balanceNature: 'Credit', parentId: 'coa-sub-3', isGroup: false, systemPurpose: 'Accumulates the integrated tax slice collected from interstate patients. Owed to the treasury.', status: 'Active' }
+    ];
+  });
+
+  const [journalVouchers, setJournalVouchers] = useState<JournalVoucher[]>(() => {
+    const local = localStorage.getItem('medicore_journal_vouchers');
+    return local ? JSON.parse(local) : [];
+  });
 
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
@@ -711,7 +769,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     name: v.name,
     vendorType: v.vendor_type,
     billingStructure: v.billing_structure,
-    currency: v.currency,
+    currency: v.currency === 'SAR' ? 'INR' : (v.currency || 'INR'),
+    address: v.address || undefined,
     creditPeriod: v.credit_period,
     rating: v.rating,
     paymentTerm: v.payment_term,
@@ -743,6 +802,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     vendor_type: v.vendorType,
     billing_structure: v.billingStructure,
     currency: v.currency,
+    address: v.address || null,
     credit_period: v.creditPeriod,
     rating: v.rating,
     payment_term: v.paymentTerm,
@@ -763,6 +823,81 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     registration_details: v.registrationDetails || {},
     business_info: v.businessInfo || {},
     contact_details: v.contactDetails || {}
+  });
+
+  const mapChartOfAccountFromDb = (c: any): ChartOfAccount => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    accountType: c.account_type,
+    accountGroup: c.account_group || undefined,
+    balanceNature: c.balance_nature,
+    systemPurpose: c.system_purpose || undefined,
+    parentId: c.parent_id || undefined,
+    isGroup: !!c.is_group,
+    description: c.description || undefined,
+    status: c.status || 'Active',
+    createdAt: c.created_at,
+    updatedAt: c.updated_at
+  });
+
+  const mapChartOfAccountToDb = (c: ChartOfAccount) => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    account_type: c.accountType,
+    account_group: c.accountGroup || null,
+    balance_nature: c.balanceNature,
+    system_purpose: c.systemPurpose || null,
+    parent_id: c.parentId || null,
+    is_group: c.isGroup,
+    description: c.description || null,
+    status: c.status
+  });
+
+  const mapJournalVoucherFromDb = (v: any, items: any[] = []): JournalVoucher => ({
+    id: v.id,
+    voucherNo: v.voucher_no,
+    voucherDate: v.voucher_date,
+    refType: v.ref_type,
+    refDocId: v.ref_doc_id || undefined,
+    refDocNo: v.ref_doc_no || undefined,
+    narration: v.narration || undefined,
+    totalDebit: Number(v.total_debit || 0),
+    totalCredit: Number(v.total_credit || 0),
+    status: v.status || 'Draft',
+    items: items.map(item => ({
+      id: item.id,
+      voucherId: item.voucher_id || undefined,
+      accountId: item.account_id,
+      postingNature: item.posting_nature,
+      amount: Number(item.amount || 0),
+      description: item.description || undefined
+    })),
+    createdAt: v.created_at,
+    updatedAt: v.updated_at
+  });
+
+  const mapJournalVoucherToDb = (v: JournalVoucher) => ({
+    id: v.id,
+    voucher_no: v.voucherNo,
+    voucher_date: v.voucherDate,
+    ref_type: v.refType,
+    ref_doc_id: v.refDocId || null,
+    ref_doc_no: v.refDocNo || null,
+    narration: v.narration || null,
+    total_debit: v.totalDebit,
+    total_credit: v.totalCredit,
+    status: v.status
+  });
+
+  const mapJournalVoucherItemToDb = (i: JournalVoucherItem, voucherId: string) => ({
+    id: i.id || crypto.randomUUID(),
+    voucher_id: voucherId,
+    account_id: i.accountId,
+    posting_nature: i.postingNature,
+    amount: i.amount,
+    description: i.description || null
   });
 
   const mapPOFromDb = (p: any, items: any[] = []): PurchaseOrder => ({
@@ -863,10 +998,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       discountAmount: Number(i.discount_amount || 0),
       vatPercentage: Number(i.vat_percentage || 15),
       vatAmount: Number(i.vat_amount || 0),
+      cgstAmount: Number(i.cgst_amount || 0),
+      sgstAmount: Number(i.sgst_amount || 0),
+      igstAmount: Number(i.igst_amount || 0),
       totalAmount: Number(i.total_amount || 0),
       remarks: i.remarks,
       isBulky: !!i.is_bulky
     })),
+    invoiceNo: g.invoice_no || undefined,
     createdAt: g.created_at
   });
 
@@ -883,6 +1022,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     discount_amount: g.discountAmount || 0,
     net_amount: g.netAmount,
     gross_amount: g.grossAmount,
+    invoice_no: g.invoiceNo || null,
     status: g.status || 'Draft'
   });
 
@@ -1176,7 +1316,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('procurement_purchase_returns').select('*'),
           supabase.from('procurement_purchase_return_items').select('*'),
           supabase.from('procurement_expiry_returns').select('*'),
-          supabase.from('procurement_expiry_return_items').select('*')
+          supabase.from('procurement_expiry_return_items').select('*'),
+          supabase.from('finance_chart_of_accounts').select('*'),
+          supabase.from('finance_journal_vouchers').select('*'),
+          supabase.from('finance_journal_voucher_items').select('*')
         ]);
 
         const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
@@ -1195,7 +1338,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'procurement_grns', 'procurement_grn_items',
             'procurement_purchase_receipts', 'procurement_purchase_receipt_items',
             'procurement_purchase_returns', 'procurement_purchase_return_items',
-            'procurement_expiry_returns', 'procurement_expiry_return_items'
+            'procurement_expiry_returns', 'procurement_expiry_return_items',
+            'finance_chart_of_accounts',
+            'finance_journal_vouchers',
+            'finance_journal_voucher_items'
         ];
 
         const [
@@ -1204,7 +1350,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
             prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes,
             pvRes, pvtRes, poRes, poiRes, grnRes, grniRes, prnRes, prniRes,
-            prtnRes, prtniRes, exprRes, expriRes
+            prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes
         ] = results;
 
         console.log(`Sync: Fetched ${bRes.data?.length || 0} raw bills from DB.`);
@@ -1540,6 +1686,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const local_returns = localStorage.getItem('medicore_purchase_returns');
             if (local_returns) returnData = JSON.parse(local_returns);
         }
+        
+        // Load Journal Vouchers gracefully
+        let jvData: JournalVoucher[] = [];
+        if (jvRes && jvRes.data) {
+            const rawJVs = jvRes.data;
+            const rawJVItems = jviRes?.data || [];
+            jvData = rawJVs.map((jv: any) => {
+                const myItems = rawJVItems.filter((i: any) => i.voucher_id === jv.id);
+                return mapJournalVoucherFromDb(jv, myItems);
+            });
+            setJournalVouchers(jvData);
+        } else {
+            const local = localStorage.getItem('medicore_journal_vouchers');
+            if (local) {
+                setJournalVouchers(JSON.parse(local));
+            }
+        }
         setPurchaseReturns(returnData);
 
         // Load Expiry Returns gracefully
@@ -1556,6 +1719,69 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (local_exp) expData = JSON.parse(local_exp);
         }
         setExpiryReturns(expData);
+
+        // Load Chart of Accounts gracefully
+        let coaData: ChartOfAccount[] = [];
+        if (coaRes && coaRes.data && coaRes.data.length > 0) {
+            coaData = coaRes.data.map(mapChartOfAccountFromDb);
+        } else {
+            const local = localStorage.getItem('medicore_chart_of_accounts');
+            if (local) {
+                coaData = JSON.parse(local);
+            }
+        }
+
+        const requiredSeeds = [
+          { id: '13500000-1350-4000-8000-000000135000', code: '135000', name: 'Input IGST (Provisional)', accountType: 'Asset' as const, balanceNature: 'Debit' as const, parentId: 'coa-sub-2', isGroup: false, description: 'Parks the integrated government tax portion paid to interstate vendors. Locked from tax deductions.', status: 'Active' as const },
+          { id: '13600000-1360-4000-8000-000000136000', code: '136000', name: 'Input IGST (Approved)', accountType: 'Asset' as const, balanceNature: 'Debit' as const, parentId: 'coa-sub-2', isGroup: false, description: 'The verified integrated tax vault. Unlocked by matching excel files to reduce tax liabilities.', status: 'Active' as const },
+          { id: '22300000-2230-4000-8000-000000223000', code: '223000', name: 'Output IGST Liability', accountType: 'Liability' as const, balanceNature: 'Credit' as const, parentId: 'coa-sub-3', isGroup: false, description: 'Accumulates the integrated tax slice collected from interstate patients. Owed to the treasury.', status: 'Active' as const }
+        ];
+
+        const missingSeeds = requiredSeeds.filter(seed => !coaData.some(acc => acc.code === seed.code));
+        if (missingSeeds.length > 0) {
+            console.log("Merging missing IGST seed accounts:", missingSeeds.map(s => s.code));
+            coaData = [...coaData, ...missingSeeds];
+
+            // If we fetched from database, try to push missing seeds to database
+            if (coaRes && coaRes.data && coaRes.data.length > 0 && checkConfigured()) {
+                const supabase = getSupabase();
+                missingSeeds.forEach(async (seed) => {
+                    const parentCode = seed.code === '223000' ? '220000' : '130000';
+                    const parent = coaData.find(a => a.code === parentCode);
+                    const dbCOA = mapChartOfAccountToDb({
+                        ...seed,
+                        parentId: parent ? parent.id : undefined
+                    });
+                    await supabase.from('finance_chart_of_accounts').upsert(dbCOA);
+                });
+            }
+        }
+
+        // Always normalize parentIds to prevent local storage vs database UUID mismatches
+        coaData = coaData.map(account => {
+            if (account.code.endsWith('00000')) {
+                return { ...account, parentId: undefined };
+            }
+            
+            let parentCode = '';
+            if (account.code.endsWith('0000')) {
+                parentCode = account.code.substring(0, 1) + '00000';
+            } else {
+                const candidateParentCode = account.code.substring(0, 2) + '0000';
+                const parentExists = coaData.some(a => a.code === candidateParentCode && a.code !== account.code);
+                if (parentExists) {
+                    parentCode = candidateParentCode;
+                } else {
+                    parentCode = account.code.substring(0, 1) + '00000';
+                }
+            }
+            
+            const parent = coaData.find(a => a.code === parentCode);
+            return { ...account, parentId: parent ? parent.id : undefined };
+        });
+
+        localStorage.setItem('medicore_chart_of_accounts', JSON.stringify(coaData));
+        setChartOfAccounts(coaData);
         
         if (!hasSyncErrors) {
             showToast('success', 'Data synced with database.');
@@ -2053,6 +2279,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
+      // Auto JV Posting
+      try {
+        const partyName = `${sale.firstName} ${sale.lastName || ''}`.trim();
+        await postAutoJournalVoucher('PHARMACY_SALE', saleId, sale.saleNo, {
+          net: sale.totalAmount,
+          tax: totalTaxAmount,
+          cgst: Number((totalTaxAmount / 2).toFixed(2)),
+          sgst: Number((totalTaxAmount / 2).toFixed(2)),
+          igst: 0,
+          gross: Number((sale.totalAmount - totalTaxAmount).toFixed(2)),
+          partyName: partyName || 'Cash Patient'
+        });
+      } catch (jvErr) {
+        console.error("Error posting automated direct sale journal voucher:", jvErr);
+      }
+
       showToast('success', 'Pharmacy Sale completed successfully.');
       setRefreshTrigger(prev => prev + 1);
       return true;
@@ -2398,6 +2640,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               discount_amount: i.discountAmount || 0,
               vat_percentage: i.vatPercentage || 15,
               vat_amount: i.vatAmount || 0,
+              cgst_amount: i.cgstAmount || 0,
+              sgst_amount: i.sgstAmount || 0,
+              igst_amount: i.igstAmount || 0,
               total_amount: i.totalAmount,
               remarks: i.remarks || null,
               is_bulky: !!i.isBulky
@@ -2449,6 +2694,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (ledgerError) {
               console.error("Error writing to ledger for GRN item:", ledgerError);
             }
+          }
+
+          // Auto JV Posting
+          try {
+            const vendor = vendors.find(v => v.id === grn.vendorId);
+            const cgstTotal = grn.items?.reduce((sum, i) => sum + Number(i.cgstAmount || 0), 0) || 0;
+            const sgstTotal = grn.items?.reduce((sum, i) => sum + Number(i.sgstAmount || 0), 0) || 0;
+            const igstTotal = grn.items?.reduce((sum, i) => sum + Number(i.igstAmount || 0), 0) || 0;
+            const taxAmount = grn.items?.reduce((sum, i) => sum + Number(i.cgstAmount || 0) + Number(i.sgstAmount || 0) + Number(i.igstAmount || 0), 0) || 0;
+            const grossTotal = grn.items?.reduce((sum, i) => sum + (Number(i.acceptedQuantity || 0) * Number(i.rate || 0) - Number(i.discountAmount || 0)), 0) || 0;
+
+            await postAutoJournalVoucher('GRN', grn.id, grn.grnNo, {
+              net: grn.netAmount,
+              cgst: cgstTotal,
+              sgst: sgstTotal,
+              igst: igstTotal,
+              tax: taxAmount,
+              gross: grossTotal,
+              partyName: vendor?.name || 'Vendor'
+            });
+          } catch (jvErr) {
+            console.error("Error posting automated GRN journal voucher:", jvErr);
           }
         }
 
@@ -3730,6 +3997,24 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   };
               }));
               
+              // Auto JV Posting
+              try {
+                const pat = patients.find(p => p.id === prescription.patientId);
+                const patientName = pat ? `${pat.firstName} ${pat.lastName || ''}`.trim() : 'Patient';
+
+                await postAutoJournalVoucher('OP_DISPENSE', billId, invoiceNo, {
+                  net: transactionTotal,
+                  tax: transactionTax,
+                  cgst: Number((transactionTax / 2).toFixed(2)),
+                  sgst: Number((transactionTax / 2).toFixed(2)),
+                  igst: 0,
+                  gross: Number((transactionTotal - transactionTax).toFixed(2)),
+                  partyName: patientName
+                });
+              } catch (jvErr) {
+                console.error("Error posting automated prescription dispense journal voucher:", jvErr);
+              }
+
               showToast('success', `Prescription dispensed. Invoice ${invoiceNo} generated.`);
               return { success: true, invoiceId: billId };
           } else {
@@ -4482,6 +4767,329 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const saveChartOfAccount = async (coa: ChartOfAccount): Promise<boolean> => {
+    let isSuccess = true;
+    setChartOfAccounts(prev => {
+      const index = prev.findIndex(c => c.id === coa.id);
+      let updated: ChartOfAccount[];
+      if (index > -1) {
+        updated = [...prev];
+        updated[index] = coa;
+      } else {
+        updated = [coa, ...prev];
+      }
+      localStorage.setItem('medicore_chart_of_accounts', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (checkConfigured()) {
+      try {
+        const dbCOA = mapChartOfAccountToDb(coa);
+        const { error } = await getSupabase().from('finance_chart_of_accounts').upsert(dbCOA);
+        if (error) {
+          console.error("Error saving chart of account:", error.message);
+          showToast('error', `Database error: ${error.message}`);
+          isSuccess = false;
+        }
+      } catch (err: any) {
+        console.error("Exception saving chart of account:", err.message);
+        isSuccess = false;
+      }
+    }
+    return isSuccess;
+  };
+
+  const deleteChartOfAccount = async (id: string): Promise<boolean> => {
+    let isSuccess = true;
+    setChartOfAccounts(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      localStorage.setItem('medicore_chart_of_accounts', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (checkConfigured()) {
+      try {
+        const { error } = await getSupabase().from('finance_chart_of_accounts').delete().eq('id', id);
+        if (error) {
+          console.error("Error deleting chart of account:", error.message);
+          showToast('error', `Database error: ${error.message}`);
+          isSuccess = false;
+        }
+      } catch (err: any) {
+        console.error("Exception deleting chart of account:", err.message);
+        isSuccess = false;
+      }
+    }
+    return isSuccess;
+  };
+
+  const saveJournalVoucher = async (jv: JournalVoucher): Promise<boolean> => {
+    let isSuccess = true;
+    setJournalVouchers(prev => {
+      const index = prev.findIndex(v => v.id === jv.id);
+      let updated: JournalVoucher[];
+      if (index > -1) {
+        updated = [...prev];
+        updated[index] = jv;
+      } else {
+        updated = [jv, ...prev];
+      }
+      localStorage.setItem('medicore_journal_vouchers', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (checkConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const dbJV = mapJournalVoucherToDb(jv);
+        const { error: hdrError } = await supabase.from('finance_journal_vouchers').upsert(dbJV);
+        if (hdrError) {
+          console.error("Error saving journal voucher:", hdrError.message);
+          showToast('error', `Database error: ${hdrError.message}`);
+          isSuccess = false;
+        } else if (jv.items) {
+          // Delete existing items for this voucher
+          await supabase.from('finance_journal_voucher_items').delete().eq('voucher_id', jv.id);
+          
+          if (jv.items.length > 0) {
+            const dbItems = jv.items.map(item => mapJournalVoucherItemToDb(item, jv.id));
+            const { error: itemsError } = await supabase.from('finance_journal_voucher_items').insert(dbItems);
+            if (itemsError) {
+              console.error("Error saving journal voucher items:", itemsError.message);
+              showToast('error', `Database error: ${itemsError.message}`);
+              isSuccess = false;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("Exception saving journal voucher:", err.message);
+        isSuccess = false;
+      }
+    }
+    return isSuccess;
+  };
+
+  const deleteJournalVoucher = async (id: string): Promise<boolean> => {
+    let isSuccess = true;
+    setJournalVouchers(prev => {
+      const updated = prev.filter(v => v.id !== id);
+      localStorage.setItem('medicore_journal_vouchers', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (checkConfigured()) {
+      try {
+        const { error } = await getSupabase().from('finance_journal_vouchers').delete().eq('id', id);
+        if (error) {
+          console.error("Error deleting journal voucher:", error.message);
+          showToast('error', `Database error: ${error.message}`);
+          isSuccess = false;
+        }
+      } catch (err: any) {
+        console.error("Exception deleting journal voucher:", err.message);
+        isSuccess = false;
+      }
+    }
+    return isSuccess;
+  };
+
+  const postAutoJournalVoucher = async (
+    type: 'GRN' | 'PHARMACY_SALE' | 'OP_DISPENSE',
+    refDocId: string,
+    refDocNo: string,
+    amountDetails: {
+      net: number;
+      cgst?: number;
+      sgst?: number;
+      igst?: number;
+      tax?: number;
+      gross?: number;
+      partyName?: string;
+      description?: string;
+    }
+  ): Promise<boolean> => {
+    // Generate sequential voucher number JV-YYYYMMDD-XXXX
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
+    const randSuffix = Math.floor(1000 + Math.random() * 9000).toString();
+    const voucherNo = `JV-${dateStr}-${randSuffix}`;
+    const voucherId = crypto.randomUUID();
+
+    const items: JournalVoucherItem[] = [];
+
+    const getAccountByCode = (code: string) => {
+      return chartOfAccounts.find(a => a.code === code);
+    };
+
+    if (type === 'GRN') {
+      const medicinePurchaseAcc = getAccountByCode('510000');
+      const inputCgstAcc = getAccountByCode('131000');
+      const inputSgstAcc = getAccountByCode('132000');
+      const inputIgstAcc = getAccountByCode('135000');
+      const accountsPayableAcc = getAccountByCode('210000');
+
+      const igst = amountDetails.igst ?? 0;
+      const isInterstate = igst > 0;
+
+      const cgst = isInterstate ? 0 : (amountDetails.cgst ?? Number(((amountDetails.tax || 0) / 2).toFixed(2)));
+      const sgst = isInterstate ? 0 : (amountDetails.sgst ?? Number(((amountDetails.tax || 0) / 2).toFixed(2)));
+      const taxTotal = isInterstate ? igst : (cgst + sgst);
+      const gross = amountDetails.gross ?? Number((amountDetails.net - taxTotal).toFixed(2));
+      const net = amountDetails.net;
+
+      if (medicinePurchaseAcc && gross > 0) {
+        items.push({
+          id: crypto.randomUUID(),
+          accountId: medicinePurchaseAcc.id,
+          postingNature: 'Debit',
+          amount: gross,
+          description: `Medicine purchase costs for ${refDocNo}`
+        });
+      }
+
+      if (isInterstate) {
+        if (inputIgstAcc && igst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: inputIgstAcc.id,
+            postingNature: 'Debit',
+            amount: igst,
+            description: `Provisional Input IGST paid for ${refDocNo}`
+          });
+        }
+      } else {
+        if (inputCgstAcc && cgst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: inputCgstAcc.id,
+            postingNature: 'Debit',
+            amount: cgst,
+            description: `Provisional Input CGST paid for ${refDocNo}`
+          });
+        }
+        if (inputSgstAcc && sgst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: inputSgstAcc.id,
+            postingNature: 'Debit',
+            amount: sgst,
+            description: `Provisional Input SGST paid for ${refDocNo}`
+          });
+        }
+      }
+
+      if (accountsPayableAcc && net > 0) {
+        items.push({
+          id: crypto.randomUUID(),
+          accountId: accountsPayableAcc.id,
+          postingNature: 'Credit',
+          amount: net,
+          description: `Payable to Vendor: ${amountDetails.partyName || 'Vendor'} for ${refDocNo}`
+        });
+      }
+    } else if (type === 'PHARMACY_SALE' || type === 'OP_DISPENSE') {
+      const cashAcc = getAccountByCode('111000');
+      const salesRevenueAcc = getAccountByCode('410000');
+      const outputCgstAcc = getAccountByCode('221000');
+      const outputSgstAcc = getAccountByCode('222000');
+      const outputIgstAcc = getAccountByCode('223000');
+
+      const igst = amountDetails.igst ?? 0;
+      const isInterstate = igst > 0;
+
+      const cgst = isInterstate ? 0 : (amountDetails.cgst ?? Number(((amountDetails.tax || 0) / 2).toFixed(2)));
+      const sgst = isInterstate ? 0 : (amountDetails.sgst ?? Number(((amountDetails.tax || 0) / 2).toFixed(2)));
+      const taxTotal = isInterstate ? igst : (cgst + sgst);
+      const gross = amountDetails.gross ?? Number((amountDetails.net - taxTotal).toFixed(2));
+      const net = amountDetails.net;
+
+      if (cashAcc && net > 0) {
+        items.push({
+          id: crypto.randomUUID(),
+          accountId: cashAcc.id,
+          postingNature: 'Debit',
+          amount: net,
+          description: `Cash collections for ${type} ${refDocNo}`
+        });
+      }
+
+      if (salesRevenueAcc && gross > 0) {
+        items.push({
+          id: crypto.randomUUID(),
+          accountId: salesRevenueAcc.id,
+          postingNature: 'Credit',
+          amount: gross,
+          description: `Pharmacy Sales Revenue for ${refDocNo}`
+        });
+      }
+
+      if (isInterstate) {
+        if (outputIgstAcc && igst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: outputIgstAcc.id,
+            postingNature: 'Credit',
+            amount: igst,
+            description: `Output IGST liability collected for ${refDocNo}`
+          });
+        }
+      } else {
+        if (outputCgstAcc && cgst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: outputCgstAcc.id,
+            postingNature: 'Credit',
+            amount: cgst,
+            description: `Output CGST liability collected for ${refDocNo}`
+          });
+        }
+        if (outputSgstAcc && sgst > 0) {
+          items.push({
+            id: crypto.randomUUID(),
+            accountId: outputSgstAcc.id,
+            postingNature: 'Credit',
+            amount: sgst,
+            description: `Output SGST liability collected for ${refDocNo}`
+          });
+        }
+      }
+    }
+
+    if (items.length === 0) return false;
+
+    const totalDebit = Number(items.filter(i => i.postingNature === 'Debit').reduce((sum, i) => sum + i.amount, 0).toFixed(2));
+    const totalCredit = Number(items.filter(i => i.postingNature === 'Credit').reduce((sum, i) => sum + i.amount, 0).toFixed(2));
+
+    const diff = Number((totalDebit - totalCredit).toFixed(2));
+    if (diff !== 0 && items.length > 1) {
+      if (diff > 0) {
+        const creditLine = items.find(i => i.postingNature === 'Credit');
+        if (creditLine) creditLine.amount = Number((creditLine.amount + diff).toFixed(2));
+      } else {
+        const debitLine = items.find(i => i.postingNature === 'Debit');
+        if (debitLine) debitLine.amount = Number((debitLine.amount + Math.abs(diff)).toFixed(2));
+      }
+    }
+
+    const finalDebit = Number(items.filter(i => i.postingNature === 'Debit').reduce((sum, i) => sum + i.amount, 0).toFixed(2));
+    const finalCredit = Number(items.filter(i => i.postingNature === 'Credit').reduce((sum, i) => sum + i.amount, 0).toFixed(2));
+
+    const jv: JournalVoucher = {
+      id: voucherId,
+      voucherNo,
+      voucherDate: new Date().toISOString().split('T')[0],
+      refType: type,
+      refDocId,
+      refDocNo,
+      narration: amountDetails.description || `${type} Auto Posting for ${refDocNo}`,
+      totalDebit: finalDebit,
+      totalCredit: finalCredit,
+      status: 'Posted',
+      items
+    };
+
+    return await saveJournalVoucher(jv);
+  };
+
   const checkAndAutoRaisePO = async (storeId: string, itemId: string, newBalance: number, forcedItem?: InventoryItem) => {
     if (!requireDb()) return;
     try {
@@ -4843,6 +5451,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       purchaseReceipts, savePurchaseReceipt, deletePurchaseReceipt,
       purchaseReturns, savePurchaseReturn, deletePurchaseReturn,
       expiryReturns, saveExpiryReturn, deleteExpiryReturn, fetchExpiryItems,
+      chartOfAccounts, saveChartOfAccount, deleteChartOfAccount,
+      journalVouchers, saveJournalVoucher, deleteJournalVoucher, postAutoJournalVoucher,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
 

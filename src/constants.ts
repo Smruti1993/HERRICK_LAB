@@ -129,8 +129,15 @@ export const NAV_ITEMS: NavItem[] = [
         subItems: [
           { label: 'Organization', path: '/finance/masters/organization' },
           { label: 'Plan Definition', path: '/finance/masters/plan-definition' },
-          { label: 'Sponsor Tariff', path: '/finance/masters/sponsor-tariff' }
-
+          { label: 'Sponsor Tariff', path: '/finance/masters/sponsor-tariff' },
+          { label: 'Chart of Accounts', path: '/finance/masters/chart-of-accounts' }
+        ]
+      },
+      {
+        label: 'Transactions',
+        path: '/finance/transactions',
+        subItems: [
+          { label: 'Journal Voucher', path: '/finance/transactions/journal-vouchers' }
         ]
       }
     ]
