@@ -107,6 +107,7 @@ export const NAV_ITEMS: NavItem[] = [
           { label: 'Vendor Master', path: '/procurement/vendor-master' }
         ]
       },
+      { label: 'Vendor Compliance', path: '/procurement/vendor-compliance' },
       { label: 'Purchase Order', path: '/procurement/purchase-order' },
       { label: 'Goods Receipt Note (GRN)', path: '/procurement/grn' },
       { label: 'Purchase Receipt', path: '/procurement/purchase-receipt' },

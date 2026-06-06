@@ -141,7 +141,7 @@ export const PharmacyInvoiceReport: React.FC<PharmacyInvoiceReportProps> = ({
                   <div className="text-[10px] text-slate-500">EACH, 1</div>
                 </td>
                 <td className="py-4 pr-4 align-top text-center">{Math.abs(item.quantity)}</td>
-                <td className="py-4 pr-4 align-top text-right">{item.unitPrice.toFixed(2)}</td>
+                <td className="py-4 pr-4 align-top text-right">{((item.total - (item.taxAmount || 0)) / Math.abs(item.quantity)).toFixed(2)}</td>
                 <td className="py-4 pr-4 align-top text-right">{Math.abs(item.discountAmount || 0).toFixed(2)}</td>
                 <td className="py-4 pr-4 align-top text-right">{Math.abs(item.taxAmount || 0).toFixed(2)}</td>
                 <td className="py-4 align-top text-right font-bold">{Math.abs(item.total).toFixed(2)}</td>
@@ -152,7 +152,7 @@ export const PharmacyInvoiceReport: React.FC<PharmacyInvoiceReportProps> = ({
             <tr className="border-t-2 border-slate-900 font-bold">
               <td className="py-3" colSpan={2}>Total</td>
               <td className="py-3 text-center">{Math.abs(totalQty)}</td>
-              <td className="py-3 text-right">{Math.abs(bill.totalAmount + (bill.discountAmount || 0)).toFixed(2)}</td>
+              <td className="py-3 text-right">{Math.abs(bill.totalAmount - (bill.taxAmount || 0) + (bill.discountAmount || 0)).toFixed(2)}</td>
               <td className="py-3 text-right">{Math.abs(bill.discountAmount || 0).toFixed(2)}</td>
               <td className="py-3 text-right">{Math.abs(bill.taxAmount || 0).toFixed(2)}</td>
               <td className="py-3 text-right">{Math.abs(bill.totalAmount).toFixed(2)}</td>
@@ -171,7 +171,7 @@ export const PharmacyInvoiceReport: React.FC<PharmacyInvoiceReportProps> = ({
             <div className="flex justify-between border-b border-slate-200 pb-1">
               <span className="w-48">Total Gross</span>
               <span>:</span>
-              <span className="flex-1 text-left ml-4">{Math.abs(bill.totalAmount + (bill.discountAmount || 0)).toFixed(2)}</span>
+              <span className="flex-1 text-left ml-4">{Math.abs(bill.totalAmount - (bill.taxAmount || 0) + (bill.discountAmount || 0)).toFixed(2)}</span>
             </div>
             <div className="flex justify-between border-b border-slate-200 pb-1">
               <span className="w-48">Total Disc.</span>

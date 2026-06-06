@@ -1113,3 +1113,48 @@ CREATE POLICY "Enable all write operations for all users" ON finance_journal_vou
 
 CREATE POLICY "Enable read access for all users" ON finance_journal_voucher_items FOR SELECT USING (true);
 CREATE POLICY "Enable all write operations for all users" ON finance_journal_voucher_items FOR ALL TO public USING (true) WITH CHECK (true);
+
+-- 61. GSTR-2B Uploads
+CREATE TABLE IF NOT EXISTS procurement_gstr2b_uploads (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    period VARCHAR(50) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    upload_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    invoices_count INTEGER DEFAULT 0,
+    total_itc NUMERIC(14, 2) DEFAULT 0.00,
+    uploaded_by VARCHAR(100) DEFAULT 'System Manager',
+    status VARCHAR(20) DEFAULT 'Processed',
+    is_reconciled BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 62. GSTR-2B Invoices
+CREATE TABLE IF NOT EXISTS procurement_gstr2b_invoices (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    upload_id UUID REFERENCES procurement_gstr2b_uploads(id) ON DELETE CASCADE,
+    invoice_no VARCHAR(100) NOT NULL,
+    invoice_date VARCHAR(50),
+    taxable_value NUMERIC(14, 2) DEFAULT 0.00,
+    tax_amount NUMERIC(14, 2) DEFAULT 0.00,
+    cgst NUMERIC(14, 2) DEFAULT 0.00,
+    sgst NUMERIC(14, 2) DEFAULT 0.00,
+    igst NUMERIC(14, 2) DEFAULT 0.00,
+    supplier_name VARCHAR(255),
+    supplier_gst VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gstr2b_invoices_upload ON procurement_gstr2b_invoices(upload_id);
+CREATE INDEX IF NOT EXISTS idx_gstr2b_invoices_no ON procurement_gstr2b_invoices(invoice_no);
+
+-- Enable RLS
+ALTER TABLE procurement_gstr2b_uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE procurement_gstr2b_invoices ENABLE ROW LEVEL SECURITY;
+
+-- Setup Policies
+CREATE POLICY "Enable read access for all users" ON procurement_gstr2b_uploads FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON procurement_gstr2b_uploads FOR ALL TO public USING (true) WITH CHECK (true);
+
+CREATE POLICY "Enable read access for all users" ON procurement_gstr2b_invoices FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON procurement_gstr2b_invoices FOR ALL TO public USING (true) WITH CHECK (true);
+

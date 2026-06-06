@@ -425,6 +425,24 @@ export const GRNPage: React.FC = () => {
       return;
     }
 
+    // GST slab change confirmation check
+    for (const item of items) {
+      const selectedVat = Number(item.vatPercentage || 0);
+      const existingMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+      if (existingMapping) {
+        const tax = taxMasters.find(t => t.id === existingMapping.taxId && t.status === 'Active');
+        const existingVat = tax ? Number(tax.percentage || 0) : 0;
+        if (existingVat !== selectedVat) {
+          const confirmShift = window.confirm(
+            `Item "${item.itemName}" was previously mapped to GST ${existingVat}%. Do you want to proceed and shift this item to the new ${selectedVat}% slab?`
+          );
+          if (!confirmShift) {
+            return; // Abort saving the GRN
+          }
+        }
+      }
+    }
+
     // WAC posting confirmation warning
     if (finalStatus === 'Submitted') {
       const confirmSubmit = window.confirm(

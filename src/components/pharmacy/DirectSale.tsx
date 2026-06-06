@@ -150,8 +150,7 @@ export const DirectSale: React.FC = () => {
     const taxPercent = tax?.percentage || 0;
 
     const unitPrice = batchData.mrp * salesCF;
-    const basePrice = unitPrice * newItems[index].quantity;
-    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+    const totalPrice = Number((unitPrice * newItems[index].quantity).toFixed(2));
 
     newItems[index] = {
       ...newItems[index],
@@ -160,7 +159,7 @@ export const DirectSale: React.FC = () => {
       unitPrice: unitPrice,
       costRate: batchData.rate,
       expiryDate: batchData.expiryDate,
-      totalPrice: Number((basePrice + taxAmount).toFixed(2))
+      totalPrice: totalPrice
     };
     setItems(newItems);
   };
@@ -312,8 +311,7 @@ export const DirectSale: React.FC = () => {
         const taxPercent = tax?.percentage || 0;
 
         const unitPrice = activeBatch.mrp * salesCF;
-        const basePrice = unitPrice * 1;
-        const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+        const totalPrice = Number((unitPrice * 1).toFixed(2));
 
         updatedItems[targetIndex] = {
           ...newItem,
@@ -322,7 +320,7 @@ export const DirectSale: React.FC = () => {
           unitPrice: unitPrice,
           costRate: activeBatch.rate,
           expiryDate: activeBatch.expiryDate,
-          totalPrice: Number((basePrice + taxAmount).toFixed(2))
+          totalPrice: totalPrice
         };
       }
       setItems(updatedItems);
@@ -368,14 +366,13 @@ export const DirectSale: React.FC = () => {
     const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
     const taxPercent = tax?.percentage || 0;
 
-    const basePrice = newItems[index].quantity * unitPrice;
-    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+    const totalPrice = Number((newItems[index].quantity * unitPrice).toFixed(2));
 
     newItems[index] = {
       ...newItems[index],
       unit: unit,
       unitPrice: unitPrice,
-      totalPrice: Number((basePrice + taxAmount).toFixed(2))
+      totalPrice: totalPrice
     };
     setItems(newItems);
   };
@@ -385,13 +382,12 @@ export const DirectSale: React.FC = () => {
     const mapping = itemTaxMappings.find(m => m.itemId === newItems[index].itemId);
     const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
     const taxPercent = tax?.percentage || 0;
-    const basePrice = qty * newItems[index].unitPrice;
-    const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
+    const totalPrice = Number((qty * newItems[index].unitPrice).toFixed(2));
 
     newItems[index] = {
       ...newItems[index],
       quantity: qty,
-      totalPrice: Number((basePrice + taxAmount).toFixed(2))
+      totalPrice: totalPrice
     };
     setItems(newItems);
   };
@@ -401,7 +397,9 @@ export const DirectSale: React.FC = () => {
         const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
         const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
         if (tax && item.unitPrice > 0) {
-            return sum + (item.quantity * item.unitPrice * (tax.percentage / 100));
+            const totalPrice = item.quantity * item.unitPrice;
+            const taxAmount = totalPrice * tax.percentage / (100 + tax.percentage);
+            return sum + taxAmount;
         }
         return sum;
     }, 0);
@@ -904,8 +902,8 @@ export const DirectSale: React.FC = () => {
                                const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                                const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                                if (tax && item.unitPrice > 0) {
-                                   const base = item.quantity * item.unitPrice;
-                                   const amt = base * (tax.percentage / 100);
+                                   const totalPrice = item.quantity * item.unitPrice;
+                                   const amt = totalPrice * tax.percentage / (100 + tax.percentage);
                                    return (
                                        <div className="flex flex-col">
                                            <span className="text-violet-600 font-bold">{amt.toFixed(2)}</span>

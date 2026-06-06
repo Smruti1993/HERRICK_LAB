@@ -95,16 +95,17 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                     <button 
                                         key={batch.batchNo}
                                         onClick={() => {
-                                            const baseAmount = batch.rate * baseQtyRequired;
-                                            const taxAmt = Number((baseAmount * (taxPercent / 100)).toFixed(2));
+                                            const totalAmount = Number((batch.rate * baseQtyRequired).toFixed(2));
+                                            const taxAmt = Number((totalAmount * taxPercent / (100 + taxPercent)).toFixed(2));
+                                            const baseAmount = Number((totalAmount - taxAmt).toFixed(2));
                                             onSelect({ 
                                                 batchNo: batch.batchNo, 
                                                 rate: batch.rate, 
                                                 batchDate: batch.batchDate, 
                                                 expiryDate: batch.expiryDate, 
-                                                baseAmount: Number(baseAmount.toFixed(2)),
+                                                baseAmount: baseAmount,
                                                 taxAmount: taxAmt,
-                                                amount: Number((baseAmount + taxAmt).toFixed(2)) 
+                                                amount: totalAmount 
                                             });
                                         }}
                                         disabled={isInsufficient}

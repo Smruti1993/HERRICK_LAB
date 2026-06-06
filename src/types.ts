@@ -1080,3 +1080,32 @@ export interface JournalVoucher {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface GSTR2BUpload {
+  id: string;
+  period: string;
+  fileName: string;
+  uploadDate?: string;
+  invoicesCount: number;
+  totalItc: number;
+  uploadedBy: string;
+  status: string;
+  isReconciled: boolean;
+  createdAt?: string;
+}
+
+export interface GSTR2BInvoice {
+  id: string;
+  uploadId: string;
+  invoiceNo: string;
+  invoiceDate?: string;
+  taxableValue: number;
+  taxAmount: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  supplierName?: string;
+  supplierGst?: string;
+  createdAt?: string;
+}
+

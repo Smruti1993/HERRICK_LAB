@@ -36,6 +36,7 @@ import { PurchaseReturnPage } from './pages/PurchaseReturn';
 import { ExpiryItemReturnPage } from './pages/ExpiryItemReturn';
 import { ChartOfAccounts } from './pages/ChartOfAccounts';
 import { JournalVouchers } from './pages/JournalVouchers';
+import { VendorCompliance } from './pages/VendorCompliance';
 
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
@@ -104,6 +105,7 @@ const AppRoutes = () => {
             <Route path="procurement">
               <Route index element={<Navigate to="vendor-master" replace />} />
               <Route path="vendor-master" element={<VendorMaster />} />
+              <Route path="vendor-compliance" element={<VendorCompliance />} />
               <Route path="tax" element={<Tax />} />
               <Route path="purchase-order" element={<PurchaseOrderPage />} />
               <Route path="grn" element={<GRNPage />} />

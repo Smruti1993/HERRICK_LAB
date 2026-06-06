@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice
 } from '../types';
 import { 
     getSupabase, 
@@ -190,6 +190,11 @@ interface DataContextType {
     }
   ) => Promise<boolean>;
 
+  gstr2bUploads: GSTR2BUpload[];
+  gstr2bInvoices: GSTR2BInvoice[];
+  saveGstr2bUpload: (upload: GSTR2BUpload, invoices: GSTR2BInvoice[]) => Promise<boolean>;
+  markUploadReconciled: (uploadId: string) => Promise<boolean>;
+
   isLoading: boolean;
   isDbConnected: boolean;
   updateDbConnection: (url: string, key: string) => void;
@@ -295,6 +300,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const local = localStorage.getItem('medicore_journal_vouchers');
     return local ? JSON.parse(local) : [];
   });
+
+  const [gstr2bUploads, setGstr2bUploads] = useState<GSTR2BUpload[]>([]);
+  const [gstr2bInvoices, setGstr2bInvoices] = useState<GSTR2BInvoice[]>([]);
 
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
@@ -1652,9 +1660,19 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const myItems = rawGRNItems.filter((i: any) => i.grn_id === g.id);
                 return mapGRNFromDb(g, myItems);
             });
+            // Overwrite localStorage with real database records to purge mock data
+            localStorage.setItem('medicore_grns', JSON.stringify(grnData));
         } else {
             const local = localStorage.getItem('medicore_grns');
-            if (local) grnData = JSON.parse(local);
+            if (local) {
+                const parsed = JSON.parse(local);
+                // Filter out default/mock data from local fallback
+                grnData = parsed.filter((g: any) => 
+                    g.invoiceNo && 
+                    !g.invoiceNo.startsWith('INV-2026-')
+                );
+                localStorage.setItem('medicore_grns', JSON.stringify(grnData));
+            }
         }
         setGrns(grnData);
 
@@ -1782,6 +1800,64 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         localStorage.setItem('medicore_chart_of_accounts', JSON.stringify(coaData));
         setChartOfAccounts(coaData);
+
+        // Load GSTR-2B data independently so it doesn't block or error the main sync
+        let uploadsData: GSTR2BUpload[] = [];
+        let invoicesData: GSTR2BInvoice[] = [];
+        if (checkConfigured()) {
+          try {
+            const { data: uploads, error: uploadsErr } = await supabase.from('procurement_gstr2b_uploads').select('*');
+            const { data: invoices, error: invoicesErr } = await supabase.from('procurement_gstr2b_invoices').select('*');
+            
+            if (uploads && !uploadsErr && invoices && !invoicesErr) {
+              uploadsData = uploads.map((u: any) => ({
+                id: u.id,
+                period: u.period,
+                fileName: u.file_name,
+                uploadDate: u.upload_date,
+                invoicesCount: u.invoices_count,
+                totalItc: Number(u.total_itc || 0),
+                uploadedBy: u.uploaded_by,
+                status: u.status,
+                isReconciled: !!u.is_reconciled,
+                createdAt: u.created_at
+              }));
+              invoicesData = invoices.map((i: any) => ({
+                id: i.id,
+                uploadId: i.upload_id,
+                invoiceNo: i.invoice_no,
+                invoiceDate: i.invoice_date,
+                taxableValue: Number(i.taxable_value || 0),
+                taxAmount: Number(i.tax_amount || 0),
+                cgst: Number(i.cgst || 0),
+                sgst: Number(i.sgst || 0),
+                igst: Number(i.igst || 0),
+                supplierName: i.supplier_name,
+                supplierGst: i.supplier_gst,
+                createdAt: i.created_at
+              }));
+              localStorage.setItem('medicore_gstr2b_uploads', JSON.stringify(uploadsData));
+              localStorage.setItem('medicore_gstr2b_invoices', JSON.stringify(invoicesData));
+            } else {
+              const uLocal = localStorage.getItem('medicore_gstr2b_uploads');
+              const iLocal = localStorage.getItem('medicore_gstr2b_invoices');
+              if (uLocal) uploadsData = JSON.parse(uLocal);
+              if (iLocal) invoicesData = JSON.parse(iLocal);
+            }
+          } catch (err) {
+            const uLocal = localStorage.getItem('medicore_gstr2b_uploads');
+            const iLocal = localStorage.getItem('medicore_gstr2b_invoices');
+            if (uLocal) uploadsData = JSON.parse(uLocal);
+            if (iLocal) invoicesData = JSON.parse(iLocal);
+          }
+        } else {
+          const uLocal = localStorage.getItem('medicore_gstr2b_uploads');
+          const iLocal = localStorage.getItem('medicore_gstr2b_invoices');
+          if (uLocal) uploadsData = JSON.parse(uLocal);
+          if (iLocal) invoicesData = JSON.parse(iLocal);
+        }
+        setGstr2bUploads(uploadsData);
+        setGstr2bInvoices(invoicesData);
         
         if (!hasSyncErrors) {
             showToast('success', 'Data synced with database.');
@@ -2187,7 +2263,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const mapping = itemTaxMappings.find(m => m.itemId === i.itemId);
         const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
         const taxPercent = tax?.percentage || 0;
-        const taxAmount = Number((i.quantity * i.unitPrice * (taxPercent / 100)).toFixed(2));
+        const total = Number((i.quantity * i.unitPrice).toFixed(2));
+        const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
 
         return {
           sale_id: saleId,
@@ -2197,7 +2274,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           unit_price: i.unitPrice,
           tax_percentage: taxPercent,
           tax_amount: taxAmount,
-          total_price: Number((i.quantity * i.unitPrice + taxAmount).toFixed(2)),
+          total_price: total,
           expiry_date: i.expiryDate || null // Convert "" to null
         };
       });
@@ -2608,6 +2685,61 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('medicore_grns', JSON.stringify(updated));
       return updated;
     });
+
+    // Auto-map GRN items to tax master if not mapped or if mapped incorrectly
+    if (grn.items) {
+      for (const item of grn.items) {
+        const targetVat = Number(item.vatPercentage || 0);
+
+        // Find active tax master for this percentage
+        let matchingTax = taxMasters.find(t => t.percentage === targetVat && t.status === 'Active');
+        if (!matchingTax) {
+          matchingTax = taxMasters.find(t => t.percentage === targetVat);
+        }
+
+        let taxId = matchingTax?.id;
+
+        if (!matchingTax) {
+          const newTaxId = crypto.randomUUID();
+          const newTax: TaxMaster = {
+            id: newTaxId,
+            taxName: `GST ${targetVat}%`,
+            percentage: targetVat,
+            status: 'Active',
+            createdAt: new Date().toISOString()
+          };
+          await saveTaxMaster(newTax);
+          taxId = newTaxId;
+        } else if (matchingTax.status !== 'Active') {
+          const updatedTax: TaxMaster = {
+            ...matchingTax,
+            status: 'Active'
+          };
+          await saveTaxMaster(updatedTax);
+        }
+
+        if (taxId) {
+          const existingMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+          if (existingMapping) {
+            if (existingMapping.taxId !== taxId) {
+              const updatedMapping: ItemTaxMapping = {
+                ...existingMapping,
+                taxId: taxId
+              };
+              await saveItemTaxMapping(updatedMapping);
+            }
+          } else {
+            const newMapping: ItemTaxMapping = {
+              id: crypto.randomUUID(),
+              itemId: item.itemId,
+              taxId: taxId,
+              createdAt: new Date().toISOString()
+            };
+            await saveItemTaxMapping(newMapping);
+          }
+        }
+      }
+    }
 
     if (isDbConnected) {
       const supabase = getSupabase();
@@ -3839,9 +3971,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                   const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                   const taxPercent = tax?.percentage || 0;
-                  const taxAmount = Number((qty * rate * (taxPercent / 100)).toFixed(2));
+                  const total = Number((qty * rate).toFixed(2));
+                  const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
                   
-                  transactionTotal += Number((qty * rate + taxAmount).toFixed(2));
+                  transactionTotal += total;
                   transactionTax += taxAmount;
               });
 
@@ -3858,8 +3991,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                   const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                   const taxPercent = tax?.percentage || 0;
-                  const taxAmount = Number((qty * rate * (taxPercent / 100)).toFixed(2));
-                  const total = Number((qty * rate + taxAmount).toFixed(2));
+                  const total = Number((qty * rate).toFixed(2));
+                  const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
 
                   return supabase.from('prescription_items')
                       .update({ 
@@ -3930,7 +4063,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                         const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                         const taxPercent = tax?.percentage || 0;
-                        const taxAmount = Number((qty * rate * (taxPercent / 100)).toFixed(2));
+                        const total = Number((qty * rate).toFixed(2));
+                        const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
                         return {
                             id: crypto.randomUUID(),
                             bill_id: billId,
@@ -3941,7 +4075,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             unit_price: rate,
                             tax_percentage: taxPercent,
                             tax_amount: taxAmount,
-                            total: Number((qty * rate + taxAmount).toFixed(2))
+                            total: total
                         };
                     });
                   
@@ -4641,8 +4775,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const saveTaxMaster = async (tax: TaxMaster) => {
-    if (!requireDb()) return;
-    const supabase = getSupabase();
     setTaxMasters(prev => {
         const index = prev.findIndex(t => t.id === tax.id);
         if (index > -1) {
@@ -4652,25 +4784,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return [tax, ...prev];
     });
-    const { error } = await supabase.from('tax_masters').upsert(mapTaxMasterToDb(tax));
-    if (error) {
-        showToast('error', `Tax save failed: ${error.message}`);
-        setRefreshTrigger(prev => prev + 1);
+    if (isDbConnected && checkConfigured()) {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('tax_masters').upsert(mapTaxMasterToDb(tax));
+      if (error) {
+          showToast('error', `Tax save failed: ${error.message}`);
+          setRefreshTrigger(prev => prev + 1);
+      }
     }
   };
 
   const deleteTaxMaster = async (id: string) => {
-    if (!requireDb()) return;
     setTaxMasters(prev => prev.filter(t => t.id !== id));
-    const { error } = await getSupabase().from('tax_masters').delete().eq('id', id);
-    if (error) {
-        showToast('error', 'Tax deletion failed.');
-        setRefreshTrigger(prev => prev + 1);
+    if (isDbConnected && checkConfigured()) {
+      const { error } = await getSupabase().from('tax_masters').delete().eq('id', id);
+      if (error) {
+          showToast('error', 'Tax deletion failed.');
+          setRefreshTrigger(prev => prev + 1);
+      }
     }
   };
 
   const saveItemTaxMapping = async (mapping: ItemTaxMapping) => {
-    if (!requireDb()) return;
     setItemTaxMappings(prev => {
         const index = prev.findIndex(m => m.id === mapping.id);
         if (index > -1) {
@@ -4680,20 +4815,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return [mapping, ...prev];
     });
-    const { error } = await getSupabase().from('item_tax_mappings').upsert(mapItemTaxMappingToDb(mapping));
-    if (error) {
-        showToast('error', `Mapping failed: ${error.message}`);
-        setRefreshTrigger(prev => prev + 1);
+    if (isDbConnected && checkConfigured()) {
+      const { error } = await getSupabase().from('item_tax_mappings').upsert(mapItemTaxMappingToDb(mapping));
+      if (error) {
+          showToast('error', `Mapping failed: ${error.message}`);
+          setRefreshTrigger(prev => prev + 1);
+      }
     }
   };
 
   const deleteItemTaxMapping = async (id: string) => {
-    if (!requireDb()) return;
     setItemTaxMappings(prev => prev.filter(m => m.id !== id));
-    const { error } = await getSupabase().from('item_tax_mappings').delete().eq('id', id);
-    if (error) {
-        showToast('error', 'Failed to remove mapping.');
-        setRefreshTrigger(prev => prev + 1);
+    if (isDbConnected && checkConfigured()) {
+      const { error } = await getSupabase().from('item_tax_mappings').delete().eq('id', id);
+      if (error) {
+          showToast('error', 'Failed to remove mapping.');
+          setRefreshTrigger(prev => prev + 1);
+      }
     }
   };
 
@@ -5416,6 +5554,103 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const saveGstr2bUpload = async (upload: GSTR2BUpload, invoices: GSTR2BInvoice[]): Promise<boolean> => {
+    let isSuccess = true;
+    
+    setGstr2bUploads(prev => {
+      const updated = [upload, ...prev.filter(u => u.id !== upload.id)];
+      localStorage.setItem('medicore_gstr2b_uploads', JSON.stringify(updated));
+      return updated;
+    });
+
+    setGstr2bInvoices(prev => {
+      const filtered = prev.filter(i => i.uploadId !== upload.id);
+      const updated = [...invoices, ...filtered];
+      localStorage.setItem('medicore_gstr2b_invoices', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected && checkConfigured()) {
+      try {
+        const supabase = getSupabase();
+        
+        const dbUpload = {
+          id: upload.id,
+          period: upload.period,
+          file_name: upload.fileName,
+          upload_date: upload.uploadDate || new Date().toISOString(),
+          invoices_count: upload.invoicesCount,
+          total_itc: upload.totalItc,
+          uploaded_by: upload.uploadedBy,
+          status: upload.status,
+          is_reconciled: upload.isReconciled
+        };
+        
+        const { error: uploadErr } = await supabase.from('procurement_gstr2b_uploads').upsert(dbUpload);
+        if (uploadErr) {
+          console.error("Database error saving GSTR2B upload:", uploadErr.message);
+          isSuccess = false;
+        } else if (invoices.length > 0) {
+          await supabase.from('procurement_gstr2b_invoices').delete().eq('upload_id', upload.id);
+          
+          const dbInvoices = invoices.map(i => ({
+            id: i.id || crypto.randomUUID(),
+            upload_id: upload.id,
+            invoice_no: i.invoiceNo,
+            invoice_date: i.invoiceDate,
+            taxable_value: i.taxableValue,
+            tax_amount: i.taxAmount,
+            cgst: i.cgst,
+            sgst: i.sgst,
+            igst: i.igst,
+            supplier_name: i.supplierName,
+            supplier_gst: i.supplierGst
+          }));
+          
+          const { error: invoicesErr } = await supabase.from('procurement_gstr2b_invoices').insert(dbInvoices);
+          if (invoicesErr) {
+            console.error("Database error saving GSTR2B invoices:", invoicesErr.message);
+            isSuccess = false;
+          }
+        }
+      } catch (err: any) {
+        console.error("Exception saving GSTR-2B data to Supabase:", err.message);
+        isSuccess = false;
+      }
+    }
+    
+    return isSuccess;
+  };
+
+  const markUploadReconciled = async (uploadId: string): Promise<boolean> => {
+    let isSuccess = true;
+    
+    setGstr2bUploads(prev => {
+      const updated = prev.map(u => u.id === uploadId ? { ...u, isReconciled: true } : u);
+      localStorage.setItem('medicore_gstr2b_uploads', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected && checkConfigured()) {
+      try {
+        const supabase = getSupabase();
+        const { error } = await supabase
+          .from('procurement_gstr2b_uploads')
+          .update({ is_reconciled: true })
+          .eq('id', uploadId);
+          
+        if (error) {
+          console.error("Database error marking GSTR2B reconciled:", error.message);
+          isSuccess = false;
+        }
+      } catch (err: any) {
+        console.error("Exception marking GSTR2B reconciled:", err.message);
+        isSuccess = false;
+      }
+    }
+    return isSuccess;
+  };
+
   return (
     <DataContext.Provider value={{
       user, login, loginDemo, logout,
@@ -5453,6 +5688,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       expiryReturns, saveExpiryReturn, deleteExpiryReturn, fetchExpiryItems,
       chartOfAccounts, saveChartOfAccount, deleteChartOfAccount,
       journalVouchers, saveJournalVoucher, deleteJournalVoucher, postAutoJournalVoucher,
+      gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
 

@@ -275,8 +275,9 @@ export const OPPharmacy: React.FC = () => {
         const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
         const taxPercent = taxMaster?.percentage || 0;
 
-        const baseAmount = chosenBatch.rate * baseQtyRequired;
-        const taxAmt = Number((baseAmount * (taxPercent / 100)).toFixed(2));
+        const total = Number((chosenBatch.rate * baseQtyRequired).toFixed(2));
+        const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
+        const baseAmount = Number((total - taxAmt).toFixed(2));
 
         setSelectedBatches(prev => ({
             ...prev,
@@ -285,9 +286,9 @@ export const OPPharmacy: React.FC = () => {
                 rate: chosenBatch.rate,
                 batchDate: chosenBatch.batchDate,
                 expiryDate: chosenBatch.expiryDate,
-                baseAmount: Number(baseAmount.toFixed(2)),
+                baseAmount: baseAmount,
                 taxAmount: taxAmt,
-                amount: Number((baseAmount + taxAmt).toFixed(2))
+                amount: total
             }
         }));
 
