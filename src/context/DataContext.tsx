@@ -87,7 +87,8 @@ interface DataContextType {
   openingStocks: OpeningStock[];
   saveOpeningStock: (stock: OpeningStock) => Promise<void>;
   
-  saveDirectSale: (sale: DirectSale) => Promise<boolean>;
+  saveDirectSale: (sale: DirectSale) => Promise<{ success: boolean; savedSale?: DirectSale }>;
+  fetchDirectSales: (filters?: { storeId?: string; fromDate?: string; toDate?: string }) => Promise<DirectSale[]>;
   fetchBatchDetails: (storeId: string, itemId: string) => Promise<Array<{ batchNo: string, currentStock: number, mrp: number, rate: number, batchDate?: string, expiryDate?: string }>>;
   
   fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
@@ -359,8 +360,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- Mappers ---
   const mapDeptFromDb = (d: any): Department => ({ id: d.id, name: d.name, code: d.code, status: d.status });
-  const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status });
-  const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status });
+  const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status, vatRegNo: b.vat_reg_no });
+  const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status, vat_reg_no: b.vatRegNo });
   
   const mapEmpFromDb = (e: any): Employee => ({
     id: e.id, firstName: e.first_name, lastName: e.last_name, email: e.email, phone: e.phone,
@@ -2222,14 +2223,33 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const saveDirectSale = async (sale: DirectSale): Promise<boolean> => {
-    if (!requireDb()) return false;
+  const saveDirectSale = async (sale: DirectSale): Promise<{ success: boolean; savedSale?: DirectSale }> => {
+    if (!requireDb()) return { success: false };
     try {
       const supabase = getSupabase();
       
+      const store = stores.find(s => s.id === sale.storeId);
+      const storeCode = store ? store.storeCode : 'DS';
+      const year = new Date().getFullYear().toString().slice(-2); // e.g. "26"
+      
+      // Get sequential counter
+      const { count, error: countError } = await supabase
+        .from('pharmacy_direct_sales')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
+      
+      const seq = (count !== null ? count + 1 : 1).toString().padStart(6, '0');
+      const invoiceNo = `INV-D-${storeCode}-${year}${seq}`;
+      
+      const rcpSeq = (count !== null ? count + 1 : 1).toString().padStart(8, '0');
+      const receiptNo = `RCP-${year}${rcpSeq}`;
+
       // 1. Save Sale Header
       const dbSale = {
         sale_no: sale.saleNo, // Correct property name
+        invoice_no: invoiceNo,
+        receipt_no: receiptNo,
         sale_date: sale.saleDate,
         store_id: sale.storeId,
         first_name: sale.firstName,
@@ -2374,12 +2394,96 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       showToast('success', 'Pharmacy Sale completed successfully.');
       setRefreshTrigger(prev => prev + 1);
-      return true;
+
+      const savedDirectSale: DirectSale = {
+        ...sale,
+        id: saleId,
+        invoiceNo: invoiceNo,
+        receiptNo: receiptNo,
+        taxAmount: totalTaxAmount,
+        items: sale.items.map((item, idx) => {
+          const dbItem = dbItems[idx];
+          return {
+            ...item,
+            taxPercentage: dbItem.tax_percentage,
+            taxAmount: dbItem.tax_amount
+          };
+        })
+      };
+
+      return { success: true, savedSale: savedDirectSale };
 
     } catch (error: any) {
       console.error('Error saving direct sale:', error);
       showToast('error', `Sale failed: ${error.message}`);
-      return false;
+      return { success: false };
+    }
+  };
+
+  const fetchDirectSales = async (filters?: { storeId?: string; fromDate?: string; toDate?: string }): Promise<DirectSale[]> => {
+    if (!requireDb()) return [];
+    try {
+      const supabase = getSupabase();
+      let query = supabase.from('pharmacy_direct_sales').select('*, items:pharmacy_direct_sale_items(*)').order('sale_date', { ascending: false });
+      
+      if (filters?.storeId) {
+        query = query.eq('store_id', filters.storeId);
+      }
+      if (filters?.fromDate) {
+        query = query.gte('sale_date', filters.fromDate);
+      }
+      if (filters?.toDate) {
+        query = query.lte('sale_date', filters.toDate);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return (data || []).map((sale: any) => ({
+        id: sale.id,
+        saleNo: sale.sale_no,
+        invoiceNo: sale.invoice_no,
+        receiptNo: sale.receipt_no,
+        saleDate: sale.sale_date,
+        storeId: sale.store_id,
+        firstName: sale.first_name,
+        middleName: sale.middle_name,
+        lastName: sale.last_name,
+        phoneNo: sale.phone_no,
+        externalNo: sale.external_no,
+        dob: sale.dob,
+        age: sale.age,
+        ageUnit: sale.age_unit,
+        gender: sale.gender,
+        referredDoctor: sale.referred_doctor,
+        licenseNo: sale.license_no,
+        nationality: sale.nationality,
+        isInsured: sale.is_insured,
+        isNewExternalPatient: sale.is_new_external_patient,
+        totalAmount: sale.total_amount,
+        taxAmount: sale.tax_amount,
+        items: (sale.items || []).map((i: any) => {
+          const invItem = inventoryItems.find((inv: any) => inv.id === i.item_id);
+          return {
+            id: i.id,
+            saleId: i.sale_id,
+            itemId: i.item_id,
+            itemCode: invItem ? invItem.itemCode : '',
+            itemName: invItem ? invItem.itemName : '',
+            batchNo: i.batch_no,
+            quantity: i.quantity,
+            unitPrice: i.unit_price,
+            totalPrice: i.total_price,
+            taxPercentage: i.tax_percentage,
+            taxAmount: i.tax_amount,
+            expiryDate: i.expiry_date
+          };
+        })
+      }));
+    } catch (error: any) {
+      console.error('Error fetching direct sales:', error);
+      showToast('error', `Failed to fetch direct sales: ${error.message}`);
+      return [];
     }
   };
 
@@ -5673,7 +5777,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       stores, saveStore, deleteStore,
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
-      saveDirectSale, fetchBatchDetails, repairPh000006, processPharmacyReturn, fetchBillItems,
+      saveDirectSale, fetchDirectSales, fetchBatchDetails, repairPh000006, processPharmacyReturn, fetchBillItems,
       prescriptions, savePrescription, dispensePrescription,
       drugGenerics, drugMasters, saveDrugMaster, deleteDrugMaster,
       taxMasters, saveTaxMaster, deleteTaxMaster, itemTaxMappings, saveItemTaxMapping, deleteItemTaxMapping,

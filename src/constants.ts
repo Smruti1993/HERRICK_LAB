@@ -82,6 +82,11 @@ export const NAV_ITEMS: NavItem[] = [
         icon: 'ShoppingCart'
       },
       {
+        label: 'Direct Sale History',
+        path: '/pharmacy/direct-sale-history',
+        icon: 'FileText'
+      },
+      {
         label: 'OP Pharmacy',
         path: '/pharmacy/op-pharmacy',
         icon: 'Clock'

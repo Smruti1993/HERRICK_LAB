@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { DirectSale as DirectSaleType, DirectSaleItem } from '../../types';
 import { parseGS1 } from '../../utils/gs1Parser';
+import { DirectSaleInvoiceReport } from './DirectSaleInvoiceReport';
 
 const INITIAL_PATIENT = {
   firstName: '',
@@ -33,6 +34,7 @@ export const DirectSale: React.FC = () => {
   const [items, setItems] = useState<DirectSaleItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [lastDispensedSale, setLastDispensedSale] = useState<DirectSaleType | null>(null);
 
   // Scanner state
   const [barcodeQuery, setBarcodeQuery] = useState('');
@@ -404,6 +406,14 @@ export const DirectSale: React.FC = () => {
         return sum;
     }, 0);
 
+  const handleCloseInvoice = () => {
+    setLastDispensedSale(null);
+    setPatient(INITIAL_PATIENT);
+    setSelectedStore('');
+    setItems([]);
+    setRowBatches({});
+  };
+
   const handleDispense = async () => {
     if (!patient.firstName) { setError('First name is required.'); return; }
     if (!selectedStore) { setError('Please select a store.'); return; }
@@ -423,13 +433,9 @@ export const DirectSale: React.FC = () => {
       items: items
     };
 
-    const success = await saveDirectSale(salePayload);
-    if (success) {
-      // Reset form
-      setPatient(INITIAL_PATIENT);
-      setSelectedStore('');
-      setItems([]);
-      setRowBatches({});
+    const result = await saveDirectSale(salePayload);
+    if (result.success && result.savedSale) {
+      setLastDispensedSale(result.savedSale);
     }
     setLoading(false);
   };
@@ -938,6 +944,13 @@ export const DirectSale: React.FC = () => {
            <AlertCircle className="w-4 h-4" />
            {error}
         </div>
+      )}
+
+      {lastDispensedSale && (
+        <DirectSaleInvoiceReport 
+          sale={lastDispensedSale} 
+          onClose={handleCloseInvoice} 
+        />
       )}
     </div>
   );

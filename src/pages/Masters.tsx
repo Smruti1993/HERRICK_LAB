@@ -40,7 +40,12 @@ const MasterList = <T extends MasterEntity>({
   onAdd: (item: any) => void 
 }) => {
   const [isAdding, setIsAdding] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', code: '', status: 'Active' });
+  const [newItem, setNewItem] = useState<{ name: string; code: string; status: string; vatRegNo?: string }>({
+    name: '',
+    code: '',
+    status: 'Active',
+    vatRegNo: ''
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +55,7 @@ const MasterList = <T extends MasterEntity>({
       id: crypto.randomUUID(),
       ...newItem
     });
-    setNewItem({ name: '', code: '', status: 'Active' });
+    setNewItem({ name: '', code: '', status: 'Active', vatRegNo: '' });
     setIsAdding(false);
   };
 
@@ -67,7 +72,7 @@ const MasterList = <T extends MasterEntity>({
       </div>
       
       {isAdding && (
-        <form onSubmit={handleSubmit} className="p-4 bg-blue-50/50 border-b border-blue-100 grid grid-cols-1 md:grid-cols-3 gap-4 animate-in slide-in-from-top-2">
+        <form onSubmit={handleSubmit} className={`p-4 bg-blue-50/50 border-b border-blue-100 grid grid-cols-1 ${title === 'Hospital' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 animate-in slide-in-from-top-2`}>
           <input 
             placeholder={`${title} Name`} 
             className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -80,6 +85,14 @@ const MasterList = <T extends MasterEntity>({
             value={newItem.code}
             onChange={e => setNewItem({...newItem, code: e.target.value})}
           />
+          {title === 'Hospital' && (
+            <input 
+              placeholder="VAT Registration Number" 
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={newItem.vatRegNo || ''}
+              onChange={e => setNewItem({...newItem, vatRegNo: e.target.value})}
+            />
+          )}
           <button type="submit" className="bg-blue-600 text-white rounded-lg text-sm font-medium">Save</button>
         </form>
       )}
@@ -90,17 +103,21 @@ const MasterList = <T extends MasterEntity>({
             <tr>
               <th className="px-6 py-3 font-semibold">Name</th>
               <th className="px-6 py-3 font-semibold">Code</th>
+              {title === 'Hospital' && <th className="px-6 py-3 font-semibold">VAT Reg No</th>}
               <th className="px-6 py-3 font-semibold">Status</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 ? (
-               <tr><td colSpan={3} className="px-6 py-4 text-center text-slate-400">No records found.</td></tr>
+               <tr><td colSpan={title === 'Hospital' ? 4 : 3} className="px-6 py-4 text-center text-slate-400">No records found.</td></tr>
             ) : (
-              data.map((item) => (
+               data.map((item) => (
                 <tr key={item.id} className="bg-white border-b border-slate-100 hover:bg-slate-50">
                   <td className="px-6 py-3 font-medium text-slate-900">{item.name}</td>
                   <td className="px-6 py-3 font-mono text-slate-500">{item.code}</td>
+                  {title === 'Hospital' && (
+                    <td className="px-6 py-3 font-mono text-slate-500">{(item as any).vatRegNo || '-'}</td>
+                  )}
                   <td className="px-6 py-3">
                     <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">Active</span>
                   </td>

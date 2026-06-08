@@ -11,7 +11,9 @@ export interface MasterEntity {
 export interface Department extends MasterEntity {}
 export interface Unit extends MasterEntity {}
 export interface ServiceCentre extends MasterEntity {}
-export interface Branch extends MasterEntity {}
+export interface Branch extends MasterEntity {
+  vatRegNo?: string;
+}
 
 // New Interface for Master Diagnosis List
 export interface MasterDiagnosis {
@@ -484,11 +486,15 @@ export interface DirectSaleItem {
   totalPrice: number;
   expiryDate?: string;
   unit?: string;
+  taxPercentage?: number;
+  taxAmount?: number;
 }
 
 export interface DirectSale {
   id?: string;
   saleNo: string;
+  invoiceNo?: string;
+  receiptNo?: string;
   saleDate: string;
   storeId: string;
   
@@ -509,6 +515,7 @@ export interface DirectSale {
   isNewExternalPatient: boolean;
   
   totalAmount: number;
+  taxAmount?: number;
   items: DirectSaleItem[];
 }
 

@@ -372,7 +372,7 @@ export const VendorCompliance: React.FC = () => {
     showToast('info', `Reading GSTR-2B Excel: ${file.name}...`);
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
@@ -463,7 +463,7 @@ export const VendorCompliance: React.FC = () => {
           }
         });
 
-        const uploadId = `UP-${Date.now().toString().slice(-6)}`;
+        const uploadId = crypto.randomUUID();
         const period = parsed[0]?.invoiceDate ? `Period ${parsed[0].invoiceDate.substring(0, 7)}` : 'Uploaded Period';
         const totalItcVal = Number(totalSheetItc.toFixed(2));
 
@@ -493,12 +493,16 @@ export const VendorCompliance: React.FC = () => {
           supplierGst: p.supplierGst || ''
         }));
 
-        saveGstr2bUpload(newUploadObj, newInvoicesObjs);
+        const success = await saveGstr2bUpload(newUploadObj, newInvoicesObjs);
 
         setIsUploaded(true);
         setIsReconciled(false);
         setIsLoading(false);
-        showToast('success', `GSTR-2B Excel parsed successfully! Loaded ${parsed.length} invoices.`);
+        if (success) {
+          showToast('success', `GSTR-2B Excel parsed and saved to database successfully! Loaded ${parsed.length} invoices.`);
+        } else {
+          showToast('error', `GSTR-2B Excel parsed successfully, but failed to insert into the database.`);
+        }
 
       } catch (err: any) {
         console.error(err);
@@ -642,78 +646,7 @@ export const VendorCompliance: React.FC = () => {
         pendingFilingCount
       }));
 
-      // Post Journal Voucher for exact matches
-      // Look up accounts by code so names always resolve correctly
-      const getAccId = (code: string) => chartOfAccounts.find(a => a.code === code)?.id || code;
-      const cgstApprovedId   = getAccId('133000'); // Input CGST (Approved)
-      const sgstApprovedId   = getAccId('134000'); // Input SGST (Approved)
-      const cgstProvisionalId = getAccId('131000'); // Input CGST (Provisional)
-      const sgstProvisionalId = getAccId('132000'); // Input SGST (Provisional)
 
-      const exactMatches = reconciled.filter(item => item.status === 'Matched');
-      exactMatches.forEach(async (item) => {
-        try {
-          const grnObj = dbGRNs.find(g => g.id === item.id);
-          if (!grnObj) return;
-          const cgst = Number((grnObj.items?.reduce((sum, i) => sum + (i.cgstAmount || 0), 0) || 0).toFixed(2));
-          const sgst = Number((grnObj.items?.reduce((sum, i) => sum + (i.sgstAmount || 0), 0) || 0).toFixed(2));
-          
-          if (cgst + sgst === 0) return;
-
-          const jvItems: JournalVoucherItem[] = [
-            {
-              id: crypto.randomUUID(),
-              accountId: cgstApprovedId,
-              postingNature: 'Debit',
-              amount: cgst,
-              description: `Approved CGST for ${item.invoiceNo}`
-            },
-            {
-              id: crypto.randomUUID(),
-              accountId: sgstApprovedId,
-              postingNature: 'Debit',
-              amount: sgst,
-              description: `Approved SGST for ${item.invoiceNo}`
-            },
-            {
-              id: crypto.randomUUID(),
-              accountId: cgstProvisionalId,
-              postingNature: 'Credit',
-              amount: cgst,
-              description: `Release provisional CGST for ${item.invoiceNo}`
-            },
-            {
-              id: crypto.randomUUID(),
-              accountId: sgstProvisionalId,
-              postingNature: 'Credit',
-              amount: sgst,
-              description: `Release provisional SGST for ${item.invoiceNo}`
-            }
-          ];
-
-          const jv: JournalVoucher = {
-            id: crypto.randomUUID(),
-            voucherNo: `JV-REC-${Date.now().toString().slice(-6)}`,
-            voucherDate: new Date().toISOString().split('T')[0],
-            refType: 'GRN',
-            refDocId: grnObj.id,
-            refDocNo: grnObj.grnNo,
-            narration: `Auto-reconciled Input Tax Credit (Approved) for GSTR-2B exact match (Invoice: ${item.invoiceNo})`,
-            totalDebit: cgst + sgst,
-            totalCredit: cgst + sgst,
-            status: 'Posted',
-            items: jvItems
-          };
-
-          saveJournalVoucher(jv);
-        } catch (err) {
-          console.error('JV exact match error:', err);
-        }
-      });
-      
-      if (exactMatches.length > 0) {
-        showToast('info', 'Journal Vouchers posted for matched invoices.');
-      }
 
       const sortedUploads = [...gstr2bUploads].sort((a, b) => {
         const dateA = a.uploadDate ? new Date(a.uploadDate).getTime() : 0;
@@ -906,9 +839,94 @@ export const VendorCompliance: React.FC = () => {
 
       const success = await saveJournalVoucher(jv);
       if (success) {
+        // Post exact-match Approved Tax JVs for any settled GRNs that are 'Matched'
+        const cgstApprovedId   = getAccId('133000'); // Input CGST (Approved)
+        const sgstApprovedId   = getAccId('134000'); // Input SGST (Approved)
+        const cgstProvisionalId = getAccId('131000'); // Input CGST (Provisional)
+        const sgstProvisionalId = getAccId('132000'); // Input SGST (Provisional)
+
+        const matchedGRNs = selectedGRNsForSettlement.filter(grn => {
+          const match = reconciliationInvoices.find(r => r.id === grn.id);
+          return match && match.status === 'Matched';
+        });
+
+        let postedMatchedCount = 0;
+        for (const grnObj of matchedGRNs) {
+          try {
+            const cgst = Number((grnObj.items?.reduce((sum, i) => sum + (i.cgstAmount || 0), 0) || 0).toFixed(2));
+            const sgst = Number((grnObj.items?.reduce((sum, i) => sum + (i.sgstAmount || 0), 0) || 0).toFixed(2));
+            
+            if (cgst + sgst === 0) continue;
+
+            const jvExists = journalVouchers.some(v => 
+              v.refDocId === grnObj.id && 
+              v.refType === 'GRN' && 
+              v.narration?.includes('GSTR-2B exact match')
+            );
+            if (jvExists) continue;
+
+            const jvItems: JournalVoucherItem[] = [
+              {
+                id: crypto.randomUUID(),
+                accountId: cgstApprovedId,
+                postingNature: 'Debit',
+                amount: cgst,
+                description: `Approved CGST for ${grnObj.invoiceNo}`
+              },
+              {
+                id: crypto.randomUUID(),
+                accountId: sgstApprovedId,
+                postingNature: 'Debit',
+                amount: sgst,
+                description: `Approved SGST for ${grnObj.invoiceNo}`
+              },
+              {
+                id: crypto.randomUUID(),
+                accountId: cgstProvisionalId,
+                postingNature: 'Credit',
+                amount: cgst,
+                description: `Release provisional CGST for ${grnObj.invoiceNo}`
+              },
+              {
+                id: crypto.randomUUID(),
+                accountId: sgstProvisionalId,
+                postingNature: 'Credit',
+                amount: sgst,
+                description: `Release provisional SGST for ${grnObj.invoiceNo}`
+              }
+            ];
+
+            const matchJv: JournalVoucher = {
+              id: crypto.randomUUID(),
+              voucherNo: `JV-REC-${Date.now().toString().slice(-6)}`,
+              voucherDate,
+              refType: 'GRN',
+              refDocId: grnObj.id,
+              refDocNo: grnObj.grnNo,
+              narration: `Auto-reconciled Input Tax Credit (Approved) for GSTR-2B exact match (Invoice: ${grnObj.invoiceNo})`,
+              totalDebit: cgst + sgst,
+              totalCredit: cgst + sgst,
+              status: 'Posted',
+              items: jvItems
+            };
+
+            const jvSuccess = await saveJournalVoucher(matchJv);
+            if (jvSuccess) {
+              postedMatchedCount++;
+            }
+          } catch (err) {
+            console.error('JV exact match error:', err);
+          }
+        }
+
         const paidIds = selectedGRNsForSettlement.map(g => g.id);
         setSettledGrnIds(prev => [...prev, ...paidIds]);
-        showToast('success', `Payout executed successfully! Journal Voucher ${voucherNo} posted.`);
+
+        let successMsg = `Payout executed successfully! Journal Voucher ${voucherNo} posted.`;
+        if (postedMatchedCount > 0) {
+          successMsg += ` Also posted ${postedMatchedCount} Approved Tax JV(s) for exact GSTR-2B matches.`;
+        }
+        showToast('success', successMsg);
       } else {
         showToast('error', 'Failed to save payout Journal Voucher.');
       }
@@ -1357,7 +1375,9 @@ export const VendorCompliance: React.FC = () => {
                         })
                         .map((u) => (
                           <tr key={u.id} className="hover:bg-slate-50/50">
-                            <td className="py-3 px-3 font-bold text-slate-700 text-[10px]">{u.id}</td>
+                            <td className="py-3 px-3 font-bold text-slate-700 text-[10px]">
+                              {u.id.includes('-') ? `UP-${u.id.split('-')[0].substring(0, 6).toUpperCase()}` : u.id}
+                            </td>
                             <td className="py-3 px-3 font-extrabold text-indigo-700">{u.period}</td>
                             <td className="py-3 px-3 text-slate-400">
                               {u.uploadDate ? new Date(u.uploadDate).toLocaleString() : '—'}
@@ -1515,14 +1535,29 @@ export const VendorCompliance: React.FC = () => {
           <div className="flex flex-col gap-6 bg-white border border-slate-200 rounded-3xl p-8 shadow-sm min-h-[600px] animate-in fade-in duration-200">
             
             {/* Header Title */}
-            <div className="border-b border-slate-100 pb-4">
-              <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-                <Coins className="w-6 h-6 text-indigo-600" />
-                Vendor Invoice Settlement & Payouts
-              </h1>
-              <p className="text-xs text-slate-500 mt-1">
-                Perform distributor payments, manage tax holds, and authorize bank payouts
-              </p>
+            <div className="border-b border-slate-100 pb-4 flex justify-between items-center">
+              <div>
+                <h1 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                  <Coins className="w-6 h-6 text-indigo-600" />
+                  Vendor Invoice Settlement & Payouts
+                </h1>
+                <p className="text-xs text-slate-500 mt-1">
+                  Perform distributor payments, manage tax holds, and authorize bank payouts
+                </p>
+              </div>
+              {settledGrnIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('medicore_settled_grn_ids');
+                    setSettledGrnIds([]);
+                    showToast('success', 'Settlement and payout logs reset! Pending invoices are now unlocked.');
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-all active:scale-95 shadow-sm"
+                >
+                  Reset Settlement History ({settledGrnIds.length})
+                </button>
+              )}
             </div>
 
             {/* Selector Section */}
