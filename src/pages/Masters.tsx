@@ -1,8 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { useData } from '../context/DataContext';
-import { MasterEntity, ServiceDefinition, ServiceTariff, VitalSignParameter } from '../types';
-import { Plus, Search, X, FileSpreadsheet, FileDown, Activity } from 'lucide-react';
+import { MasterEntity, ServiceDefinition, ServiceTariff, VitalSignParameter, Currency } from '../types';
+import { Plus, Search, X, FileSpreadsheet, FileDown, Activity, DollarSign } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { Pagination } from '../components/Pagination';
 
 // --- Helper for Downloads ---
 const downloadTemplate = (type: 'diagnosis' | 'service' | 'dental_icd') => {
@@ -136,6 +137,8 @@ const DiagnosisMaster = () => {
     const { masterDiagnoses, uploadMasterDiagnoses, isLoading } = useData();
     const [searchTerm, setSearchTerm] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -168,6 +171,8 @@ const DiagnosisMaster = () => {
         d.code.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const paginatedDiagnoses = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
     return (
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
             {/* Action Bar */}
@@ -189,7 +194,7 @@ const DiagnosisMaster = () => {
                             placeholder="Search ICD code or name..." 
                             className="w-full h-9 pl-9 pr-4 bg-white/10 text-white placeholder:text-blue-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
                             value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
+                            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                         />
                     </div>
                     
@@ -226,7 +231,7 @@ const DiagnosisMaster = () => {
                         {filtered.length === 0 ? (
                             <tr><td colSpan={3} className="px-6 py-12 text-center text-slate-400 italic">No diagnosis found. Match your search or upload Excel.</td></tr>
                         ) : (
-                            filtered.map((d) => (
+                            paginatedDiagnoses.map((d) => (
                                 <tr key={d.id} className="hover:bg-blue-50/30 transition-colors group h-10">
                                     <td className="px-6 py-2 font-mono font-bold text-blue-600 border-r border-slate-50">{d.code}</td>
                                     <td className="px-6 py-2 font-medium text-slate-700 border-r border-slate-50">{d.description}</td>
@@ -240,15 +245,14 @@ const DiagnosisMaster = () => {
                 </table>
             </div>
 
-            {/* Compact Footer/Pagination */}
-            <div className="bg-slate-50 px-6 py-2 flex justify-center items-center gap-2 border-t border-slate-200">
-                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:bg-slate-50 transition-all text-xs">«</button>
-                <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                    <button className="w-7 h-6 text-[10px] font-bold text-white bg-blue-600 rounded-md">1</button>
-                    <button className="w-7 h-6 text-[10px] font-bold text-slate-500 hover:bg-slate-50 rounded-md">2</button>
-                </div>
-                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-all text-xs">»</button>
-            </div>
+            <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filtered.length / itemsPerPage)}
+                totalItems={filtered.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                colorTheme="blue"
+            />
         </div>
     );
 };
@@ -261,6 +265,8 @@ const DentalICDMaster = () => {
     const [showAddForm, setShowAddForm] = useState(false);
     const [newICD, setNewICD] = useState({ code: '', description: '', status: 'Active' as const });
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -304,6 +310,8 @@ const DentalICDMaster = () => {
         d.code.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const paginatedDental = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
     return (
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
             {/* Action Bar */}
@@ -325,7 +333,7 @@ const DentalICDMaster = () => {
                             placeholder="Search code or diagnosis..." 
                             className="w-full h-9 pl-9 pr-4 bg-white/10 text-white placeholder:text-teal-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
                             value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
+                            onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                         />
                     </div>
                     
@@ -390,7 +398,7 @@ const DentalICDMaster = () => {
                         {filtered.length === 0 ? (
                             <tr><td colSpan={3} className="px-6 py-12 text-center text-slate-400 italic">No dental codes found. Add manually or upload Excel.</td></tr>
                         ) : (
-                            filtered.map((d) => (
+                            paginatedDental.map((d) => (
                                 <tr key={d.id} className="hover:bg-teal-50/30 transition-colors group h-10">
                                     <td className="px-6 py-2 font-mono font-bold text-teal-600 border-r border-slate-50">{d.code}</td>
                                     <td className="px-6 py-2 font-medium text-slate-700 border-r border-slate-50">{d.description}</td>
@@ -404,14 +412,14 @@ const DentalICDMaster = () => {
                 </table>
             </div>
 
-            {/* Compact Footer/Pagination */}
-            <div className="bg-slate-50 px-6 py-2 flex justify-center items-center gap-2 border-t border-slate-200">
-                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:bg-slate-50 transition-all text-xs">«</button>
-                <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                    <button className="w-7 h-6 text-[10px] font-bold text-white bg-teal-600 rounded-md">1</button>
-                </div>
-                <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-all text-xs">»</button>
-            </div>
+            <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filtered.length / itemsPerPage)}
+                totalItems={filtered.length}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                colorTheme="teal"
+            />
         </div>
     );
 };
@@ -423,6 +431,8 @@ const ServiceMaster = () => {
     const [showForm, setShowForm] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
 
     // Initial Form State
     const initialForm: ServiceDefinition = {
@@ -545,6 +555,8 @@ const ServiceMaster = () => {
         s.code.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const paginatedServices = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
     return (
         <div className="flex gap-4 h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
             {/* List Section */}
@@ -568,7 +580,7 @@ const ServiceMaster = () => {
                                 placeholder="Search..." 
                                 className="w-full h-8 pl-9 pr-3 bg-white/10 text-white placeholder:text-blue-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
                                 value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
+                                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                             />
                         </div>
                         
@@ -614,7 +626,7 @@ const ServiceMaster = () => {
                             {filtered.length === 0 ? (
                                 <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">No services found.</td></tr>
                             ) : (
-                                filtered.map((s, i) => {
+                                paginatedServices.map((s, i) => {
                                     const tariff = serviceTariffs.find(t => t.serviceId === s.id);
                                     const displayPrice = tariff ? tariff.price.toFixed(2) : '-';
 
@@ -634,14 +646,14 @@ const ServiceMaster = () => {
                     </table>
                 </div>
 
-                <div className="bg-slate-50 px-6 py-2 flex justify-center items-center gap-2 border-t border-slate-200">
-                    <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:bg-slate-50 transition-all text-xs">«</button>
-                    <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                        <button className="w-7 h-6 text-[10px] font-bold text-white bg-blue-600 rounded-md">1</button>
-                        <button className="w-7 h-6 text-[10px] font-bold text-slate-500 hover:bg-slate-50 rounded-md">2</button>
-                    </div>
-                    <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-all text-xs">»</button>
-                </div>
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={Math.ceil(filtered.length / itemsPerPage)}
+                    totalItems={filtered.length}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={setCurrentPage}
+                    colorTheme="blue"
+                />
             </div>
 
             {/* Form Section */}
@@ -753,6 +765,8 @@ const VitalSignMaster = () => {
     const { vitalSignGroups, vitalSignParameters, saveVitalSignParameter, deleteVitalSignParameter } = useData();
     const [selectedGroupId, setSelectedGroupId] = useState(vitalSignGroups[0]?.id || '');
     const [showForm, setShowForm] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
     
     const initialForm: VitalSignParameter = {
         id: '',
@@ -767,6 +781,8 @@ const VitalSignMaster = () => {
     const [form, setForm] = useState<VitalSignParameter>(initialForm);
 
     const groupParameters = vitalSignParameters.filter(p => p.groupId === selectedGroupId);
+
+    const paginatedParameters = groupParameters.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     const handleEdit = (p: VitalSignParameter) => {
         setForm(p);
@@ -804,7 +820,7 @@ const VitalSignMaster = () => {
                                     <select 
                                         className="h-9 border border-slate-200 rounded-lg px-3 pr-8 text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all cursor-pointer appearance-none font-bold text-blue-700 min-w-[180px]"
                                         value={selectedGroupId}
-                                        onChange={e => setSelectedGroupId(e.target.value)}
+                                        onChange={e => { setSelectedGroupId(e.target.value); setCurrentPage(1); }}
                                     >
                                         {vitalSignGroups.map(g => (
                                             <option key={g.id} value={g.id}>{g.name}</option>
@@ -854,7 +870,7 @@ const VitalSignMaster = () => {
                                         <td colSpan={5} className="p-16 text-center text-slate-400 italic font-medium">No parameters mapped to this group.</td>
                                     </tr>
                                 ) : (
-                                    groupParameters.map((p) => (
+                                    paginatedParameters.map((p) => (
                                         <tr key={p.id} onClick={() => handleEdit(p)} className="hover:bg-blue-50/40 transition-colors group cursor-pointer h-12">
                                             <td className="px-6 py-2 font-bold text-slate-800 border-r border-slate-50">{p.name}</td>
                                             <td className="px-6 py-2 border-r border-slate-50">
@@ -894,14 +910,14 @@ const VitalSignMaster = () => {
                         </table>
                     </div>
 
-                    <div className="bg-slate-50 px-6 py-2 flex justify-center items-center gap-2 border-t border-slate-200">
-                        <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-400 hover:bg-slate-50 transition-all text-[10px]">««</button>
-                        <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                            <button className="w-7 h-6 text-[10px] font-bold text-white bg-blue-600 rounded-md">1</button>
-                            <button className="w-7 h-6 text-[10px] font-bold text-slate-500 hover:bg-slate-50 rounded-md">2</button>
-                        </div>
-                        <button className="w-8 h-7 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 transition-all text-[10px]">»»</button>
-                    </div>
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(groupParameters.length / itemsPerPage)}
+                        totalItems={groupParameters.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setCurrentPage}
+                        colorTheme="blue"
+                    />
                 </div>
             </div>
 
@@ -1009,6 +1025,169 @@ const VitalSignMaster = () => {
     );
 };
 
+// --- Currency Master Component ---
+const CurrencyMaster = () => {
+  const { currencies, selectedCurrency, setSelectedCurrency, saveCurrency, deleteCurrency } = useData();
+  const [isAdding, setIsAdding] = useState(false);
+  const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '', isActive: true });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCurrency.code || !newCurrency.name || !newCurrency.symbol) return;
+    
+    const success = await saveCurrency({
+      id: crypto.randomUUID(),
+      code: newCurrency.code.toUpperCase().trim(),
+      name: newCurrency.name.trim(),
+      symbol: newCurrency.symbol.trim(),
+      isActive: newCurrency.isActive,
+      isDefault: false
+    });
+    
+    if (success) {
+      setNewCurrency({ code: '', name: '', symbol: '', isActive: true });
+      setIsAdding(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col min-h-[500px] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
+      {/* Action Bar */}
+      <div className="bg-gradient-to-r from-blue-700 to-indigo-600 px-6 py-4 border-b border-blue-400 flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-white/20 p-2 rounded-xl backdrop-blur-md">
+            <DollarSign className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="font-bold text-white text-lg tracking-tight">Currency Master</h3>
+            <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest mt-0.5 opacity-80">Global System Currencies</p>
+          </div>
+        </div>
+        
+        <button 
+          onClick={() => setIsAdding(!isAdding)}
+          className="bg-white text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Currency
+        </button>
+      </div>
+
+      {isAdding && (
+        <form onSubmit={handleSubmit} className="p-6 bg-slate-50 border-b border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-4 animate-in slide-in-from-top-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Currency Code</label>
+            <input 
+              placeholder="e.g. INR, SAR, USD" 
+              maxLength={3}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono"
+              value={newCurrency.code}
+              onChange={e => setNewCurrency({...newCurrency, code: e.target.value})}
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Currency Name</label>
+            <input 
+              placeholder="e.g. Saudi Riyal" 
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={newCurrency.name}
+              onChange={e => setNewCurrency({...newCurrency, name: e.target.value})}
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Symbol</label>
+            <input 
+              placeholder="e.g. ₹, SAR, $" 
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={newCurrency.symbol}
+              onChange={e => setNewCurrency({...newCurrency, symbol: e.target.value})}
+              required
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <button type="submit" className="flex-1 h-[38px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm">
+              Save Currency
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setIsAdding(false)} 
+              className="h-[38px] px-3 bg-white border border-slate-200 text-slate-500 rounded-lg text-xs font-bold"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Table Content */}
+      <div className="flex-1 overflow-auto bg-white">
+        <table className="w-full text-sm text-left border-collapse">
+          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider sticky top-0 z-10">
+            <tr>
+              <th className="px-6 py-4 w-32">Code</th>
+              <th className="px-6 py-4">Currency Name</th>
+              <th className="px-6 py-4 w-32 text-center">Symbol</th>
+              <th className="px-6 py-4 w-32 text-center">Status</th>
+              <th className="px-6 py-4 w-48 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {currencies.length === 0 ? (
+              <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">No currencies found. Add custom currencies above.</td></tr>
+            ) : (
+              currencies.map((curr: Currency) => {
+                const isSelected = selectedCurrency === curr.code;
+                return (
+                  <tr key={curr.id} className={`hover:bg-slate-50/50 transition-colors group h-12 ${isSelected ? 'bg-blue-50/20' : ''}`}>
+                    <td className="px-6 py-3 font-mono font-bold text-blue-600">{curr.code}</td>
+                    <td className="px-6 py-3 font-medium text-slate-800">{curr.name}</td>
+                    <td className="px-6 py-3 text-center font-bold text-slate-600">{curr.symbol}</td>
+                    <td className="px-6 py-3 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        curr.isActive 
+                          ? 'bg-green-50 text-green-700 border-green-100' 
+                          : 'bg-slate-50 text-slate-500 border-slate-100'
+                      }`}>
+                        {curr.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <div className="flex justify-center gap-2">
+                        {isSelected ? (
+                          <span className="bg-blue-600 text-white text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg shadow-sm border border-blue-600">
+                            Active Currency
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setSelectedCurrency(curr.code)}
+                            className="bg-white border border-slate-200 text-slate-700 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all"
+                          >
+                            Set Active
+                          </button>
+                        )}
+                        {!isSelected && curr.id !== 'c1' && curr.id !== 'c2' && curr.id !== 'c3' && curr.id !== 'c4' && curr.id !== 'c5' && (
+                          <button
+                            onClick={() => deleteCurrency(curr.id)}
+                            className="text-slate-300 hover:text-red-500 p-1 rounded transition-colors"
+                            title="Delete Currency"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 export const Masters = () => {
   const { 
     departments, addDepartment, 
@@ -1017,17 +1196,18 @@ export const Masters = () => {
     branches, saveBranch
   } = useData();
 
-  const [activeTab, setActiveTab] = useState<'hospitals' | 'departments' | 'units' | 'services' | 'diagnosis' | 'dental_icd' | 'service_defs' | 'vitals'>('hospitals');
+  const [activeTab, setActiveTab] = useState<'hospitals' | 'departments' | 'units' | 'services' | 'diagnosis' | 'dental_icd' | 'service_defs' | 'vitals' | 'currencies'>('hospitals');
 
   const tabs = [
     { id: 'hospitals', label: 'Hospitals' },
     { id: 'departments', label: 'Departments' },
     { id: 'units', label: 'Medical Units' },
-    { id: 'services', label: 'Service Locations' }, // Renamed from Service Centres to clarify
+    { id: 'services', label: 'Service Locations' },
     { id: 'diagnosis', label: 'Diagnosis (ICD)' },
     { id: 'dental_icd', label: 'Dental ICD' },
-    { id: 'service_defs', label: 'Service Master' }, // Renamed from Service Definitions to clarify
+    { id: 'service_defs', label: 'Service Master' },
     { id: 'vitals', label: 'Vital Signs' },
+    { id: 'currencies', label: 'Currency Master' },
   ];
 
   return (
@@ -1072,6 +1252,9 @@ export const Masters = () => {
         )}
         {activeTab === 'vitals' && (
             <VitalSignMaster />
+        )}
+        {activeTab === 'currencies' && (
+            <CurrencyMaster />
         )}
       </div>
     </div>

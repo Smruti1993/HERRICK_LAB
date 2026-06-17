@@ -9,8 +9,6 @@ import {
 } from 'lucide-react';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-const fmtCurrency = (v: number) =>
-  new Intl.NumberFormat('en-SA', { style: 'currency', currency: 'SAR', minimumFractionDigits: 2 }).format(v);
 
 const today = () => new Date().toISOString().split('T')[0];
 const genReturnNo = () => `RTN-${Date.now().toString().slice(-8)}`;
@@ -43,8 +41,11 @@ const RETURN_TYPES: { value: PurchaseReturnType; label: string; icon: any; desc:
 export const PurchaseReturnPage: React.FC = () => {
   const {
     purchaseReturns, savePurchaseReturn, deletePurchaseReturn,
-    purchaseReceipts, grns, vendors, stores, inventoryItems, showToast, storeItemMappings
+    purchaseReceipts, grns, vendors, stores, inventoryItems, showToast, storeItemMappings,
+    formatCurrency, selectedCurrency
   } = useData();
+
+  const fmtCurrency = formatCurrency;
 
   // ── View ────────────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<'list' | 'select-type' | 'form'>('list');
@@ -926,10 +927,10 @@ export const PurchaseReturnPage: React.FC = () => {
                     {[
                       { label: 'Source Qty', value: activeItem.sourceQuantity ?? activeItem.quantity },
                       { label: 'Return Qty', value: activeItem.quantity, highlight: true },
-                      { label: 'Unit Rate', value: `${activeItem.rate.toFixed(2)} SAR` },
-                      { label: 'Basic Amount', value: `${(activeItem.quantity * activeItem.rate).toFixed(2)} SAR` },
+                      { label: 'Unit Rate', value: formatCurrency(activeItem.rate) },
+                      { label: 'Basic Amount', value: formatCurrency(activeItem.quantity * activeItem.rate) },
                       { label: 'Discount %', value: `${(activeItem.discountPercentage || 0).toFixed(2)}%` },
-                      { label: 'Discount Amt', value: `${(activeItem.discountAmount || 0).toFixed(2)} SAR` },
+                      { label: 'Discount Amt', value: formatCurrency(activeItem.discountAmount || 0) },
                     ].map((row, i) => (
                       <div key={i} className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 font-medium">{row.label}</span>
@@ -1032,7 +1033,7 @@ export const PurchaseReturnPage: React.FC = () => {
                           <div className="font-bold text-slate-700 text-sm">{item.itemName}</div>
                           <div className="text-xs text-slate-400">{item.itemCode}</div>
                         </div>
-                        <div className="text-xs font-bold text-rose-600">SAR {item.stock?.itemRate?.toFixed(2) || '0.00'}</div>
+                        <div className="text-xs font-bold text-rose-600">{formatCurrency(item.stock?.itemRate || 0)}</div>
                       </button>
                     )) : (
                       <div className="px-4 py-4 text-sm text-slate-400 text-center">No items found</div>
@@ -1058,7 +1059,7 @@ export const PurchaseReturnPage: React.FC = () => {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unit Rate (SAR)</label>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unit Rate ({selectedCurrency})</label>
                   <input
                     type="number"
                     min={0}

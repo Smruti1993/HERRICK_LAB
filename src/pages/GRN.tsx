@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { GRN, GRNItem, PurchaseOrder, InventoryItem } from '../types';
+import { Pagination } from '../components/Pagination';
 import { 
   Plus, Search, Edit2, Trash2, ShieldCheck, Check, Info, FileText, 
   MapPin, Landmark, Award, Globe, User, Percent, AlertTriangle, ArrowLeft,
-  DollarSign, ShoppingCart, ShoppingBag, Calendar, Layers, Activity, Truck, Grid, BookOpen
+  DollarSign, ShoppingCart, ShoppingBag, Calendar, Layers, Activity, Truck, Grid, BookOpen, Barcode
 } from 'lucide-react';
+import { parseGS1 } from '../utils/gs1Parser';
+import { playSuccessBeep, playErrorBeep } from '../utils/audio';
 
 const STATE_CODES: { [key: string]: string } = {
   '01': 'Jammu & Kashmir',
@@ -46,7 +49,7 @@ export const GRNPage: React.FC = () => {
   const { 
     grns, saveGRN, deleteGRN,
     purchaseOrders, vendors, stores, inventoryItems, showToast, storeItemMappings,
-    taxMasters, itemTaxMappings
+    taxMasters, itemTaxMappings, saveInventoryItem
   } = useData();
 
   const resolveItemTaxPercentage = (itemId: string): number => {
@@ -58,6 +61,8 @@ export const GRNPage: React.FC = () => {
 
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   
   // Header Form States
   const [editingGRNId, setEditingGRNId] = useState<string | null>(null);
@@ -82,6 +87,18 @@ export const GRNPage: React.FC = () => {
   // Items grid state
   const [items, setItems] = useState<GRNItem[]>([]);
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+
+  // Barcode scanner state
+  const [barcodeQuery, setBarcodeQuery] = useState('');
+  const [autoFocusScanner, setAutoFocusScanner] = useState(true);
+  const [scannerFocused, setScannerFocused] = useState(false);
+  const scannerInputRef = React.useRef<HTMLInputElement>(null);
+  const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
+
+  // Unrecognized Barcode Mapping Dialog state
+  const [unrecognizedScan, setUnrecognizedScan] = useState<{ gtin: string; batch?: string; expiry?: string } | null>(null);
+  const [mappingItemId, setMappingItemId] = useState('');
+  const [mappingSearchQuery, setMappingSearchQuery] = useState('');
 
   // Add Item Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -127,6 +144,36 @@ export const GRNPage: React.FC = () => {
       setGateEntryDate(new Date().toISOString().split('T')[0]);
     }
   }, [viewMode, editingGRNId]);
+
+  // Auto-focus barcode scanner
+  useEffect(() => {
+    if (viewMode === 'form' && autoFocusScanner && scannerInputRef.current) {
+      scannerInputRef.current.focus();
+    }
+  }, [viewMode, autoFocusScanner, items.length]);
+
+  // Global blur listener to restore focus to scanner if checked
+  useEffect(() => {
+    if (!autoFocusScanner || viewMode !== 'form') return;
+    const handleBlur = (e: FocusEvent) => {
+      const target = e.relatedTarget as HTMLElement;
+      if (
+        scannerInputRef.current &&
+        (!target ||
+          (target.tagName !== 'INPUT' &&
+            target.tagName !== 'SELECT' &&
+            target.tagName !== 'TEXTAREA'))
+      ) {
+        setTimeout(() => {
+          if (scannerInputRef.current) {
+            scannerInputRef.current.focus();
+          }
+        }, 150);
+      }
+    };
+    document.addEventListener('focusout', handleBlur);
+    return () => document.removeEventListener('focusout', handleBlur);
+  }, [autoFocusScanner, viewMode]);
 
   // Recalculate Line and Header totals dynamically
   useEffect(() => {
@@ -402,6 +449,214 @@ export const GRNPage: React.FC = () => {
     showToast('success', `${selectedItem.itemName} added to GRN list.`);
   };
 
+  const processGRNBarcodeItem = (matchedItem: InventoryItem, scannedBatch?: string, scannedExpiry?: string) => {
+    const isMapped = storeItemMappings.some(m => m.storeId === storeId && m.itemId === matchedItem.id);
+    if (!isMapped) {
+      showToast('error', `Item "${matchedItem.itemName}" is not mapped to the selected store.`);
+      playErrorBeep();
+      setBarcodeQuery('');
+      return;
+    }
+
+    const batchCode = scannedBatch ? scannedBatch.toUpperCase() : `B-${Date.now().toString().slice(-4)}`;
+    const expiryDate = scannedExpiry || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Check if item is already in GRN list with the same batch
+    const existingIndex = items.findIndex(item => item.itemId === matchedItem.id && item.batchCode === batchCode);
+
+    const po = grnType === 'From Purchase Order' ? purchaseOrders.find(p => p.id === poId) : null;
+    const poItem = po?.items?.find(pi => pi.itemId === matchedItem.id);
+
+    if (grnType === 'From Purchase Order' && !poItem) {
+      showToast('error', `Item "${matchedItem.itemName}" is not part of Purchase Order ${po?.poNo || ''}.`);
+      playErrorBeep();
+      setBarcodeQuery('');
+      return;
+    }
+
+    if (existingIndex > -1) {
+      // Increment quantity atomically
+      const existingItem = items[existingIndex];
+      const newQty = (existingItem.receivedQuantity || 0) + 1;
+      
+      const qty = newQty;
+      const rate = existingItem.rate || 0;
+      const discPct = existingItem.discountPercentage || 0;
+      const vatPct = existingItem.vatPercentage ?? 0;
+      
+      const cost = qty * rate;
+      const discAmt = cost * (discPct / 100);
+      const taxable = Math.max(0, cost - discAmt);
+      const vatAmt = taxable * (vatPct / 100);
+      const total = taxable + vatAmt;
+      const unitCost = qty > 0 ? total / qty : rate;
+      
+      const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '' };
+      const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+      
+      const cgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const sgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const igstAmount = isIntrastate ? 0 : Number(vatAmt.toFixed(2));
+      
+      setItems(prev => prev.map((item, idx) => {
+        if (idx === existingIndex) {
+          return {
+            ...item,
+            receivedQuantity: qty,
+            acceptedQuantity: qty,
+            discountAmount: Number(discAmt.toFixed(2)),
+            vatAmount: Number(vatAmt.toFixed(2)),
+            totalAmount: Number(total.toFixed(2)),
+            unitCost: Number(unitCost.toFixed(2)),
+            cgstAmount,
+            sgstAmount,
+            igstAmount
+          };
+        }
+        return item;
+      }));
+      
+      showToast('success', `Incremented quantity for "${matchedItem.itemName}" (Batch: ${batchCode})`);
+      playSuccessBeep();
+    } else {
+      // Direct receipt or new PO item - add directly
+      const qty = 1;
+      const rate = poItem ? poItem.unitCost || 0 : (matchedItem.stock?.itemRate || 10);
+      const discPct = poItem ? poItem.discountPercentage || 0 : 0;
+      const vatPct = resolveItemTaxPercentage(matchedItem.id);
+      
+      const cost = qty * rate;
+      const discAmt = cost * (discPct / 100);
+      const taxable = Math.max(0, cost - discAmt);
+      const vatAmt = taxable * (vatPct / 100);
+      const total = taxable + vatAmt;
+      
+      const vendorGst = selectedVendor ? getVendorGstDetails(selectedVendor) : { stateCode: '' };
+      const isIntrastate = !vendorGst.stateCode || vendorGst.stateCode === '07';
+      
+      const cgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const sgstAmount = isIntrastate ? Number((vatAmt / 2).toFixed(2)) : 0;
+      const igstAmount = isIntrastate ? 0 : Number(vatAmt.toFixed(2));
+      
+      const newItem: GRNItem = {
+        itemId: matchedItem.id,
+        itemName: matchedItem.itemName,
+        itemCode: matchedItem.itemCode,
+        locator: 'MAIN-01',
+        batchCode,
+        expiryDate,
+        poQuantity: poItem ? poItem.quantity || 0 : 0,
+        receivedQuantity: qty,
+        acceptedQuantity: qty,
+        rate: rate,
+        publicPrice: poItem ? poItem.publicPrice || rate * 1.25 : rate * 1.25,
+        unitCost: Number((total / qty).toFixed(2)),
+        discountPercentage: discPct,
+        discountAmount: Number(discAmt.toFixed(2)),
+        vatPercentage: vatPct,
+        vatAmount: Number(vatAmt.toFixed(2)),
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
+        totalAmount: Number(total.toFixed(2)),
+        remarks: '',
+        isBulky: poItem ? poItem.isBulk || false : false
+      };
+      
+      setItems(prev => [...prev, newItem]);
+      setActiveItemIndex(items.length);
+      showToast('success', `Added "${matchedItem.itemName}" to GRN.`);
+      playSuccessBeep();
+    }
+
+    setLastGS1Scan({
+      gtin: matchedItem.gtin || '',
+      batch: scannedBatch,
+      expiry: scannedExpiry
+    });
+    setBarcodeQuery('');
+  };
+
+  const handleBarcodeScan = async (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
+    const query = barcodeQuery.trim();
+    if (!query) return;
+
+    if (!storeId) {
+      showToast('error', 'Please select a store first.');
+      playErrorBeep();
+      setBarcodeQuery('');
+      return;
+    }
+
+    const parsedGS1 = parseGS1(query);
+    const hasParsedGtin = !!parsedGS1.gtin;
+    const searchGtin = parsedGS1.gtin || query;
+    const searchBatchNo = parsedGS1.batch;
+    const searchExpiry = parsedGS1.expiry;
+
+    const isStandardBarcode = hasParsedGtin || (/^\d+$/.test(query) && query.length >= 8 && query.length <= 14);
+
+    const cleanQuery = searchGtin.replace(/^0+/, '');
+    const matchedItem = inventoryItems.find(i => {
+      if (!i.isActive) return false;
+      if (i.itemCode?.toLowerCase() === query.toLowerCase() || i.itemCode?.toLowerCase() === searchGtin.toLowerCase()) {
+        return true;
+      }
+      if (isStandardBarcode && i.gtin) {
+        const cleanItemGtin = i.gtin.replace(/^0+/, '');
+        if (cleanItemGtin === cleanQuery) return true;
+      }
+      return false;
+    });
+
+    if (!matchedItem) {
+      playErrorBeep();
+      setUnrecognizedScan({
+        gtin: searchGtin,
+        batch: searchBatchNo,
+        expiry: searchExpiry
+      });
+      setMappingItemId('');
+      setMappingSearchQuery('');
+      setBarcodeQuery('');
+      return;
+    }
+
+    processGRNBarcodeItem(matchedItem, searchBatchNo, searchExpiry);
+  };
+
+  const handleConfirmMapping = async () => {
+    if (!unrecognizedScan || !mappingItemId) {
+      showToast('error', 'Please select an item to link.');
+      playErrorBeep();
+      return;
+    }
+
+    const selectedItem = inventoryItems.find(i => i.id === mappingItemId);
+    if (!selectedItem) return;
+
+    try {
+      const updatedItem = {
+        ...selectedItem,
+        gtin: unrecognizedScan.gtin
+      };
+
+      await saveInventoryItem(updatedItem);
+      showToast('success', `Linked barcode ${unrecognizedScan.gtin} to item "${selectedItem.itemName}" successfully.`);
+      playSuccessBeep();
+
+      processGRNBarcodeItem(updatedItem, unrecognizedScan.batch, unrecognizedScan.expiry);
+
+      setUnrecognizedScan(null);
+      setMappingItemId('');
+      setMappingSearchQuery('');
+    } catch (err: any) {
+      showToast('error', `Mapping failed: ${err.message}`);
+      playErrorBeep();
+    }
+  };
+
   // Save GRN action
   const handleSave = async (e: React.FormEvent, finalStatus: 'Draft' | 'Submitted') => {
     e.preventDefault();
@@ -512,6 +767,8 @@ export const GRNPage: React.FC = () => {
     g.gateEntryNo.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const paginatedGRNs = filteredGRNs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="flex flex-col h-full gap-6 animate-in fade-in duration-300">
       
@@ -558,7 +815,7 @@ export const GRNPage: React.FC = () => {
                 placeholder="Search by receipt no, type, or gate entry..."
                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-400 text-sm"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               />
             </div>
           </div>
@@ -580,7 +837,7 @@ export const GRNPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {filteredGRNs.map((g) => {
+                  {paginatedGRNs.map((g) => {
                     const vendor = vendors.find(v => v.id === g.vendorId);
                     const store = stores.find(s => s.id === g.storeId);
                     return (
@@ -645,6 +902,14 @@ export const GRNPage: React.FC = () => {
               </div>
             )}
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filteredGRNs.length / itemsPerPage)}
+            totalItems={filteredGRNs.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            colorTheme="emerald"
+          />
         </div>
       ) : (
         /* ================== FORM VIEW ================== */
@@ -919,7 +1184,77 @@ export const GRNPage: React.FC = () => {
             <div className="p-6">
               
               {bottomTab === 'items' && (
-                <div className="overflow-x-auto">
+                <div className="flex flex-col gap-4">
+                  {/* Barcode Scanner Bar */}
+                  {storeId && (
+                    <div className="p-4 bg-slate-50 border border-slate-200/60 rounded-2xl flex flex-col gap-2 shrink-0 animate-in fade-in duration-300">
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex-1 min-w-[280px] max-w-md">
+                          <div className="relative group">
+                            <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500 group-hover:text-emerald-600 transition-colors" />
+                            <input
+                              ref={scannerInputRef}
+                              id="grn-barcode-input"
+                              type="text"
+                              className="w-full pl-9 pr-24 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-400 font-medium transition-all"
+                              placeholder="Scan item barcode (GTIN) or code to receive..."
+                              value={barcodeQuery}
+                              onChange={e => setBarcodeQuery(e.target.value)}
+                              onFocus={() => setScannerFocused(true)}
+                              onBlur={() => setScannerFocused(false)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleBarcodeScan(e);
+                                }
+                              }}
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">
+                                {scannerFocused ? 'Ready' : 'Click to Scan'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                              checked={autoFocusScanner}
+                              onChange={e => setAutoFocusScanner(e.target.checked)}
+                            />
+                            <span className="text-xs font-semibold text-slate-500">Auto-Focus Scanner</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {lastGS1Scan && (
+                        <div className="text-[10px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-1.5 flex items-center gap-4 max-w-md animate-in fade-in slide-in-from-top-1 duration-200">
+                          <span className="font-bold uppercase tracking-wider text-emerald-600 bg-emerald-100/50 px-1.5 py-0.5 rounded text-[9px]">GS1 Parsed</span>
+                          {lastGS1Scan.gtin && (
+                            <span>GTIN: <span className="font-bold text-emerald-900">{lastGS1Scan.gtin}</span></span>
+                          )}
+                          {lastGS1Scan.batch && (
+                            <span>Batch: <span className="font-bold text-emerald-900">{lastGS1Scan.batch}</span></span>
+                          )}
+                          {lastGS1Scan.expiry && (
+                            <span>Expiry: <span className="font-bold text-emerald-900">{lastGS1Scan.expiry}</span></span>
+                          )}
+                          <button 
+                            type="button" 
+                            onClick={() => setLastGS1Scan(null)} 
+                            className="ml-auto hover:text-emerald-950 font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="overflow-x-auto">
                   {items.length > 0 ? (
                     <table className="w-full text-left border-collapse min-w-[1400px]">
                       <thead>
@@ -1115,6 +1450,7 @@ export const GRNPage: React.FC = () => {
                     </div>
                   )}
                 </div>
+              </div>
               )}
 
               {bottomTab === 'billing' && (
@@ -1353,6 +1689,112 @@ export const GRNPage: React.FC = () => {
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md shadow-emerald-100 transition-all active:scale-95"
               >
                 Append to Receipts Grid
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Unrecognized Barcode Mapping Modal */}
+      {unrecognizedScan && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="p-6 bg-amber-50 border-b border-amber-100">
+              <h3 className="text-lg font-black text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-5.5 h-5.5 text-amber-600" />
+                ⚠️ UNRECOGNIZED BARCODE DETECTED
+              </h3>
+              <p className="text-xs text-amber-600 mt-1 font-semibold">This barcode is not linked to any item in the catalog. Link it now to proceed.</p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 flex flex-col gap-4 overflow-auto max-h-[400px]">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/60 text-xs flex flex-col gap-2 font-semibold text-slate-600">
+                <div>Scanned GTIN: <span className="font-mono font-bold text-slate-800">{unrecognizedScan.gtin}</span></div>
+                <div className="grid grid-cols-2 gap-4 mt-1">
+                  <div>Parsed Batch: <span className="font-bold text-slate-800">{unrecognizedScan.batch || 'N/A'}</span></div>
+                  <div>Parsed Expiry: <span className="font-bold text-slate-800">{unrecognizedScan.expiry || 'N/A'}</span></div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Search Catalog to Link this Barcode</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by item name or code..."
+                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-emerald-500 bg-white placeholder-slate-400 font-medium"
+                    value={mappingSearchQuery}
+                    onChange={e => setMappingSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Matching items selector */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs font-bold text-slate-500 font-semibold">Matching Items Found:</span>
+                <div className="border border-slate-200 rounded-2xl max-h-48 overflow-y-auto divide-y divide-slate-100 shadow-inner">
+                  {inventoryItems
+                    .filter(i => 
+                      i.isActive && 
+                      (!storeId || storeItemMappings.some(m => m.storeId === storeId && m.itemId === i.id)) &&
+                      (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                       i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                    )
+                    .slice(0, 15)
+                    .map(item => (
+                      <label 
+                        key={item.id} 
+                        className={`flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors ${
+                          mappingItemId === item.id ? 'bg-emerald-50/50' : ''
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="mappingItem"
+                          className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                          checked={mappingItemId === item.id}
+                          onChange={() => setMappingItemId(item.id)}
+                        />
+                        <div className="text-xs">
+                          <p className="font-bold text-slate-800">{item.itemName}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{item.itemCode} · {item.itemCategory}</p>
+                        </div>
+                      </label>
+                    ))}
+                  {inventoryItems.filter(i => 
+                    i.isActive && 
+                    (!storeId || storeItemMappings.some(m => m.storeId === storeId && m.itemId === i.id)) &&
+                    (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                     i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                  ).length === 0 && (
+                    <div className="p-4 text-center text-xs text-slate-400 italic">No store-mapped items match your search.</div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setUnrecognizedScan(null)}
+                className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-50 transition-all active:scale-95"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMapping}
+                disabled={!mappingItemId}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-100 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                CONFIRM & BIND BARCODE
               </button>
             </div>
 

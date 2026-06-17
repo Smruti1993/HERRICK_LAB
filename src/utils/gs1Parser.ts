@@ -22,6 +22,11 @@ export function parseGS1(barcode: string): ParsedGS1 {
     cleanBarcode = cleanBarcode.substring(3);
   }
 
+  // Auto-correct dropped opening parenthesis for first AI if it starts with digits followed by a closing parenthesis (e.g. "01)")
+  if (/^\d{2,4}\)/.test(cleanBarcode)) {
+    cleanBarcode = '(' + cleanBarcode;
+  }
+
   // 1. Try parsing parentheses format: (01)00888643031024(17)261231(10)LOT123
   if (cleanBarcode.includes('(') && cleanBarcode.includes(')')) {
     const regex = /\((\d{2,4})\)([^()]+)/g;

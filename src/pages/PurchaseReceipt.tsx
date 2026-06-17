@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useData } from '../context/DataContext';
 import { PurchaseReceipt, PurchaseReceiptItem } from '../types';
+import { Pagination } from '../components/Pagination';
 import {
   Plus, Search, Edit2, Trash2, Check, FileText, MapPin, User, Award,
   ArrowLeft, DollarSign, Grid, BookOpen, Percent, ShoppingBag, Layers,
@@ -15,9 +16,6 @@ type BottomTab = 'items' | 'batch' | 'billing' | 'terms' | 'advance';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmtCurrency = (v: number) =>
-  new Intl.NumberFormat('en-SA', { style: 'currency', currency: 'SAR', minimumFractionDigits: 2 }).format(v);
-
 const today = () => new Date().toISOString().split('T')[0];
 
 const genReceiptNo = () => `PRN-${Date.now().toString().slice(-8)}`;
@@ -28,12 +26,17 @@ export const PurchaseReceiptPage: React.FC = () => {
   const {
     purchaseReceipts, savePurchaseReceipt, deletePurchaseReceipt,
     grns, vendors, stores, inventoryItems, showToast,
-    purchaseOrders, storeItemMappings
+    purchaseOrders, storeItemMappings,
+    formatCurrency, selectedCurrency
   } = useData();
+
+  const fmtCurrency = formatCurrency;
 
   // ── View mode ──────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // ── Header fields ──────────────────────────────────────────────────────────
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -319,6 +322,8 @@ export const PurchaseReceiptPage: React.FC = () => {
     (vendors.find(v => v.id === p.vendorId)?.name || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const paginatedReceipts = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   // ═══════════════════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -366,7 +371,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                 placeholder="Search by receipt no or vendor..."
                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-violet-500 outline-none transition-all placeholder:text-slate-400 text-sm"
                 value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                onChange={e => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               />
             </div>
             <div className="text-xs font-bold text-slate-400">{filtered.length} record(s)</div>
@@ -388,7 +393,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {filtered.map(pr => {
+                  {paginatedReceipts.map(pr => {
                     const vendor = vendors.find(v => v.id === pr.vendorId);
                     const store = stores.find(s => s.id === pr.storeId);
                     const grn = grns.find(g => g.id === pr.grnId);
@@ -450,6 +455,14 @@ export const PurchaseReceiptPage: React.FC = () => {
               </div>
             )}
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filtered.length / itemsPerPage)}
+            totalItems={filtered.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            colorTheme="violet"
+          />
         </div>
 
       ) : (
@@ -1012,7 +1025,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                         <thead>
                           <tr className="text-xs font-bold text-slate-400 uppercase bg-slate-50">
                             <th className="px-4 py-3">#</th>
-                            <th className="px-4 py-3">Amount (SAR)</th>
+                            <th className="px-4 py-3">Amount ({selectedCurrency})</th>
                             <th className="px-4 py-3">Bank / Payment Mode</th>
                             <th className="px-4 py-3">Reference No.</th>
                             <th className="px-4 py-3"></th>
@@ -1128,10 +1141,10 @@ export const PurchaseReceiptPage: React.FC = () => {
 
                     <div className="border-t border-slate-100 pt-2 flex flex-col gap-1.5">
                       {[
-                        { label: 'Unit Rate', value: `${activeItem.rate.toFixed(2)} SAR` },
-                        { label: 'Basic Amount', value: `${(activeItem.quantity * activeItem.rate).toFixed(2)} SAR` },
+                        { label: 'Unit Rate', value: formatCurrency(activeItem.rate) },
+                        { label: 'Basic Amount', value: formatCurrency(activeItem.quantity * activeItem.rate) },
                         { label: 'Discount %', value: `${(activeItem.discountPercentage || 0).toFixed(2)}%` },
-                        { label: 'Discount Amt', value: `${(activeItem.discountAmount || 0).toFixed(2)} SAR` },
+                        { label: 'Discount Amt', value: formatCurrency(activeItem.discountAmount || 0) },
                       ].map(row => (
                         <div key={row.label} className="flex justify-between items-center text-xs">
                           <span className="text-slate-500 font-medium">{row.label}</span>
@@ -1141,7 +1154,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                       <div className="flex justify-between items-center text-xs mt-1 p-2 bg-violet-50 rounded-xl border border-violet-100">
                         <span className="text-violet-600 font-extrabold">Net Line Amount</span>
                         <span className="font-extrabold text-violet-700">
-                          {fmtCurrency(Math.max(0, activeItem.quantity * activeItem.rate - (activeItem.discountAmount || 0)))}
+                          {formatCurrency(Math.max(0, activeItem.quantity * activeItem.rate - (activeItem.discountAmount || 0)))}
                         </span>
                       </div>
                     </div>
@@ -1176,15 +1189,15 @@ export const PurchaseReceiptPage: React.FC = () => {
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-violet-200">Gross Amount</span>
-                    <span className="font-bold">{fmtCurrency(items.reduce((s, i) => s + i.quantity * i.rate, 0))}</span>
+                    <span className="font-bold">{formatCurrency(items.reduce((s, i) => s + i.quantity * i.rate, 0))}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-violet-200">Total Discount</span>
-                    <span className="font-bold text-rose-300">-{fmtCurrency(items.reduce((s, i) => s + (i.discountAmount || 0), 0))}</span>
+                    <span className="font-bold text-rose-300">-{formatCurrency(items.reduce((s, i) => s + (i.discountAmount || 0), 0))}</span>
                   </div>
                   <div className="border-t border-violet-500 pt-2 flex justify-between">
                     <span className="text-violet-100 font-bold">Net Amount</span>
-                    <span className="font-extrabold text-lg">{fmtCurrency(netAmount)}</span>
+                    <span className="font-extrabold text-lg">{formatCurrency(netAmount)}</span>
                   </div>
                 </div>
               </div>
@@ -1236,7 +1249,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                           <div className="font-bold text-slate-700 text-sm">{item.itemName}</div>
                           <div className="text-xs text-slate-400">{item.itemCode}</div>
                         </div>
-                        <div className="text-xs font-bold text-violet-600">SAR {item.stock?.itemRate?.toFixed(2) || '0.00'}</div>
+                        <div className="text-xs font-bold text-violet-600">{formatCurrency(item.stock?.itemRate || 0)}</div>
                       </button>
                     )) : (
                       <div className="px-4 py-4 text-sm text-slate-400 text-center">No items found</div>
@@ -1262,7 +1275,7 @@ export const PurchaseReceiptPage: React.FC = () => {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unit Rate (SAR)</label>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Unit Rate ({selectedCurrency})</label>
                   <input
                     type="number"
                     min={0}

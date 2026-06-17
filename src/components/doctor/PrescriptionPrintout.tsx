@@ -1,5 +1,6 @@
 import React from 'react';
 import { Prescription, Patient, Diagnosis, Allergy, VitalSign, Employee } from '../../types';
+import { useData } from '../../context/DataContext';
 
 interface PrescriptionPrintoutProps {
     prescription: Prescription;
@@ -20,9 +21,14 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
     vitals,
     onClose
 }) => {
+    const { departments, inventoryItems } = useData();
     const primaryDiag = diagnoses.find(d => d.type === 'Primary' || d.type === 'Provisional');
     const secondaryDiag = diagnoses.find(d => d.type === 'Secondary');
     const activeAllergy = allergies.length > 0 ? allergies.map(a => a.allergen).join(', ') : 'NKA';
+
+    const docDept = doctor?.departmentId 
+        ? (departments.find(d => d.id === doctor.departmentId)?.name || "Reception") 
+        : "Reception";
     
     // Auto-print on mount
     React.useEffect(() => {
@@ -71,16 +77,16 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold text-[11px]">Patient Name</div>
                             <div className="col-span-9 p-1.5 text-sm font-bold flex justify-between">
                                 <span>{patient.firstName} {patient.lastName}</span>
-                                <span className="font-arabic">عبدالله احمد حماد الحويطي</span>
+                                <span className="font-arabic">{patient.arabicName || ""}</span>
                             </div>
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold text-[11px]">MRN</div>
-                            <div className="col-span-9 p-1.5 text-sm font-mono tracking-tight font-bold">DAMC{patient.id.slice(-10).toUpperCase()}</div>
+                            <div className="col-span-9 p-1.5 text-sm font-mono tracking-tight font-bold">{patient.id.slice(-8).toUpperCase()}</div>
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">ID No.</div>
-                            <div className="col-span-9 p-1.5 font-medium">1112120223</div>
+                            <div className="col-span-9 p-1.5 font-medium">{patient.nationalId || ""}</div>
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">Sex / Age</div>
@@ -88,7 +94,7 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">Department</div>
-                            <div className="col-span-9 p-1.5 font-medium uppercase">Reception</div>
+                            <div className="col-span-9 p-1.5 font-medium uppercase">{docDept}</div>
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">Weight</div>
@@ -96,14 +102,14 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 border-b border-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">Policy No.</div>
-                            <div className="col-span-9 p-1.5 font-medium"></div>
+                            <div className="col-span-9 p-1.5 font-medium">{patient.policyNo || ""}</div>
                         </div>
                         <div className="grid grid-cols-12 divide-x divide-slate-400 text-[11px]">
                             <div className="col-span-3 bg-slate-100 p-1.5 font-bold">Card No.</div>
-                            <div className="col-span-9 p-1.5 font-medium"></div>
+                            <div className="col-span-9 p-1.5 font-medium">{patient.cardNo || ""}</div>
                         </div>
                     </div>
-
+ 
                     <div className="col-span-4 flex flex-col items-center justify-start p-4 bg-white">
                          {/* Simple Barcode Placeholder */}
                          <div className="w-full h-16 bg-white flex flex-col items-center">
@@ -130,7 +136,7 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                             </div>
                             <div className="flex justify-between border-b pb-0.5 border-slate-200">
                                 <span className="font-bold">Sponsor</span>
-                                <span className="truncate max-w-[120px]">CASH , Cash Plan( Payer IDA14)</span>
+                                <span className="truncate max-w-[120px]">{patient.sponsorName || "CASH"}</span>
                             </div>
                             <div className="flex justify-between border-b pb-0.5 border-slate-200">
                                 <span className="font-bold">Validity</span>
@@ -165,19 +171,24 @@ export const PrescriptionPrintout: React.FC<PrescriptionPrintoutProps> = ({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-300">
-                        {prescription.items.map((item) => (
-                            <tr key={item.id} className="divide-x divide-slate-400 min-h-[3rem]">
-                                <td className="p-2 align-top">
-                                    <div className="font-bold uppercase">{item.genericName}</div>
-                                    <div className="text-slate-600 font-medium">{item.itemName} / {item.dose} {item.units}</div>
-                                </td>
-                                <td className="p-2 text-center align-top font-mono"></td>
-                                <td className="p-2 text-center align-top">{item.noDays}</td>
-                                <td className="p-2 text-center align-top font-bold">{item.totalQty}</td>
-                                <td className="p-2 text-center align-top"></td>
-                                <td className="p-2 align-top italic">{item.frequency} - {item.drugInstruction}</td>
-                            </tr>
-                        ))}
+                        {prescription.items.map((item) => {
+                            const invItem = inventoryItems.find(inv => inv.id === item.itemId);
+                            const sfdaCode = invItem?.sfda || item.itemCode || "";
+                            const itemAmt = item.totalAmount !== undefined ? item.totalAmount : (item.unitPrice && item.totalQty ? (item.unitPrice * item.totalQty) : null);
+                            return (
+                                <tr key={item.id} className="divide-x divide-slate-400 min-h-[3rem]">
+                                    <td className="p-2 align-top">
+                                        <div className="font-bold uppercase">{item.genericName}</div>
+                                        <div className="text-slate-600 font-medium">{item.itemName} / {item.dose} {item.units}</div>
+                                    </td>
+                                    <td className="p-2 text-center align-top font-mono">{sfdaCode}</td>
+                                    <td className="p-2 text-center align-top">{item.noDays}</td>
+                                    <td className="p-2 text-center align-top font-bold">{item.totalQty}</td>
+                                    <td className="p-2 text-center align-top">{itemAmt !== null ? itemAmt.toFixed(2) : ""}</td>
+                                    <td className="p-2 align-top italic">{item.frequency} - {item.drugInstruction}</td>
+                                </tr>
+                            );
+                        })}
                         {/* Fill remaining space if few items */}
                         {[...Array(Math.max(0, 5 - prescription.items.length))].map((_, i) => (
                             <tr key={`empty-${i}`} className="divide-x divide-slate-400 h-10">

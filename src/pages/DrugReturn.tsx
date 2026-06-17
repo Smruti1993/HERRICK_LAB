@@ -19,7 +19,8 @@ type LiveBillItem = {
 };
 
 export const DrugReturn: React.FC = () => {
-    const { patients, bills, stores, showToast, processPharmacyReturn, fetchBillItems } = useData();
+    const { patients, bills, stores, showToast, processPharmacyReturn, fetchBillItems, formatCurrency, selectedCurrency } = useData();
+    const decimals = selectedCurrency === 'BHD' ? 3 : 2;
     
     const [searchMRN, setSearchMRN] = useState('');
     const [selectedStoreId, setSelectedStoreId] = useState('');
@@ -88,7 +89,7 @@ export const DrugReturn: React.FC = () => {
         return liveItems.reduce((sum, item) => {
             const qty = returnQuantities[item.id] || 0;
             const base = qty * item.unitPrice;
-            const tax = Number((base * (item.taxPercentage / 100)).toFixed(2));
+            const tax = Number((base * (item.taxPercentage / 100)).toFixed(decimals));
             return sum + base + tax;
         }, 0);
     }, [liveItems, returnQuantities]);
@@ -198,7 +199,7 @@ export const DrugReturn: React.FC = () => {
                                                 {new Date(bill.date).toLocaleDateString()}
                                             </span>
                                         </div>
-                                        <div className="text-xs text-slate-500 font-medium">SAR {Number(bill.totalAmount || 0).toFixed(2)}</div>
+                                        <div className="text-xs text-slate-500 font-medium">{formatCurrency(bill.totalAmount || 0)}</div>
                                     </button>
                                 ))
                             )}
@@ -217,7 +218,7 @@ export const DrugReturn: React.FC = () => {
                                 </div>
                                 <div className="text-right">
                                     <div className="text-xs font-bold text-slate-400 uppercase">Total Credit</div>
-                                    <div className="text-2xl font-black text-blue-600">SAR {totalReturnAmount.toFixed(2)}</div>
+                                    <div className="text-2xl font-black text-blue-600">{formatCurrency(totalReturnAmount)}</div>
                                 </div>
                             </div>
 
@@ -289,19 +290,19 @@ export const DrugReturn: React.FC = () => {
                                                         )}
                                                     </td>
                                                     <td className="px-4 py-4 text-right">
-                                                        <span className="text-xs font-bold text-slate-600">SAR {item.unitPrice.toFixed(2)}</span>
+                                                        <span className="text-xs font-bold text-slate-600">{formatCurrency(item.unitPrice)}</span>
                                                     </td>
                                                     <td className="px-4 py-4 text-right">
                                                         <div className="flex flex-col">
                                                             <span className="text-xs font-bold text-orange-600">
-                                                                SAR {((returnQuantities[item.id] || 0) * item.unitPrice * (item.taxPercentage / 100)).toFixed(2)}
+                                                                {formatCurrency((returnQuantities[item.id] || 0) * item.unitPrice * (item.taxPercentage / 100))}
                                                             </span>
                                                             <span className="text-[9px] font-black text-slate-400 uppercase">({item.taxPercentage}%)</span>
                                                         </div>
                                                     </td>
                                                     <td className="px-4 py-4 text-right">
                                                         <span className="text-sm font-black text-slate-800">
-                                                            SAR {((returnQuantities[item.id] || 0) * item.unitPrice * (1 + item.taxPercentage / 100)).toFixed(2)}
+                                                            {formatCurrency((returnQuantities[item.id] || 0) * item.unitPrice * (1 + item.taxPercentage / 100))}
                                                         </span>
                                                     </td>
                                                 </tr>

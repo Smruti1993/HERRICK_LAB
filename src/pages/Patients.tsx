@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { Search, Pencil, X, UserPlus, Filter } from 'lucide-react';
+import { Pagination } from '../components/Pagination';
 import { Patient } from '../types';
 
 export const Patients = () => {
-  const { patients, addPatient, updatePatient } = useData();
+  const { patients, addPatient, updatePatient, organizations } = useData();
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   const initialFormState = {
     firstName: '',
@@ -16,7 +19,12 @@ export const Patients = () => {
     gender: 'Male',
     phone: '',
     email: '',
-    address: ''
+    address: '',
+    arabicName: '',
+    nationalId: '',
+    sponsorName: 'CASH',
+    policyNo: '',
+    cardNo: ''
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -39,7 +47,12 @@ export const Patients = () => {
         gender: p.gender,
         phone: p.phone,
         email: p.email,
-        address: p.address
+        address: p.address,
+        arabicName: p.arabicName || '',
+        nationalId: p.nationalId || '',
+        sponsorName: p.sponsorName || 'CASH',
+        policyNo: p.policyNo || '',
+        cardNo: p.cardNo || ''
     });
     setEditingId(p.id);
     setShowForm(true);
@@ -70,6 +83,8 @@ export const Patients = () => {
     const fullName = `${p.firstName} ${p.lastName}`.toLowerCase();
     return fullName.includes(term) || p.phone.includes(term);
   });
+
+  const paginatedPatients = filteredPatients.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   return (
     <div className="space-y-6">
@@ -121,6 +136,35 @@ export const Patients = () => {
                     <input type="email" className="form-input" value={formData.email} 
                         onChange={e => setFormData({...formData, email: e.target.value})} />
                 </div>
+                <div>
+                    <label className="form-label">Arabic Name</label>
+                    <input className="form-input" value={formData.arabicName} 
+                        onChange={e => setFormData({...formData, arabicName: e.target.value})} />
+                </div>
+                <div>
+                    <label className="form-label">National ID / Iqama</label>
+                    <input className="form-input" value={formData.nationalId} 
+                        onChange={e => setFormData({...formData, nationalId: e.target.value})} />
+                </div>
+                <div>
+                    <label className="form-label">Sponsor</label>
+                    <select className="form-input" value={formData.sponsorName} onChange={e => setFormData({...formData, sponsorName: e.target.value})}>
+                        <option value="CASH">CASH</option>
+                        {organizations.map(org => (
+                            <option key={org.id} value={org.name}>{org.name}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="form-label">Policy No.</label>
+                    <input className="form-input" value={formData.policyNo} 
+                        onChange={e => setFormData({...formData, policyNo: e.target.value})} />
+                </div>
+                <div>
+                    <label className="form-label">Card No.</label>
+                    <input className="form-input" value={formData.cardNo} 
+                        onChange={e => setFormData({...formData, cardNo: e.target.value})} />
+                </div>
                 <div className="md:col-span-2 lg:col-span-3">
                     <label className="form-label">Address</label>
                     <textarea className="form-input h-20" value={formData.address} 
@@ -150,11 +194,11 @@ export const Patients = () => {
                     className="w-full pl-10 pr-8 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none transition-all" 
                     placeholder="Search by name or phone..."
                     value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
+                    onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 />
                 {searchTerm && (
                     <button 
-                        onClick={() => setSearchTerm('')}
+                        onClick={() => { setSearchTerm(''); setCurrentPage(1); }}
                         className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
                     >
                         <X className="w-3.5 h-3.5" />
@@ -184,7 +228,7 @@ export const Patients = () => {
                             </td>
                         </tr>
                     ) : (
-                        filteredPatients.map(p => {
+                        paginatedPatients.map(p => {
                             const age = new Date().getFullYear() - new Date(p.dob).getFullYear();
                             return (
                                 <tr key={p.id} className="hover:bg-slate-50 transition-colors group">
@@ -208,6 +252,14 @@ export const Patients = () => {
                 </tbody>
             </table>
         </div>
+        <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filteredPatients.length / itemsPerPage)}
+            totalItems={filteredPatients.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            colorTheme="teal"
+        />
       </div>
     </div>
   );

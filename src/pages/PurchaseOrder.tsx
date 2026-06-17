@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useData } from '../context/DataContext';
 import { PurchaseOrder, PurchaseOrderItem, POAddressDetails, POOtherDetails, POTerm, InventoryItem } from '../types';
+import { Pagination } from '../components/Pagination';
 import { 
   Plus, Search, Edit2, Trash2, ShieldCheck, Check, Info, FileText, 
   MapPin, Landmark, Award, Globe, User, Percent, AlertTriangle, ArrowLeft,
@@ -10,11 +11,16 @@ import {
 export const PurchaseOrderPage: React.FC = () => {
   const { 
     purchaseOrders, savePurchaseOrder, deletePurchaseOrder,
-    vendors, stores, taxMasters, inventoryItems, itemTaxMappings, showToast 
+    vendors, stores, taxMasters, inventoryItems, itemTaxMappings, showToast,
+    formatCurrency, selectedCurrency
   } = useData();
+
+  const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   
   // Header Form States
   const [editingPOId, setEditingPOId] = useState<string | null>(null);
@@ -143,7 +149,7 @@ export const PurchaseOrderPage: React.FC = () => {
       }
     }
 
-    setNetAmount(Number((afterDisc + taxAmt).toFixed(2)));
+    setNetAmount(Number((afterDisc + taxAmt).toFixed(decimals)));
   }, [items, discountAmount, discountPercentage, taxCode, taxMasters, itemTaxMappings]);
 
   // Sync right-hand detail panel fields when activeItemIndex changes
@@ -414,6 +420,8 @@ export const PurchaseOrderPage: React.FC = () => {
     po.purchaseOrganisation.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const paginatedPOs = filteredPOs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className="flex flex-col h-full gap-6 animate-in fade-in duration-300">
       
@@ -460,7 +468,7 @@ export const PurchaseOrderPage: React.FC = () => {
                 placeholder="Search by order number or type..."
                 className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-400 text-sm"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               />
             </div>
           </div>
@@ -479,7 +487,7 @@ export const PurchaseOrderPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filteredPOs.map(po => {
+                  {paginatedPOs.map(po => {
                     const matchedVendor = vendors.find(v => v.id === po.vendorId);
                     const matchedStore = stores.find(s => s.id === po.storeId);
                     return (
@@ -497,7 +505,7 @@ export const PurchaseOrderPage: React.FC = () => {
                           <div className="text-[10px] text-slate-400 font-bold uppercase">Code: {matchedStore?.storeCode || 'UNK'}</div>
                         </td>
                         <td className="px-8 py-4">
-                          <span className="font-black text-blue-600 text-sm">SAR {po.netAmount.toFixed(2)}</span>
+                          <span className="font-black text-blue-600 text-sm">{formatCurrency(po.netAmount)}</span>
                         </td>
                         <td className="px-8 py-4 text-right">
                           <div className="flex justify-end gap-2">
@@ -532,6 +540,14 @@ export const PurchaseOrderPage: React.FC = () => {
               </div>
             )}
           </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(filteredPOs.length / itemsPerPage)}
+            totalItems={filteredPOs.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            colorTheme="blue"
+          />
         </div>
       ) : (
         /* ================== FORM VIEW ================== */
@@ -746,7 +762,7 @@ export const PurchaseOrderPage: React.FC = () => {
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-2xl font-black text-blue-600">SAR {netAmount.toFixed(2)}</span>
+                <span className="text-2xl font-black text-blue-600">{formatCurrency(netAmount)}</span>
               </div>
             </div>
 
@@ -1140,7 +1156,7 @@ export const PurchaseOrderPage: React.FC = () => {
                     <div className="flex gap-3">
                       <input 
                         type="number" 
-                        placeholder="Request Amount (SAR)" 
+                        placeholder={`Request Amount (${selectedCurrency})`} 
                         className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs font-semibold text-slate-700" 
                       />
                       <button 

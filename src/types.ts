@@ -8,6 +8,16 @@ export interface MasterEntity {
   status: 'Active' | 'Inactive';
 }
 
+export interface Currency {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  isActive: boolean;
+  isDefault: boolean;
+  createdAt?: string;
+}
+
 export interface Department extends MasterEntity {}
 export interface Unit extends MasterEntity {}
 export interface ServiceCentre extends MasterEntity {}
@@ -139,6 +149,11 @@ export interface Patient {
   email: string;
   address: string;
   registrationDate: string;
+  arabicName?: string;
+  nationalId?: string;
+  sponsorName?: string;
+  policyNo?: string;
+  cardNo?: string;
 }
 
 export interface DoctorAvailability {
@@ -214,6 +229,8 @@ export interface Bill {
   prescriptionId?: string;
   doctorId?: string;
   createdBy?: string;
+  patientName?: string;
+  receiptNo?: string;
 }
 
 // --- Clinical / Workbench Types ---
@@ -517,7 +534,13 @@ export interface DirectSale {
   totalAmount: number;
   taxAmount?: number;
   items: DirectSaleItem[];
+  paymentMode?: string;
+  referenceNo?: string;
+  pgOrderId?: string;
+  pgPaymentId?: string;
+  paymentStatus?: string;
 }
+
 
 export interface PrescriptionItem {
   id: string;
@@ -588,6 +611,16 @@ export interface TaxMaster {
   taxName: string;
   percentage: number;
   status: 'Active' | 'Inactive';
+  createdAt?: string;
+}
+
+export interface Currency {
+  id: string;
+  code: string;
+  name: string;
+  symbol: string;
+  isActive: boolean;
+  isDefault: boolean;
   createdAt?: string;
 }
 

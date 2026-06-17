@@ -3,6 +3,7 @@ import { useData } from '../context/DataContext';
 import { useNavigate } from 'react-router-dom';
 import { SponsorTariff as SponsorTariffType } from '../types';
 import { Save, Loader2, Plus, Search } from 'lucide-react';
+import { Pagination } from '../components/Pagination';
 
 export const SponsorTariff: React.FC = () => {
   const navigate = useNavigate();
@@ -14,8 +15,12 @@ export const SponsorTariff: React.FC = () => {
     sponsorTariffs,
     saveSponsorTariffBatch,
     deleteSponsorTariff,
-    showToast
+    showToast,
+    formatCurrency,
+    selectedCurrency
   } = useData();
+
+  const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
   // --- View Mode ---
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
@@ -475,7 +480,7 @@ export const SponsorTariff: React.FC = () => {
                           <div>{item.name}</div>
                           <div className="text-slate-400 font-mono text-[10px]">{item.code}</div>
                         </div>
-                        <div className="font-bold text-blue-600">${item.basePrice.toFixed(2)}</div>
+                        <div className="font-bold text-blue-600">{formatCurrency(item.basePrice)}</div>
                       </div>
                     ))}
                   </div>
@@ -621,7 +626,7 @@ export const SponsorTariff: React.FC = () => {
                       
                       {/* Base Tariff */}
                       <td className="p-2 border border-slate-300 text-right font-mono font-bold text-slate-600 bg-slate-50">
-                        {row.baseTariff.toFixed(1)}
+                        {row.baseTariff.toFixed(decimals)}
                       </td>
                       
                       {/* Contract Type */}
@@ -654,7 +659,7 @@ export const SponsorTariff: React.FC = () => {
                       <td className="p-1 border border-slate-300">
                         <input
                           type="number"
-                          step="0.01"
+                          step={selectedCurrency === 'BHD' ? "0.001" : "0.01"}
                           disabled={row.contractType !== 'Flat'}
                           className="w-full border border-slate-300 rounded px-1.5 py-0.5 text-xs text-right font-mono font-extrabold text-blue-800 outline-none disabled:bg-slate-50 disabled:text-slate-700"
                           value={row.tariffAmount}
@@ -738,49 +743,14 @@ export const SponsorTariff: React.FC = () => {
             </table>
           </div>
 
-          {/* --- Pagination Bar --- */}
-          <div className="flex justify-between items-center bg-[#f1f3f7] border-t border-slate-300 px-4 py-2 text-xs">
-            <div></div>
-            <div className="flex items-center gap-1">
-              <button 
-                onClick={() => setCurrentPage(1)} 
-                disabled={currentPage === 1}
-                className="px-2 py-1 bg-white border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-bold"
-              >
-                &lt;&lt;
-              </button>
-              {Array.from({ length: Math.min(10, totalPages) }, (_, idx) => {
-                const pageNum = idx + 1;
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => setCurrentPage(pageNum)}
-                    className={`px-3 py-1 border rounded font-bold transition-all ${
-                      currentPage === pageNum 
-                        ? 'bg-blue-600 text-white border-blue-600' 
-                        : 'bg-white text-blue-600 border-slate-300 hover:bg-slate-50'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              })}
-              <button 
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="px-2 py-1 bg-white border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-bold"
-              >
-                &gt;
-              </button>
-              <button 
-                onClick={() => setCurrentPage(totalPages)} 
-                disabled={currentPage === totalPages || totalPages === 0}
-                className="px-2 py-1 bg-white border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-50 text-slate-600 font-bold"
-              >
-                &gt;&gt;
-              </button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredRows.length}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            colorTheme="blue"
+          />
         </div>
       )}
 

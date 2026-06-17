@@ -161,7 +161,7 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
             genericName: gName || 'Generic Not Mapped',
             frequency: 'Once Daily',
             dose: '1',
-            units: item.baseUom || 'Tab',
+            units: (item.baseUom || 'Tab').trim().toUpperCase(),
             intakeQty: 1,
             startDate: new Date().toISOString().split('T')[0],
             noDays: 5,
@@ -198,11 +198,19 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
 
         const prescriptionId = crypto.randomUUID();
 
-        // Assign the new prescriptionId to all items
-        const itemsWithId = selectedItems.map(item => ({
-            ...item,
-            prescriptionId
-        }));
+        // Assign the new prescriptionId to all items and convert totalQty to base UOM if needed
+        const itemsWithId = selectedItems.map(item => {
+            const invItem = inventoryItems.find(i => i.id === item.itemId);
+            const isSalesUom = item.units?.trim().toUpperCase() === (invItem?.salesUom || '').trim().toUpperCase();
+            const cf = isSalesUom ? Number(invItem?.salesConversionFactor || 1) : 1;
+            const totalQtyInBase = Number(item.totalQty || 0) * cf;
+
+            return {
+                ...item,
+                prescriptionId,
+                totalQty: totalQtyInBase
+            };
+        });
 
         const prescription: Prescription = {
             id: prescriptionId,
@@ -485,7 +493,23 @@ export const PharmacyOrderingModal: React.FC<PharmacyOrderingModalProps> = ({
                                                     value={item.intakeQty}
                                                     onChange={e => updateItem(item.id!, 'intakeQty', Number(e.target.value))}
                                                 />
-                                                <span className="text-[10px] text-slate-400 font-bold">{item.units}</span>
+                                                 {(() => {
+                                                     const invItem = inventoryItems.find(i => i.id === item.itemId);
+                                                     const options = [
+                                                         (invItem?.baseUom || 'Tab').trim().toUpperCase(),
+                                                         (invItem?.salesUom || '').trim().toUpperCase()
+                                                     ].filter((v, i, a) => v && a.indexOf(v) === i);
+                                                     
+                                                     return (
+                                                         <select 
+                                                             className="px-1 py-1 bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-600 outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                                                             value={item.units}
+                                                             onChange={e => updateItem(item.id!, 'units', e.target.value)}
+                                                         >
+                                                             {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                         </select>
+                                                     );
+                                                 })()}
                                             </div>
                                         </td>
                                         <td className="p-4">

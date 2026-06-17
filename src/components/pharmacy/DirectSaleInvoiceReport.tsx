@@ -34,7 +34,8 @@ const Barcode: React.FC<{ value: string }> = ({ value }) => {
 };
 
 export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = ({ sale, onClose }) => {
-  const { stores, branches } = useData();
+  const { stores, branches, formatCurrency, selectedCurrency } = useData();
+  const decimals = selectedCurrency === 'BHD' ? 3 : 2;
   
   // Find store and branch/hospital
   const store = stores.find(s => s.id === sale.storeId);
@@ -57,8 +58,8 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
     return {
       ...item,
       rateBeforeTax: Number(rateBeforeTax.toFixed(4)),
-      baseAmount: Number(baseAmount.toFixed(2)),
-      taxAmount: Number(taxAmount.toFixed(2)),
+      baseAmount: Number(baseAmount.toFixed(decimals)),
+      taxAmount: Number(taxAmount.toFixed(decimals)),
       taxPercentage
     };
   });
@@ -204,14 +205,14 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                       <div className="text-[10px] text-slate-400 font-mono">Batch: {item.batchNo} {item.expiryDate && `| Exp: ${new Date(item.expiryDate).toLocaleDateString()}`}</div>
                     </td>
                     <td className="py-2.5 px-1 text-right font-semibold">{item.quantity}</td>
-                    <td className="py-2.5 px-1 text-right font-mono">{(item.rateBeforeTax).toFixed(2)}</td>
+                    <td className="py-2.5 px-1 text-right font-mono">{(item.rateBeforeTax).toFixed(decimals)}</td>
                     <td className="py-2.5 px-1 uppercase text-slate-500 text-[10px]">{item.unit || 'Tablets'}</td>
-                    <td className="py-2.5 px-1 text-right font-mono">{item.totalPrice.toFixed(2)}</td>
-                    <td className="py-2.5 px-1 text-right font-mono">0.00</td>
-                    <td className="py-2.5 px-1 text-right font-mono">{item.baseAmount.toFixed(2)}</td>
-                    <td className="py-2.5 px-1 text-right font-mono">0.00</td>
+                    <td className="py-2.5 px-1 text-right font-mono">{item.totalPrice.toFixed(decimals)}</td>
+                    <td className="py-2.5 px-1 text-right font-mono">{(0).toFixed(decimals)}</td>
+                    <td className="py-2.5 px-1 text-right font-mono">{item.baseAmount.toFixed(decimals)}</td>
+                    <td className="py-2.5 px-1 text-right font-mono">{(0).toFixed(decimals)}</td>
                     <td className="py-2.5 px-1 text-right font-semibold text-slate-600">{item.taxPercentage}%</td>
-                    <td className="py-2.5 px-1 text-right font-bold font-mono">{item.totalPrice.toFixed(2)}</td>
+                    <td className="py-2.5 px-1 text-right font-bold font-mono">{item.totalPrice.toFixed(decimals)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -235,8 +236,8 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                   {Object.entries(vatBreakdown).map(([pct, val]) => (
                     <tr key={pct}>
                       <td className="py-1.5 text-slate-600">VAT {pct}%</td>
-                      <td className="py-1.5 text-right">{val.taxableAmount.toFixed(2)}</td>
-                      <td className="py-1.5 text-right">{val.vatAmount.toFixed(2)}</td>
+                      <td className="py-1.5 text-right">{val.taxableAmount.toFixed(decimals)}</td>
+                      <td className="py-1.5 text-right">{val.vatAmount.toFixed(decimals)}</td>
                     </tr>
                   ))}
                   {Object.keys(vatBreakdown).length === 0 && (
@@ -246,8 +247,8 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                   )}
                   <tr className="font-bold border-t border-slate-200 text-slate-800">
                     <td className="py-1.5">Total Tax (VAT)</td>
-                    <td className="py-1.5 text-right">{(grandTotal - totalTax).toFixed(2)}</td>
-                    <td className="py-1.5 text-right">{totalTax.toFixed(2)}</td>
+                    <td className="py-1.5 text-right">{(grandTotal - totalTax).toFixed(decimals)}</td>
+                    <td className="py-1.5 text-right">{totalTax.toFixed(decimals)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -257,23 +258,23 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
             <div className="flex flex-col justify-end items-end space-y-1.5">
               <div className="flex justify-between w-64 text-slate-500 font-medium">
                 <span>Total Before Round Off:</span>
-                <span className="font-mono">{subtotalBeforeTax.toFixed(2)}</span>
+                <span className="font-mono">{subtotalBeforeTax.toFixed(decimals)}</span>
               </div>
               <div className="flex justify-between w-64 text-slate-500 font-medium">
                 <span>Add: Total Taxes (VAT):</span>
-                <span className="font-mono">{totalTax.toFixed(2)}</span>
+                <span className="font-mono">{totalTax.toFixed(decimals)}</span>
               </div>
               <div className="flex justify-between w-64 text-slate-500 font-medium">
                 <span>Less: Total Discount:</span>
-                <span className="font-mono">-{totalDiscount.toFixed(2)}</span>
+                <span className="font-mono">-{totalDiscount.toFixed(decimals)}</span>
               </div>
               <div className="flex justify-between w-64 text-slate-500 font-medium border-b border-slate-100 pb-1.5">
                 <span>Round Off:</span>
-                <span className="font-mono">{roundOff.toFixed(2)}</span>
+                <span className="font-mono">{roundOff.toFixed(decimals)}</span>
               </div>
               <div className="flex justify-between w-64 text-slate-900 font-extrabold text-sm border-b-2 border-slate-200 pb-1">
                 <span>Grand Total:</span>
-                <span className="font-mono text-blue-700">SAR {grandTotal.toFixed(2)}</span>
+                <span className="font-mono text-blue-700">{formatCurrency(grandTotal)}</span>
               </div>
             </div>
           </div>
@@ -297,10 +298,10 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                 <tr>
                   <td className="py-2 px-1">1</td>
                   <td className="py-2 px-1 text-blue-700">{sale.receiptNo || 'RCP-26000001'}</td>
-                  <td className="py-2 px-1 text-right font-bold">{grandTotal.toFixed(2)}</td>
-                  <td className="py-2 px-1 font-sans">Cash</td>
-                  <td className="py-2 px-1">-</td>
-                  <td className="py-2 px-1">-</td>
+                  <td className="py-2 px-1 text-right font-bold">{grandTotal.toFixed(decimals)}</td>
+                  <td className="py-2 px-1 font-sans">{sale.paymentMode || 'Cash'}</td>
+                  <td className="py-2 px-1">{sale.referenceNo || '-'}</td>
+                  <td className="py-2 px-1 font-sans text-[10px]">{sale.paymentMode === 'UPI' && sale.pgOrderId ? `PG Order: ${sale.pgOrderId}` : '-'}</td>
                   <td className="py-2 px-1 font-sans">{new Date(sale.saleDate).toLocaleDateString()}</td>
                 </tr>
               </tbody>
@@ -311,28 +312,28 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t-2 border-slate-200/80">
             {/* Patient details block */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/50 space-y-2 print:bg-transparent print:border-slate-300 print:rounded-none">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Patient Summary (SAR)</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Patient Summary ({selectedCurrency})</span>
               <div className="space-y-1 font-semibold text-slate-600">
-                <div className="flex justify-between"><span>Patient Gross Amount:</span><span className="font-mono">{grandTotal.toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>Patient Discount Amount:</span><span className="font-mono">0.00</span></div>
-                <div className="flex justify-between"><span>Patient VAT Amount:</span><span className="font-mono">{totalTax.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Patient Gross Amount:</span><span className="font-mono">{grandTotal.toFixed(decimals)}</span></div>
+                <div className="flex justify-between"><span>Patient Discount Amount:</span><span className="font-mono">{(0).toFixed(decimals)}</span></div>
+                <div className="flex justify-between"><span>Patient VAT Amount:</span><span className="font-mono">{totalTax.toFixed(decimals)}</span></div>
                 <div className="flex justify-between border-t border-slate-200 pt-1.5 text-slate-800 text-sm font-bold">
                   <span>Patient Net Amount Payable:</span>
-                  <span className="font-mono text-blue-700">{grandTotal.toFixed(2)}</span>
+                  <span className="font-mono text-blue-700">{formatCurrency(grandTotal)}</span>
                 </div>
               </div>
             </div>
 
             {/* Sponsor details block */}
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/50 space-y-2 print:bg-transparent print:border-slate-300 print:rounded-none">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Sponsor Summary (SAR)</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Sponsor Summary ({selectedCurrency})</span>
               <div className="space-y-1 font-semibold text-slate-600">
-                <div className="flex justify-between"><span>Sponsor Gross Amount:</span><span className="font-mono">0.00</span></div>
-                <div className="flex justify-between"><span>Sponsor Discount Amount:</span><span className="font-mono">0.00</span></div>
-                <div className="flex justify-between"><span>Sponsor VAT Amount:</span><span className="font-mono">0.00</span></div>
+                <div className="flex justify-between"><span>Sponsor Gross Amount:</span><span className="font-mono">{(0).toFixed(decimals)}</span></div>
+                <div className="flex justify-between"><span>Sponsor Discount Amount:</span><span className="font-mono">{(0).toFixed(decimals)}</span></div>
+                <div className="flex justify-between"><span>Sponsor VAT Amount:</span><span className="font-mono">{(0).toFixed(decimals)}</span></div>
                 <div className="flex justify-between border-t border-slate-200 pt-1.5 text-slate-800 text-sm font-bold">
                   <span>Sponsor Net Amount Payable:</span>
-                  <span className="font-mono">0.00</span>
+                  <span className="font-mono">{(0).toFixed(decimals)}</span>
                 </div>
               </div>
             </div>

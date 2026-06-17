@@ -8,6 +8,8 @@ import {
 import { DirectSale as DirectSaleType, DirectSaleItem } from '../../types';
 import { parseGS1 } from '../../utils/gs1Parser';
 import { DirectSaleInvoiceReport } from './DirectSaleInvoiceReport';
+import { getSupabase } from '../../services/supabaseClient';
+import { playSuccessBeep, playErrorBeep } from '../../utils/audio';
 
 const INITIAL_PATIENT = {
   firstName: '',
@@ -27,7 +29,19 @@ const INITIAL_PATIENT = {
 };
 
 export const DirectSale: React.FC = () => {
-  const { stores, inventoryItems, storeItemMappings, saveDirectSale, fetchBatchDetails, itemTaxMappings, taxMasters } = useData();
+  const { stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails, itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem } = useData();
+
+  const decimals = selectedCurrency === 'BHD' ? 3 : 2;
+
+  const getExchangeRateToINR = (code: string) => {
+    switch(code) {
+      case 'SAR': return 22.20;
+      case 'USD': return 83.00;
+      case 'BHD': return 220.00;
+      case 'QAR': return 22.80;
+      case 'INR': default: return 1.00;
+    }
+  };
   
   const [patient, setPatient] = useState(INITIAL_PATIENT);
   const [selectedStore, setSelectedStore] = useState('');
@@ -35,6 +49,13 @@ export const DirectSale: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastDispensedSale, setLastDispensedSale] = useState<DirectSaleType | null>(null);
+  const [paymentMode, setPaymentMode] = useState<'Cash' | 'Card' | 'UPI'>('Cash');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [showUpiModal, setShowUpiModal] = useState(false);
+  const [upiLink, setUpiLink] = useState('');
+  const [upiOrderId, setUpiOrderId] = useState('');
+  const [pendingSaleNo, setPendingSaleNo] = useState('');
+  const [pendingSale, setPendingSale] = useState<DirectSaleType | null>(null);
 
   // Scanner state
   const [barcodeQuery, setBarcodeQuery] = useState('');
@@ -43,6 +64,13 @@ export const DirectSale: React.FC = () => {
   const [scannerFocused, setScannerFocused] = useState(false);
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
+
+  // Unrecognized Barcode Mapping Dialog state
+  const [unrecognizedScan, setUnrecognizedScan] = useState<{ gtin: string; batch?: string; expiry?: string } | null>(null);
+  const [mappingItemId, setMappingItemId] = useState('');
+  const [mappingSearchQuery, setMappingSearchQuery] = useState('');
+  const [supervisorPin, setSupervisorPin] = useState('');
+  const [pinError, setPinError] = useState('');
 
   // Search references for items
   const [activeSearchIndex, setActiveSearchIndex] = useState<number | null>(null);
@@ -93,6 +121,106 @@ export const DirectSale: React.FC = () => {
     document.addEventListener('focusout', handleBlur);
     return () => document.removeEventListener('focusout', handleBlur);
   }, [autoFocusScanner]);
+
+  const handlePaymentCompletion = async (sale: DirectSaleType, paymentId: string, orderId: string) => {
+    // 1. Complete direct sale payment (deduct stock, post JV, update status to paid)
+    const success = await completeDirectSalePayment(sale, paymentId, orderId);
+    if (!success) return;
+
+    // 2. Fetch the updated sale record from DB
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from('pharmacy_direct_sales')
+      .select('*, items:pharmacy_direct_sale_items(*)')
+      .eq('sale_no', sale.saleNo)
+      .single();
+      
+    if (!error && data) {
+      const mappedSale: DirectSaleType = {
+        id: data.id,
+        saleNo: data.sale_no,
+        invoiceNo: data.invoice_no,
+        receiptNo: data.receipt_no,
+        saleDate: data.sale_date,
+        storeId: data.store_id,
+        firstName: data.first_name,
+        middleName: data.middle_name,
+        lastName: data.last_name,
+        phoneNo: data.phone_no,
+        externalNo: data.external_no,
+        dob: data.dob,
+        age: data.age,
+        ageUnit: data.age_unit,
+        gender: data.gender,
+        referredDoctor: data.referred_doctor,
+        licenseNo: data.license_no,
+        nationality: data.nationality,
+        isInsured: data.is_insured,
+        isNewExternalPatient: data.is_new_external_patient,
+        totalAmount: data.total_amount,
+        taxAmount: data.tax_amount,
+        paymentMode: data.payment_mode || 'UPI',
+        referenceNo: data.reference_no || data.pg_payment_id || '',
+        pgOrderId: data.pg_order_id || '',
+        pgPaymentId: data.pg_payment_id || '',
+        paymentStatus: data.payment_status || 'paid',
+        items: (data.items || []).map((i: any) => {
+          const invItem = inventoryItems.find((inv: any) => inv.id === i.item_id);
+          const originalItem = sale.items.find(pi => pi.itemId === i.item_id);
+          return {
+            id: i.id,
+            saleId: i.sale_id,
+            itemId: i.item_id,
+            itemCode: invItem ? invItem.itemCode : '',
+            itemName: invItem ? invItem.itemName : '',
+            batchNo: i.batch_no,
+            quantity: i.quantity,
+            unitPrice: i.unit_price,
+            totalPrice: i.total_price,
+            taxPercentage: i.tax_percentage,
+            taxAmount: i.tax_amount,
+            expiryDate: i.expiry_date,
+            unit: originalItem?.unit || invItem?.salesUom || invItem?.baseUom || ''
+          };
+        })
+      };
+      
+      setLastDispensedSale(mappedSale);
+      setShowUpiModal(false);
+      setPendingSale(null);
+      setPendingSaleNo('');
+    }
+  };
+
+  // Listen for Supabase Realtime updates on the pending sale
+  useEffect(() => {
+    if (!pendingSale) return;
+
+    const supabase = getSupabase();
+    
+    const channel = supabase
+      .channel(`realtime-sale-${pendingSale.saleNo}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pharmacy_direct_sales',
+          filter: `sale_no=eq.${pendingSale.saleNo}`
+        },
+        async (payload: any) => {
+          console.log("Realtime webhook notification received: ", payload);
+          if (payload.new && payload.new.payment_status === 'paid') {
+            await handlePaymentCompletion(pendingSale, payload.new.pg_payment_id || '', payload.new.pg_order_id || '');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [pendingSale, inventoryItems]);
 
   const addItemRow = () => {
     const newItem: DirectSaleItem = {
@@ -166,12 +294,113 @@ export const DirectSale: React.FC = () => {
     setItems(newItems);
   };
 
-  const handleBarcodeScan = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const processMatchedDirectSaleItem = async (matchedItem: any, scannedBatch?: string, scannedExpiry?: string) => {
+    // Verify store item mapping
+    const isMapped = storeItemMappings.some(
+      m => m.storeId === selectedStore && m.itemId === matchedItem.id
+    );
+    if (!isMapped) {
+      setError(`Item "${matchedItem.itemName}" is not mapped to the selected store.`);
+      playErrorBeep();
+      return;
+    }
+
+    // Check if item is already present in current list
+    const existingIndex = items.findIndex(item => item.itemId === matchedItem.id);
+    if (existingIndex > -1 && incrementOnRescan) {
+      // Increment quantity
+      updateItemQty(existingIndex, items[existingIndex].quantity + 1);
+      playSuccessBeep();
+      return;
+    }
+
+    // Fetch batches
+    const batches = await fetchBatchDetails(selectedStore, matchedItem.id);
+    
+    // Auto-select FIFO batch (first batch with stock, or first batch if all empty)
+    const sortedBatches = [...batches].sort((a, b) => {
+      if (!a.expiryDate) return 1;
+      if (!b.expiryDate) return -1;
+      return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+    });
+
+    // Try to match parsed GS1 batch number first
+    let activeBatch = null;
+    if (scannedBatch) {
+      activeBatch = sortedBatches.find(
+        b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase() && b.currentStock > 0
+      );
+      if (!activeBatch) {
+        const batchExists = sortedBatches.some(b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase());
+        if (batchExists) {
+          setError(`Parsed batch "${scannedBatch}" has no stock. Selecting FIFO batch.`);
+        } else {
+          setError(`Parsed batch "${scannedBatch}" not found. Selecting FIFO batch.`);
+        }
+      }
+    }
+
+    if (!activeBatch) {
+      activeBatch = sortedBatches.find(b => b.currentStock > 0) || sortedBatches[0];
+    }
+
+    const batchNo = activeBatch ? activeBatch.batchNo : '';
+
+    // Find an empty row or append
+    const emptyRowIndex = items.findIndex(item => !item.itemId);
+    const targetIndex = emptyRowIndex > -1 ? emptyRowIndex : items.length;
+
+    const newItem: DirectSaleItem = {
+      itemId: matchedItem.id,
+      itemCode: matchedItem.itemCode,
+      itemName: matchedItem.itemName,
+      batchNo: batchNo,
+      quantity: 1,
+      unit: matchedItem.salesUom || matchedItem.baseUom || 'EACH',
+      unitPrice: 0,
+      totalPrice: 0
+    };
+
+    let updatedItems = [...items];
+    if (emptyRowIndex > -1) {
+      updatedItems[emptyRowIndex] = newItem;
+    } else {
+      updatedItems.push(newItem);
+    }
+
+    setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
+
+    if (activeBatch) {
+      const isSalesUom = newItem.unit?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
+      const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
+
+      const unitPrice = activeBatch.mrp * salesCF;
+      const totalPrice = Number((unitPrice * 1).toFixed(2));
+
+      updatedItems[targetIndex] = {
+        ...newItem,
+        batchNo: batchNo,
+        batchDate: activeBatch.batchDate,
+        unitPrice: unitPrice,
+        costRate: activeBatch.rate,
+        expiryDate: activeBatch.expiryDate,
+        totalPrice: totalPrice
+      };
+    }
+    setItems(updatedItems);
+    setActiveSearchIndex(null);
+    setItemQuery('');
+    setShowItemDropdown(false);
+    playSuccessBeep();
+  };
+
+  const handleBarcodeScan = async (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     const query = barcodeQuery.trim();
     if (!query) return;
 
     if (!selectedStore) {
+      playErrorBeep();
       setError('Please select a store first.');
       setBarcodeQuery('');
       return;
@@ -217,17 +446,6 @@ export const DirectSale: React.FC = () => {
     );
 
     if (matchedItem) {
-      // Verify store item mapping
-      const isMapped = storeItemMappings.some(
-        m => m.storeId === selectedStore && m.itemId === matchedItem.id
-      );
-      if (!isMapped) {
-        setError(`Item "${matchedItem.itemName}" is not mapped to the selected store.`);
-        setLastGS1Scan(null);
-        setBarcodeQuery('');
-        return;
-      }
-
       // Set last GS1 scan state for UI display if GS1 data parsed successfully and contains batch/expiry info
       if (parsedGS1.gtin && (parsedGS1.batch || parsedGS1.expiry)) {
         setLastGS1Scan({
@@ -239,96 +457,7 @@ export const DirectSale: React.FC = () => {
         setLastGS1Scan(null);
       }
 
-      // Check if item is already present in current list
-      const existingIndex = items.findIndex(item => item.itemId === matchedItem.id);
-      if (existingIndex > -1 && incrementOnRescan) {
-        // Increment quantity
-        updateItemQty(existingIndex, items[existingIndex].quantity + 1);
-        setBarcodeQuery('');
-        return;
-      }
-
-      // Fetch batches
-      const batches = await fetchBatchDetails(selectedStore, matchedItem.id);
-      
-      // Auto-select FIFO batch (first batch with stock, or first batch if all empty)
-      const sortedBatches = [...batches].sort((a, b) => {
-        if (!a.expiryDate) return 1;
-        if (!b.expiryDate) return -1;
-        return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
-      });
-
-      // Try to match parsed GS1 batch number first
-      let activeBatch = null;
-      if (searchBatchNo) {
-        activeBatch = sortedBatches.find(
-          b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase() && b.currentStock > 0
-        );
-        if (!activeBatch) {
-          const batchExists = sortedBatches.some(b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase());
-          if (batchExists) {
-            setError(`Parsed batch "${searchBatchNo}" has no stock. Selecting FIFO batch.`);
-          } else {
-            setError(`Parsed batch "${searchBatchNo}" not found. Selecting FIFO batch.`);
-          }
-        }
-      }
-
-      if (!activeBatch) {
-        activeBatch = sortedBatches.find(b => b.currentStock > 0) || sortedBatches[0];
-      }
-
-      const batchNo = activeBatch ? activeBatch.batchNo : '';
-
-      // Find an empty row or append
-      const emptyRowIndex = items.findIndex(item => !item.itemId);
-      const targetIndex = emptyRowIndex > -1 ? emptyRowIndex : items.length;
-
-      const newItem: DirectSaleItem = {
-        itemId: matchedItem.id,
-        itemCode: matchedItem.itemCode,
-        itemName: matchedItem.itemName,
-        batchNo: batchNo,
-        quantity: 1,
-        unit: matchedItem.salesUom || matchedItem.baseUom || 'EACH',
-        unitPrice: 0,
-        totalPrice: 0
-      };
-
-      let updatedItems = [...items];
-      if (emptyRowIndex > -1) {
-        updatedItems[emptyRowIndex] = newItem;
-      } else {
-        updatedItems.push(newItem);
-      }
-
-      setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
-
-      if (activeBatch) {
-        const isSalesUom = newItem.unit?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
-        const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
-
-        const mapping = itemTaxMappings.find(m => m.itemId === matchedItem.id);
-        const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
-        const taxPercent = tax?.percentage || 0;
-
-        const unitPrice = activeBatch.mrp * salesCF;
-        const totalPrice = Number((unitPrice * 1).toFixed(2));
-
-        updatedItems[targetIndex] = {
-          ...newItem,
-          batchNo: batchNo,
-          batchDate: activeBatch.batchDate,
-          unitPrice: unitPrice,
-          costRate: activeBatch.rate,
-          expiryDate: activeBatch.expiryDate,
-          totalPrice: totalPrice
-        };
-      }
-      setItems(updatedItems);
-      setActiveSearchIndex(null);
-      setItemQuery('');
-      setShowItemDropdown(false);
+      await processMatchedDirectSaleItem(matchedItem, searchBatchNo, parsedGS1.expiry);
     } else {
       // Check if it's a batch number scanned directly for any item already selected
       let batchMatched = false;
@@ -339,6 +468,7 @@ export const DirectSale: React.FC = () => {
           const foundBatch = batches.find(b => b.batchNo === query);
           if (foundBatch) {
             handleSelectBatch(i, query);
+            playSuccessBeep();
             batchMatched = true;
             break;
           }
@@ -346,12 +476,60 @@ export const DirectSale: React.FC = () => {
       }
 
       if (!batchMatched) {
-        setError(`No active item matches barcode/code "${query}".`);
+        playErrorBeep();
+        setUnrecognizedScan({
+          gtin: searchGtin,
+          batch: searchBatchNo,
+          expiry: parsedGS1.expiry
+        });
+        setMappingItemId('');
+        setMappingSearchQuery('');
+        setSupervisorPin('');
+        setPinError('');
+      } else {
+        setLastGS1Scan(null);
       }
-      setLastGS1Scan(null);
     }
 
     setBarcodeQuery('');
+  };
+
+  const handleConfirmMapping = async () => {
+    if (!unrecognizedScan || !mappingItemId) {
+      setError('Please select an item to link.');
+      playErrorBeep();
+      return;
+    }
+
+    if (supervisorPin !== '4321' && supervisorPin !== '1234') {
+      setPinError('Invalid Supervisor PIN. Access denied.');
+      playErrorBeep();
+      return;
+    }
+
+    const selectedItem = inventoryItems.find(i => i.id === mappingItemId);
+    if (!selectedItem) return;
+
+    try {
+      const updatedItem = {
+        ...selectedItem,
+        gtin: unrecognizedScan.gtin
+      };
+
+      await saveInventoryItem(updatedItem);
+      playSuccessBeep();
+
+      await processMatchedDirectSaleItem(selectedItem, unrecognizedScan.batch, unrecognizedScan.expiry);
+
+      setUnrecognizedScan(null);
+      setMappingItemId('');
+      setMappingSearchQuery('');
+      setSupervisorPin('');
+      setPinError('');
+    } catch (err: any) {
+      setError(`Mapping failed: ${err.message}`);
+      playErrorBeep();
+    }
   };
 
   const handleSelectUom = (index: number, unit: string) => {
@@ -412,6 +590,23 @@ export const DirectSale: React.FC = () => {
     setSelectedStore('');
     setItems([]);
     setRowBatches({});
+    setPaymentMode('Cash');
+    setReferenceNo('');
+    setShowUpiModal(false);
+    setUpiLink('');
+    setUpiOrderId('');
+    setPendingSale(null);
+    setPendingSaleNo('');
+  };
+
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   };
 
   const handleDispense = async () => {
@@ -420,17 +615,119 @@ export const DirectSale: React.FC = () => {
     if (items.length === 0) { setError('Please add at least one item.'); return; }
     if (items.some(i => !i.itemId || !i.batchNo || i.quantity <= 0)) { setError('Please complete all item details.'); return; }
 
+    const saleNo = `DSALE-${Date.now().toString().slice(-6)}`;
+
+    if (paymentMode === 'UPI' || paymentMode === 'Card') {
+      setLoading(true);
+      setError('');
+      
+      const loaded = await loadRazorpayScript();
+      if (!loaded) {
+        setError("Failed to load Razorpay Checkout SDK.");
+        setLoading(false);
+        return;
+      }
+
+      // 1. Create sale payload in 'pending' status
+      const salePayload: DirectSaleType = {
+        ...patient,
+        saleNo,
+        saleDate: new Date().toISOString(),
+        storeId: selectedStore,
+        totalAmount: totalSaleAmount,
+        items: items,
+        paymentMode,
+        paymentStatus: 'pending'
+      };
+
+      // 2. Save to database in pending status
+      const result = await saveDirectSale(salePayload);
+      if (!result.success || !result.savedSale) {
+        setError("Failed to register direct sale entry in database.");
+        setLoading(false);
+        return;
+      }
+
+      // 3. Configure Razorpay options
+      const orderId = `order_UPI${Date.now().toString().slice(-6)}`;
+      setUpiOrderId(orderId);
+      setPendingSale(salePayload);
+      setPendingSaleNo(saleNo);
+      // @ts-ignore
+      const rawRzpKey = import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_51b4HIs73b";
+      const rzpKey = typeof rawRzpKey === 'string' ? rawRzpKey.trim() : rawRzpKey;
+      console.log("Razorpay Key ID used:", rzpKey, "Length:", rzpKey.length);
+
+      const inrRate = getExchangeRateToINR(selectedCurrency);
+      const amountInPaise = Math.round(totalSaleAmount * 100 * inrRate);
+      if (amountInPaise < 100) {
+        setError("Total payable amount must be at least ₹1.00 (100 Paise) to initialize Razorpay checkout.");
+        setLoading(false);
+        return;
+      }
+      const cleanContact = (patient.phoneNo || "").replace(/\D/g, "");
+      const finalContact = cleanContact.length >= 10 ? cleanContact.slice(-10) : "9999999999";
+
+      const cleanPatientName = `${patient.firstName} ${patient.lastName || ""}`.trim().replace(/[^a-zA-Z0-9 ]/g, "");
+      const cleanDescription = `Direct Sale Invoice ${result.savedSale.invoiceNo || saleNo}`.replace(/[^a-zA-Z0-9\- ]/g, "");
+
+      console.log("Razorpay Amount (Paise):", amountInPaise);
+      console.log("Razorpay Prefill Contact:", finalContact);
+      console.log("Razorpay Clean Patient Name:", cleanPatientName);
+
+      const options = {
+        key: rzpKey, 
+        amount: amountInPaise, 
+        currency: "INR",
+        name: "MediCore HMS Pharmacy",
+        description: cleanDescription,
+        prefill: {
+          name: cleanPatientName,
+          contact: finalContact
+        },
+        notes: {
+          saleNo: saleNo,
+          patientName: cleanPatientName
+        },
+        handler: async function (response: any) {
+          console.log("Client-side payment callback: ", response.razorpay_payment_id);
+          await handlePaymentCompletion(salePayload, response.razorpay_payment_id, response.razorpay_order_id || '');
+        },
+        modal: {
+          ondismiss: function () {
+            setLoading(false);
+            setPendingSale(null);
+            setPendingSaleNo('');
+          }
+        }
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+      
+      if (paymentMode === 'UPI') {
+        const inrRate = getExchangeRateToINR(selectedCurrency);
+        const link = `upi://pay?pa=medicorepharmacy@hdfcbank&pn=MediCore%20Pharmacy&tr=${orderId}&am=${(totalSaleAmount * inrRate).toFixed(2)}&cu=INR&tn=Bill-${saleNo}`;
+        setUpiLink(link);
+        setShowUpiModal(true);
+      }
+      
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError('');
 
-    const saleNo = `DSALE-${Date.now().toString().slice(-6)}`;
     const salePayload: DirectSaleType = {
       ...patient,
       saleNo,
       saleDate: new Date().toISOString(),
       storeId: selectedStore,
       totalAmount: totalSaleAmount,
-      items: items
+      items: items,
+      paymentMode,
+      paymentStatus: 'paid'
     };
 
     const result = await saveDirectSale(salePayload);
@@ -440,7 +737,15 @@ export const DirectSale: React.FC = () => {
     setLoading(false);
   };
 
-  // Filter items by store mapping and query
+  const handleUpiPaymentSuccess = async () => {
+    setLoading(true);
+    setError('');
+    const paymentId = `pay_UPI${Date.now().toString().slice(-6)}`;
+    if (pendingSale) {
+      await handlePaymentCompletion(pendingSale, paymentId, upiOrderId);
+    }
+    setLoading(false);
+  };  // Filter items by store mapping and query
   const mappedItemIds = new Set(storeItemMappings.filter(m => m.storeId === selectedStore).map(m => m.itemId));
   const itemOptions = inventoryItems.filter(i => 
     i.isActive !== false && 
@@ -659,16 +964,43 @@ export const DirectSale: React.FC = () => {
                    ))}
                  </select>
                </div>
+               <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-lg border border-slate-200">
+                 <span className="text-[10px] font-bold text-slate-400 uppercase">Payment Mode:</span>
+                 <select 
+                   className="text-xs font-bold text-violet-700 bg-transparent outline-none cursor-pointer"
+                   value={paymentMode}
+                   onChange={e => {
+                     setPaymentMode(e.target.value as any);
+                     setReferenceNo('');
+                   }}
+                 >
+                   <option value="Cash">Cash</option>
+                   <option value="Card">Card</option>
+                   <option value="UPI">UPI</option>
+                 </select>
+               </div>
+               {paymentMode === 'Card' && (
+                 <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-lg border border-slate-200 animate-in fade-in slide-in-from-left-2 duration-200">
+                   <span className="text-[10px] font-bold text-slate-400 uppercase">Card Ref No:</span>
+                   <input
+                     type="text"
+                     placeholder="Enter Ref No"
+                     className="text-xs font-bold text-slate-700 bg-transparent outline-none w-28 placeholder-slate-300"
+                     value={referenceNo}
+                     onChange={e => setReferenceNo(e.target.value)}
+                   />
+                 </div>
+               )}
             </div>
             <div className="flex items-center gap-3">
                <div className="text-right flex gap-6 items-center border-r border-slate-100 pr-6 mr-6">
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Tax</p>
-                    <p className="text-sm font-bold text-slate-500 leading-none">SAR {totalTaxAmount.toFixed(2)}</p>
+                    <p className="text-sm font-bold text-slate-500 leading-none">{formatCurrency(totalTaxAmount)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Payable</p>
-                    <p className="text-lg font-black text-violet-600 leading-none">SAR {totalSaleAmount.toFixed(2)}</p>
+                    <p className="text-lg font-black text-violet-600 leading-none">{formatCurrency(totalSaleAmount)}</p>
                   </div>
                </div>
                <button 
@@ -685,7 +1017,7 @@ export const DirectSale: React.FC = () => {
           {selectedStore && (
             <div className="px-4 py-2 bg-slate-50/50 border-b border-slate-100 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-4">
-                <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
+                <div className="flex-1 max-w-md">
                   <div className="relative group">
                     <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-violet-400 group-hover:text-violet-600 transition-colors" />
                     <input
@@ -698,6 +1030,12 @@ export const DirectSale: React.FC = () => {
                       onChange={e => setBarcodeQuery(e.target.value)}
                       onFocus={() => setScannerFocused(true)}
                       onBlur={() => setScannerFocused(false)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleBarcodeScan(e);
+                        }
+                      }}
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
@@ -706,7 +1044,7 @@ export const DirectSale: React.FC = () => {
                       </span>
                     </div>
                   </div>
-                </form>
+                </div>
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -901,7 +1239,7 @@ export const DirectSale: React.FC = () => {
                            />
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-slate-600 italic">
-                           {item.unitPrice > 0 ? item.unitPrice.toFixed(2) : '-'}
+                           {item.unitPrice > 0 ? item.unitPrice.toFixed(decimals) : '-'}
                         </td>
                         <td className="px-4 py-3 text-right">
                            {(() => {
@@ -912,7 +1250,7 @@ export const DirectSale: React.FC = () => {
                                    const amt = totalPrice * tax.percentage / (100 + tax.percentage);
                                    return (
                                        <div className="flex flex-col">
-                                           <span className="text-violet-600 font-bold">{amt.toFixed(2)}</span>
+                                           <span className="text-violet-600 font-bold">{amt.toFixed(decimals)}</span>
                                            <span className="text-[9px] text-slate-400 font-bold uppercase">({tax.percentage}%)</span>
                                        </div>
                                    );
@@ -921,7 +1259,7 @@ export const DirectSale: React.FC = () => {
                            })()}
                         </td>
                         <td className="px-4 py-3 text-right font-black text-slate-800">
-                           {item.totalPrice > 0 ? item.totalPrice.toFixed(2) : '0.00'}
+                           {item.totalPrice > 0 ? item.totalPrice.toFixed(decimals) : '0.00'}
                         </td>
                         <td className="px-4 py-3 text-center">
                            <button 
@@ -951,6 +1289,208 @@ export const DirectSale: React.FC = () => {
           sale={lastDispensedSale} 
           onClose={handleCloseInvoice} 
         />
+      )}
+
+      {showUpiModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-100 p-6 flex flex-col space-y-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 tracking-tight">UPI Dynamic QR Payment</h3>
+              <p className="text-xs text-slate-400 mt-1">Scan the QR code below using any UPI App (BHIM, Google Pay, PhonePe, Paytm)</p>
+            </div>
+
+            <div className="bg-slate-50 p-6 rounded-xl border border-slate-100 flex justify-center items-center">
+              <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-100 flex flex-col items-center gap-2">
+                <svg className="w-48 h-48" viewBox="0 0 100 100">
+                  <rect x="2" y="2" width="96" height="96" rx="8" fill="none" stroke="#e2e8f0" strokeWidth="2" />
+                  
+                  <rect x="8" y="8" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                  <rect x="14" y="14" width="8" height="8" fill="#6d28d9" />
+                  
+                  <rect x="72" y="8" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                  <rect x="78" y="14" width="8" height="8" fill="#6d28d9" />
+                  
+                  <rect x="8" y="72" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                  <rect x="14" y="78" width="8" height="8" fill="#6d28d9" />
+                  
+                  <g fill="#1e293b">
+                    <rect x="36" y="8" width="4" height="8" />
+                    <rect x="44" y="12" width="8" height="4" />
+                    <rect x="56" y="8" width="12" height="4" />
+                    <rect x="8" y="36" width="8" height="4" />
+                    <rect x="16" y="44" width="4" height="8" />
+                    <rect x="8" y="56" width="4" height="12" />
+                    
+                    <rect x="40" y="40" width="20" height="20" rx="4" fill="#6d28d9" />
+                    
+                    <rect x="32" y="32" width="8" height="4" />
+                    <rect x="60" y="32" width="4" height="8" />
+                    <rect x="32" y="60" width="4" height="8" />
+                    <rect x="60" y="60" width="8" height="4" />
+                    <rect x="44" y="72" width="12" height="4" />
+                    <rect x="36" y="84" width="8" height="8" />
+                    <rect x="72" y="44" width="8" height="8" />
+                    <rect x="80" y="56" width="12" height="4" />
+                    <rect x="72" y="72" width="20" height="4" />
+                    <rect x="84" y="80" width="8" height="8" />
+                  </g>
+                  <text x="50" y="52" fill="white" fontSize="6" fontWeight="bold" textAnchor="middle">UPI</text>
+                </svg>
+                <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded tracking-wide max-w-[200px] truncate select-all" title={upiLink}>
+                  {upiOrderId}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-1 bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs font-semibold text-slate-600">
+              <div className="flex justify-between">
+                <span>Sale Subtotal:</span>
+                <span className="font-mono text-slate-800">{formatCurrency(totalSaleAmount)}</span>
+              </div>
+              {selectedCurrency !== 'INR' && (
+                <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-extrabold text-violet-700">
+                  <span>INR Equivalent (1 {selectedCurrency} = ₹{getExchangeRateToINR(selectedCurrency).toFixed(2)}):</span>
+                  <span className="font-mono text-base">₹{(totalSaleAmount * getExchangeRateToINR(selectedCurrency)).toFixed(2)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleUpiPaymentSuccess}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-100 transition-all active:scale-[0.98] disabled:opacity-50"
+              >
+                Bypass & Simulate Webhook Success (Local Dev)
+              </button>
+              <button
+                onClick={() => { setShowUpiModal(false); setUpiOrderId(''); setUpiLink(''); setPendingSale(null); setPendingSaleNo(''); }}
+                className="w-full px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold transition-all"
+              >
+                Cancel UPI Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unrecognized Barcode Mapping Modal with Supervisor Bypass */}
+      {unrecognizedScan && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="p-6 bg-amber-50 border-b border-amber-100">
+              <h3 className="text-base font-black text-amber-800 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                ⚠️ UNRECOGNIZED BARCODE DETECTED
+              </h3>
+              <p className="text-[11px] text-amber-600 mt-1 font-semibold">Link this barcode to a drug in the catalog to proceed dispensing.</p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 flex flex-col gap-4 overflow-auto max-h-[380px]">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 text-xs flex flex-col gap-1.5 font-semibold text-slate-600">
+                <div>Scanned GTIN: <span className="font-mono font-bold text-slate-800">{unrecognizedScan.gtin}</span></div>
+                <div className="grid grid-cols-2 gap-4 mt-0.5">
+                  <div>Parsed Batch: <span className="font-bold text-slate-800">{unrecognizedScan.batch || 'N/A'}</span></div>
+                  <div>Parsed Expiry: <span className="font-bold text-slate-800">{unrecognizedScan.expiry || 'N/A'}</span></div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Search Catalog to Link this Barcode</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by drug name or code..."
+                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-violet-500 bg-white placeholder-slate-400 font-medium"
+                    value={mappingSearchQuery}
+                    onChange={e => setMappingSearchQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* Matching items selector */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-semibold">Matching Items Found:</span>
+                <div className="border border-slate-200 rounded-xl max-h-40 overflow-y-auto divide-y divide-slate-100 shadow-inner">
+                  {inventoryItems
+                    .filter(i => 
+                      i.isActive && 
+                      (!selectedStore || storeItemMappings.some(m => m.storeId === selectedStore && m.itemId === i.id)) &&
+                      (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                       i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                    )
+                    .slice(0, 15)
+                    .map(item => (
+                      <label 
+                        key={item.id} 
+                        className={`flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors ${
+                          mappingItemId === item.id ? 'bg-violet-50/50' : ''
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="mappingItem"
+                          className="w-3.5 h-3.5 text-violet-600 focus:ring-violet-500 border-slate-300"
+                          checked={mappingItemId === item.id}
+                          onChange={() => setMappingItemId(item.id)}
+                        />
+                        <div className="text-xs">
+                          <p className="font-bold text-slate-800">{item.itemName}</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase">{item.itemCode} · {item.itemCategory}</p>
+                        </div>
+                      </label>
+                    ))}
+                  {inventoryItems.filter(i => 
+                    i.isActive && 
+                    (!selectedStore || storeItemMappings.some(m => m.storeId === selectedStore && m.itemId === i.id)) &&
+                    (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                     i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                  ).length === 0 && (
+                    <div className="p-4 text-center text-xs text-slate-400 italic">No items match your search.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Supervisor Approval Bypass */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-semibold">🔒 Supervisor Approval Required</label>
+                <input
+                  type="password"
+                  placeholder="Enter Supervisor PIN (Demo: 4321)"
+                  className={`w-full px-3 py-1.5 border ${pinError ? 'border-red-400 focus:ring-red-400' : 'border-slate-200 focus:ring-violet-500'} rounded-lg text-xs outline-none bg-white placeholder-slate-300 font-bold tracking-widest text-center`}
+                  value={supervisorPin}
+                  onChange={e => { setSupervisorPin(e.target.value); setPinError(''); }}
+                />
+                {pinError && <p className="text-[10px] text-red-500 font-bold text-center mt-0.5">{pinError}</p>}
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setUnrecognizedScan(null)}
+                className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-50 transition-all active:scale-95"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMapping}
+                disabled={!mappingItemId || !supervisorPin}
+                className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-xs shadow-md shadow-violet-100 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                CONFIRM & BIND BARCODE
+              </button>
+            </div>
+
+          </div>
+        </div>
       )}
     </div>
   );

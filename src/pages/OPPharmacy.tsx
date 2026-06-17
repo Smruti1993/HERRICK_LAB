@@ -8,18 +8,27 @@ import { useData } from '../context/DataContext';
 import { BatchSelectionModal } from '../components/pharmacy/BatchSelectionModal';
 import { PharmacyInvoiceReport } from '../components/pharmacy/PharmacyInvoiceReport';
 import { parseGS1 } from '../utils/gs1Parser';
+import { playSuccessBeep, playErrorBeep } from '../utils/audio';
+import { InventoryItem } from '../types';
 
 export const OPPharmacy: React.FC = () => {
     const { 
         prescriptions, inventoryItems, patients, showToast, stores, 
         dispensePrescription, employees, bills, appointments,
-        itemTaxMappings, taxMasters, fetchBatchDetails
+        itemTaxMappings, taxMasters, fetchBatchDetails,
+        formatCurrency, selectedCurrency, saveInventoryItem
     } = useData();
+
+    const decimals = selectedCurrency === 'BHD' ? 3 : 2;
     
-    const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+    const [selectedStoreId, setSelectedStoreId] = useState<string>(() => {
+        return localStorage.getItem('selected_pharmacy_store_id') || '';
+    });
     useEffect(() => {
         if (stores.length > 0 && !selectedStoreId) {
-            setSelectedStoreId(stores[0].id);
+            const defaultId = stores[0].id;
+            setSelectedStoreId(defaultId);
+            localStorage.setItem('selected_pharmacy_store_id', defaultId);
         }
     }, [stores, selectedStoreId]);
 
@@ -33,8 +42,29 @@ export const OPPharmacy: React.FC = () => {
     });
     const [toDate, setToDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
     const [selectedBatches, setSelectedBatches] = useState<Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount: number, taxAmount?: number, baseAmount?: number }>>({});
+    const [dispensingUom, setDispensingUom] = useState<Record<string, string>>({}); // itemRecId -> selected UOM
     const [activeBatchItem, setActiveBatchItem] = useState<{ id: string, itemId: string, itemName: string, reqQty: number, unit?: string } | null>(null);
     const [generatedInvoiceId, setGeneratedInvoiceId] = useState<string | null>(null);
+    const [storeBatches, setStoreBatches] = useState<Record<string, any[]>>({});
+    const [batchesLoading, setBatchesLoading] = useState<boolean>(false);
+    const [issueQty, setIssueQty] = useState<Record<string, number>>({});
+
+    const [paymentMode, setPaymentMode] = useState<'Cash' | 'Card' | 'UPI'>('Cash');
+    const [referenceNo, setReferenceNo] = useState('');
+    const [showUpiModal, setShowUpiModal] = useState(false);
+    const [upiLink, setUpiLink] = useState('');
+    const [upiOrderId, setUpiOrderId] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const getExchangeRateToINR = (code: string) => {
+        switch(code) {
+            case 'SAR': return 22.20;
+            case 'USD': return 83.00;
+            case 'BHD': return 220.00;
+            case 'QAR': return 22.80;
+            case 'INR': default: return 1.00;
+        }
+    };
 
     // Barcode scanner state
     const [barcodeQuery, setBarcodeQuery] = useState('');
@@ -42,6 +72,13 @@ export const OPPharmacy: React.FC = () => {
     const [scannerFocused, setScannerFocused] = useState(false);
     const scannerInputRef = React.useRef<HTMLInputElement>(null);
     const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
+
+    // Unrecognized Barcode Mapping Dialog state
+    const [unrecognizedScan, setUnrecognizedScan] = useState<{ gtin: string; batch?: string; expiry?: string } | null>(null);
+    const [mappingItemId, setMappingItemId] = useState('');
+    const [mappingSearchQuery, setMappingSearchQuery] = useState('');
+    const [supervisorPin, setSupervisorPin] = useState('');
+    const [pinError, setPinError] = useState('');
 
     // Auto-focus barcode scanner
     useEffect(() => {
@@ -78,13 +115,164 @@ export const OPPharmacy: React.FC = () => {
     [prescriptions, selectedPrescriptionId]);
 
     useEffect(() => {
-        // Clear batches when prescription changes
+        // Clear batches and UOM selections when prescription changes
         setSelectedBatches({});
-    }, [selectedPrescriptionId]);
+        setPaymentMode('Cash');
+        setReferenceNo('');
+        setShowUpiModal(false);
+        setUpiLink('');
+        setUpiOrderId('');
+        // Reset issue qty to remaining qty for each item
+        if (selectedPrescription) {
+            const defaultQtys: Record<string, number> = {};
+            const defaultUoms: Record<string, string> = {};
+            selectedPrescription.items.forEach(item => {
+                const invItem = inventoryItems.find(i => i.id === item.itemId);
+                const prescriptionBills = bills.filter(b => b.prescriptionId === selectedPrescription.id);
+                const dispensedQty = prescriptionBills.reduce((sum, b) => {
+                    const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                    return sum + matchingItems.reduce((acc, curr) => {
+                        const isSales = curr.itemType?.toUpperCase() === invItem?.salesUom?.toUpperCase();
+                        const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                        return acc + (curr.quantity * cf);
+                    }, 0);
+                }, 0);
+                const remainingQty = Math.max(0, item.totalQty - dispensedQty);
+
+                const prescUom = (item.units || 'EACH').trim().toUpperCase();
+                defaultUoms[item.id] = prescUom;
+
+                const isSales = prescUom === (invItem?.salesUom || '').trim().toUpperCase();
+                const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+
+                defaultQtys[item.id] = remainingQty / cf;
+            });
+            setDispensingUom(defaultUoms);
+            setIssueQty(defaultQtys);
+        } else {
+            setDispensingUom({});
+            setIssueQty({});
+        }
+    }, [selectedPrescriptionId, bills, inventoryItems]);
+
+    useEffect(() => {
+        if (!selectedPrescription || !selectedStoreId) {
+            setStoreBatches({});
+            return;
+        }
+
+        let isMounted = true;
+        const loadAllBatches = async () => {
+            setBatchesLoading(true);
+            try {
+                const batchPromises = selectedPrescription.items.map(async (item) => {
+                    const batches = await fetchBatchDetails(selectedStoreId, item.itemId);
+                    return { itemId: item.itemId, batches };
+                });
+
+                const results = await Promise.all(batchPromises);
+                if (isMounted) {
+                    const batchMap: Record<string, any[]> = {};
+                    results.forEach(res => {
+                        batchMap[res.itemId] = res.batches;
+                    });
+                    setStoreBatches(batchMap);
+                }
+            } catch (error) {
+                console.error("Error fetching batches for prescription items:", error);
+            } finally {
+                if (isMounted) {
+                    setBatchesLoading(false);
+                }
+            }
+        };
+
+        loadAllBatches();
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedPrescription, selectedStoreId, fetchBatchDetails]);
 
     const patient = useMemo(() =>  
         selectedPrescription ? patients.find(pat => pat.id === selectedPrescription.patientId) : null,
     [selectedPrescription, patients]);
+
+    const totals = useMemo(() => {
+        if (!selectedPrescription) return { tax: 0, total: 0 };
+        
+        let totalBillable = 0;
+        let totalTax = 0;
+        
+        selectedPrescription.items.forEach(item => {
+            const allocation = selectedBatches[item.id];
+            if (allocation) {
+                const invItem = inventoryItems.find(i => i.id === item.itemId);
+                const prescriptionBills = bills.filter(b => b.prescriptionId === selectedPrescription.id);
+                const dispensedQty = prescriptionBills.reduce((sum, b) => {
+                    const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                    return sum + matchingItems.reduce((acc, curr) => {
+                        const isSales = curr.itemType?.toUpperCase() === invItem?.salesUom?.toUpperCase();
+                        const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                        return acc + (curr.quantity * cf);
+                    }, 0);
+                }, 0);
+                const remainingQty = Math.max(0, item.totalQty - dispensedQty);
+                
+                const selectedUom = dispensingUom[item.id] || item.units || 'EACH';
+                const isSalesUom = selectedUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                const salesCF = isSalesUom ? Number(invItem?.salesConversionFactor || 1) : 1;
+                
+                const iqty = issueQty[item.id] ?? (remainingQty / salesCF);
+                const itemPrice = allocation.rate * salesCF;
+                const total = Number((iqty * itemPrice).toFixed(decimals));
+                
+                const itemMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+                const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+                const taxPercent = taxMaster?.percentage || 0;
+                
+                const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                
+                totalBillable += total;
+                totalTax += taxAmt;
+            }
+        });
+        
+        return { tax: totalTax, total: totalBillable };
+    }, [selectedPrescription, selectedBatches, dispensingUom, issueQty, bills, inventoryItems, itemTaxMappings, taxMasters, decimals]);
+
+    const getPrescriptionStatus = (p: typeof prescriptions[0]) => {
+        let hasDispensedAny = false;
+        let allItemsDispensed = true;
+        
+        p.items.forEach(item => {
+            const invItem = inventoryItems.find(i => i.id === item.itemId);
+            const prescriptionBills = bills.filter(b => b.prescriptionId === p.id && b.status !== 'Cancelled');
+            const dispensedQty = prescriptionBills.reduce((sum, b) => {
+                const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                return sum + matchingItems.reduce((acc, curr) => {
+                    const isSales = curr.itemType?.toUpperCase() === invItem?.salesUom?.toUpperCase();
+                    const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                    return acc + (curr.quantity * cf);
+                }, 0);
+            }, 0);
+            
+            if (dispensedQty > 0) {
+                hasDispensedAny = true;
+            }
+            if (dispensedQty < item.totalQty) {
+                allItemsDispensed = false;
+            }
+        });
+        
+        if (allItemsDispensed) return 'Dispensed';
+        if (hasDispensedAny) return 'Partially Dispensed';
+        return 'Pending';
+    };
+
+    const isSelectedPrescriptionFullyDispensed = useMemo(() => {
+        if (!selectedPrescription) return false;
+        return getPrescriptionStatus(selectedPrescription) === 'Dispensed';
+    }, [selectedPrescription, bills, inventoryItems]);
 
     const filteredPrescriptions = useMemo(() => {
         return prescriptions.filter(p => {
@@ -96,12 +284,12 @@ export const OPPharmacy: React.FC = () => {
                                 p.id.toLowerCase().includes(query) || 
                                 patName.includes(query);
             
-            // 2. Robust Status Match
-            const status = (p.status || '').toLowerCase().trim();
+            // 2. Robust Status Match based on actual dispensed quantities
+            const computedStatus = getPrescriptionStatus(p).toLowerCase();
             const filterValue = (statusFilter || 'Pending').toLowerCase();
             const matchesStatus = filterValue === 'all' || 
-                                (filterValue === 'pending' && (status === 'pending' || status === 'partially dispensed')) ||
-                                (filterValue === 'dispensed' && (status === 'dispensed' || status === 'partially dispensed'));
+                                (filterValue === 'pending' && (computedStatus === 'pending' || computedStatus === 'partially dispensed')) ||
+                                (filterValue === 'dispensed' && (computedStatus === 'dispensed' || computedStatus === 'partially dispensed'));
             
             // 3. Robust Date Range Match (Handles both "T" and space separators)
             if (!p.orderDate) return false;
@@ -115,13 +303,15 @@ export const OPPharmacy: React.FC = () => {
             const dateB = b.orderDate ? new Date(b.orderDate).getTime() : 0;
             return dateB - dateA;
         });
-    }, [prescriptions, searchQuery, statusFilter, patients, fromDate, toDate]);
+    }, [prescriptions, searchQuery, statusFilter, patients, fromDate, toDate, bills, inventoryItems]);
 
-    const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number, unit?: string) => {
+    const handleDispenseItem = (itemId: string, itemRecId: string, itemName: string, reqQty: number, defaultUnit?: string) => {
         if (!selectedStoreId) {
             showToast('error', 'Please select a store first.');
             return;
         }
+        // Use the user-selected UOM if available, fallback to prescription unit
+        const unit = dispensingUom[itemRecId] || defaultUnit;
         setActiveBatchItem({ id: itemRecId, itemId, itemName, reqQty, unit });
     };
 
@@ -132,18 +322,253 @@ export const OPPharmacy: React.FC = () => {
         setActiveBatchItem(null);
     };
 
-    const handleBarcodeScan = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const processMatchedOPItem = async (matchedItem: InventoryItem, scannedBatch?: string, scannedExpiry?: string) => {
+        if (!selectedPrescription) {
+            playErrorBeep();
+            showToast('error', 'No prescription selected.');
+            return;
+        }
+        // Find prescription item in pending state
+        const prescItem = selectedPrescription.items.find(
+            item => item.itemId === matchedItem.id && item.status !== 'Dispensed'
+        );
+
+        if (!prescItem) {
+            playErrorBeep();
+            showToast(
+                'error',
+                `Item "${matchedItem.itemName}" is not part of this pending prescription.`
+            );
+            return;
+        }
+
+        // Calculate remaining quantity
+        const prescriptionBills = bills.filter(b => b.prescriptionId === selectedPrescription.id);
+        const dispensedQty = prescriptionBills.reduce((sum, b) => {
+            const matchingItems = b.items.filter(bi => bi.itemId === prescItem.itemId);
+            return sum + matchingItems.reduce((acc, curr) => {
+                const isSales = curr.itemType?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
+                const cf = isSales ? Number(matchedItem.salesConversionFactor || 1) : 1;
+                return acc + (curr.quantity * cf);
+            }, 0);
+        }, 0);
+        const remainingQty = Math.max(0, prescItem.totalQty - dispensedQty);
+
+        if (remainingQty <= 0) {
+            playErrorBeep();
+            showToast('error', `Item "${matchedItem.itemName}" has already been fully dispensed.`);
+            return;
+        }
+
+        // Fetch batches
+        const batches = await fetchBatchDetails(selectedStoreId, matchedItem.id);
+
+        // Sort by expiry (FIFO)
+        const sortedBatches = [...batches].sort((a, b) => {
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+        });
+
+        // Exclude expired batches from auto-selection via barcode scanner
+        const nonExpiredBatches = sortedBatches.filter(b => !b.expiryDate || new Date(b.expiryDate) >= new Date());
+
+        if (nonExpiredBatches.length === 0) {
+            playErrorBeep();
+            showToast('error', `No non-expired stock batches available for "${matchedItem.itemName}" in store.`);
+            return;
+        }
+
+        // Conversion factors
+        const selectedUom = dispensingUom[prescItem.id] || prescItem.units || 'EACH';
+        const isSalesUom = selectedUom.toUpperCase() === matchedItem.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
+        const maxQty = remainingQty / salesCF;
+
+        // Tax calculation parameters
+        const itemMapping = itemTaxMappings.find(m => m.itemId === matchedItem.id);
+        const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+        const taxPercent = taxMaster?.percentage || 0;
+
+        const currentSelectedBatch = selectedBatches[prescItem.id];
+
+        if (!currentSelectedBatch) {
+            // Case A: First Scan of Item (Quantity starts at 1)
+            const targetQty = 1;
+            const baseQtyRequired = targetQty * salesCF;
+
+            let chosenBatch = null;
+            let matchedByGS1Batch = false;
+
+            if (scannedBatch) {
+                chosenBatch = nonExpiredBatches.find(
+                    b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase() && b.currentStock >= baseQtyRequired
+                );
+                if (chosenBatch) {
+                    matchedByGS1Batch = true;
+                } else {
+                    const batchExists = nonExpiredBatches.some(b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase());
+                    if (batchExists) {
+                        showToast('info', `Parsed batch "${scannedBatch}" has insufficient stock in store. Selecting FIFO batch.`);
+                    } else {
+                        showToast('info', `Parsed batch "${scannedBatch}" not found in stock. Selecting FIFO batch.`);
+                    }
+                }
+            }
+
+            if (!chosenBatch) {
+                chosenBatch = nonExpiredBatches.find(b => b.currentStock >= baseQtyRequired);
+            }
+
+            if (!chosenBatch) {
+                playErrorBeep();
+                showToast(
+                    'error',
+                    `Insufficient stock for "${matchedItem.itemName}". Required: ${baseQtyRequired} in store.`
+                );
+                return;
+            }
+
+            const itemPrice = chosenBatch.rate * salesCF;
+            const total = Number((targetQty * itemPrice).toFixed(decimals));
+            const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+            const baseAmount = Number((total - taxAmt).toFixed(decimals));
+
+            setIssueQty(prev => ({ ...prev, [prescItem.id]: targetQty }));
+            setSelectedBatches(prev => ({
+                ...prev,
+                [prescItem.id]: {
+                    batchNo: chosenBatch.batchNo,
+                    rate: chosenBatch.rate,
+                    batchDate: chosenBatch.batchDate,
+                    expiryDate: chosenBatch.expiryDate,
+                    baseAmount: baseAmount,
+                    taxAmount: taxAmt,
+                    amount: total
+                }
+            }));
+
+            const successMessage = matchedByGS1Batch 
+                ? `Successfully matched Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`
+                : `Auto-selected FIFO Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`;
+
+            showToast('success', `${successMessage} (Added 1 unit)`);
+            playSuccessBeep();
+
+        } else {
+            // Check if scanned batch is different
+            const isDifferentBatch = scannedBatch && currentSelectedBatch.batchNo.toLowerCase() !== scannedBatch.toLowerCase();
+
+            if (isDifferentBatch) {
+                // Case C: Scan of a Different Batch (Switch and reset quantity to 1)
+                const targetQty = 1;
+                const baseQtyRequired = targetQty * salesCF;
+
+                let chosenBatch = nonExpiredBatches.find(
+                    b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase() && b.currentStock >= baseQtyRequired
+                );
+                let matchedByGS1Batch = false;
+
+                if (chosenBatch) {
+                    matchedByGS1Batch = true;
+                } else {
+                    const batchExists = nonExpiredBatches.some(b => b.batchNo.toLowerCase() === scannedBatch.toLowerCase());
+                    if (batchExists) {
+                        showToast('info', `Parsed batch "${scannedBatch}" has insufficient stock in store. Selecting FIFO batch.`);
+                    } else {
+                        showToast('info', `Parsed batch "${scannedBatch}" not found in stock. Selecting FIFO batch.`);
+                    }
+                    chosenBatch = nonExpiredBatches.find(b => b.currentStock >= baseQtyRequired);
+                }
+
+                if (!chosenBatch) {
+                    playErrorBeep();
+                    showToast(
+                        'error',
+                        `Insufficient stock for "${matchedItem.itemName}". Required: ${baseQtyRequired} in store.`
+                    );
+                    return;
+                }
+
+                const itemPrice = chosenBatch.rate * salesCF;
+                const total = Number((targetQty * itemPrice).toFixed(decimals));
+                const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                const baseAmount = Number((total - taxAmt).toFixed(decimals));
+
+                setIssueQty(prev => ({ ...prev, [prescItem.id]: targetQty }));
+                setSelectedBatches(prev => ({
+                    ...prev,
+                    [prescItem.id]: {
+                        batchNo: chosenBatch.batchNo,
+                        rate: chosenBatch.rate,
+                        batchDate: chosenBatch.batchDate,
+                        expiryDate: chosenBatch.expiryDate,
+                        baseAmount: baseAmount,
+                        taxAmount: taxAmt,
+                        amount: total
+                    }
+                }));
+
+                showToast('success', `Switched allocation to Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}" (Quantity reset to 1)`);
+                playSuccessBeep();
+
+            } else {
+                // Case B: Subsequent Scan (Same Batch) - Increment quantity by 1
+                const currentQty = issueQty[prescItem.id] ?? 1;
+
+                if (currentQty + 1 <= maxQty) {
+                    const nextQty = currentQty + 1;
+                    const baseQtyRequired = nextQty * salesCF;
+
+                    // Verify the selected batch has enough stock
+                    const chosenBatch = nonExpiredBatches.find(b => b.batchNo === currentSelectedBatch.batchNo);
+                    if (chosenBatch && chosenBatch.currentStock < baseQtyRequired) {
+                        playErrorBeep();
+                        showToast('error', `Cannot increment. Insufficient stock in Batch "${currentSelectedBatch.batchNo}". Stock: ${chosenBatch.currentStock}, Required: ${baseQtyRequired}.`);
+                        return;
+                    }
+
+                    const itemPrice = currentSelectedBatch.rate * salesCF;
+                    const total = Number((nextQty * itemPrice).toFixed(decimals));
+                    const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                    const baseAmount = Number((total - taxAmt).toFixed(decimals));
+
+                    setIssueQty(prev => ({ ...prev, [prescItem.id]: nextQty }));
+                    setSelectedBatches(prev => ({
+                        ...prev,
+                        [prescItem.id]: {
+                            ...currentSelectedBatch,
+                            baseAmount: baseAmount,
+                            taxAmount: taxAmt,
+                            amount: total
+                        }
+                    }));
+
+                    showToast('success', `Incremented "${matchedItem.itemName}" to ${nextQty} units.`);
+                    playSuccessBeep();
+
+                } else {
+                    playErrorBeep();
+                    showToast('error', `Required quantity of ${maxQty} already fully scanned.`);
+                }
+            }
+        }
+    };
+
+    const handleBarcodeScan = async (e?: React.SyntheticEvent) => {
+        if (e) e.preventDefault();
         const query = barcodeQuery.trim();
         if (!query) return;
 
         if (!selectedStoreId) {
+            playErrorBeep();
             showToast('error', 'Please select a store first.');
             setBarcodeQuery('');
             return;
         }
 
         if (!selectedPrescription) {
+            playErrorBeep();
             showToast('error', 'Please select a prescription order first.');
             setBarcodeQuery('');
             return;
@@ -189,23 +614,16 @@ export const OPPharmacy: React.FC = () => {
         );
 
         if (!matchedItem) {
-            showToast('error', `No active item found matching barcode/code "${query}".`);
-            setLastGS1Scan(null);
-            setBarcodeQuery('');
-            return;
-        }
-
-        // Find prescription item in pending state
-        const prescItem = selectedPrescription.items.find(
-            item => item.itemId === matchedItem.id && item.status !== 'Dispensed'
-        );
-
-        if (!prescItem) {
-            showToast(
-                'error',
-                `Item "${matchedItem.itemName}" is not part of this pending prescription.`
-            );
-            setLastGS1Scan(null);
+            playErrorBeep();
+            setUnrecognizedScan({
+                gtin: searchGtin,
+                batch: searchBatchNo,
+                expiry: parsedGS1.expiry
+            });
+            setMappingItemId('');
+            setMappingSearchQuery('');
+            setSupervisorPin('');
+            setPinError('');
             setBarcodeQuery('');
             return;
         }
@@ -221,102 +639,113 @@ export const OPPharmacy: React.FC = () => {
             setLastGS1Scan(null);
         }
 
-        // Fetch batches
-        const batches = await fetchBatchDetails(selectedStoreId, matchedItem.id);
+        await processMatchedOPItem(matchedItem, searchBatchNo, parsedGS1.expiry);
+        setBarcodeQuery('');
+    };
 
-        // Sort by expiry (FIFO)
-        const sortedBatches = [...batches].sort((a, b) => {
-            if (!a.expiryDate) return 1;
-            if (!b.expiryDate) return -1;
-            return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
-        });
-
-        // Conversion factors
-        const isSalesUom = prescItem.units?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
-        const salesCF = isSalesUom ? Number(matchedItem.salesConversionFactor || 1) : 1;
-        const baseQtyRequired = prescItem.totalQty * salesCF;
-
-        // Try to match parsed GS1 batch number first
-        let chosenBatch = null;
-        let matchedByGS1Batch = false;
-
-        if (searchBatchNo) {
-            chosenBatch = sortedBatches.find(
-                b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase() && b.currentStock >= baseQtyRequired
-            );
-            if (chosenBatch) {
-                matchedByGS1Batch = true;
-            } else {
-                const batchExists = sortedBatches.some(b => b.batchNo.toLowerCase() === searchBatchNo.toLowerCase());
-                if (batchExists) {
-                    showToast('info', `Parsed batch "${searchBatchNo}" has insufficient stock in store. Selecting FIFO batch.`);
-                } else {
-                    showToast('info', `Parsed batch "${searchBatchNo}" not found in stock. Selecting FIFO batch.`);
-                }
-            }
-        }
-
-        // Fallback to FIFO
-        if (!chosenBatch) {
-            chosenBatch = sortedBatches.find(b => b.currentStock >= baseQtyRequired);
-        }
-
-        if (!chosenBatch) {
-            showToast(
-                'error',
-                `Insufficient stock for "${matchedItem.itemName}". Required: ${baseQtyRequired} in store.`
-            );
-            setBarcodeQuery('');
+    const handleConfirmMapping = async () => {
+        if (!unrecognizedScan || !mappingItemId) {
+            showToast('error', 'Please select an item to link.');
+            playErrorBeep();
             return;
         }
 
-        // Tax calculation
-        const itemMapping = itemTaxMappings.find(m => m.itemId === matchedItem.id);
-        const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
-        const taxPercent = taxMaster?.percentage || 0;
+        if (supervisorPin !== '4321' && supervisorPin !== '1234') {
+            setPinError('Invalid Supervisor PIN. Access denied.');
+            playErrorBeep();
+            return;
+        }
 
-        const total = Number((chosenBatch.rate * baseQtyRequired).toFixed(2));
-        const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
-        const baseAmount = Number((total - taxAmt).toFixed(2));
+        const selectedItem = inventoryItems.find(i => i.id === mappingItemId);
+        if (!selectedItem) return;
 
-        setSelectedBatches(prev => ({
-            ...prev,
-            [prescItem.id]: {
-                batchNo: chosenBatch.batchNo,
-                rate: chosenBatch.rate,
-                batchDate: chosenBatch.batchDate,
-                expiryDate: chosenBatch.expiryDate,
-                baseAmount: baseAmount,
-                taxAmount: taxAmt,
-                amount: total
+        try {
+            const updatedItem = {
+                ...selectedItem,
+                gtin: unrecognizedScan.gtin
+            };
+
+            await saveInventoryItem(updatedItem);
+            showToast('success', `Linked barcode ${unrecognizedScan.gtin} to item "${selectedItem.itemName}" successfully.`);
+            
+            await processMatchedOPItem(selectedItem, unrecognizedScan.batch, unrecognizedScan.expiry);
+
+            setUnrecognizedScan(null);
+            setMappingItemId('');
+            setMappingSearchQuery('');
+            setSupervisorPin('');
+            setPinError('');
+        } catch (err: any) {
+            showToast('error', `Mapping failed: ${err.message}`);
+            playErrorBeep();
+        }
+    };
+
+    const executeDispensation = async (payMode: string, refNo: string, amount: number, status: string) => {
+        setLoading(true);
+        const result = await dispensePrescription(
+            selectedPrescription!.id, 
+            selectedStoreId, 
+            selectedBatches, 
+            issueQty, 
+            dispensingUom,
+            payMode,
+            refNo,
+            amount,
+            status
+        );
+        setLoading(false);
+        if (result.success) {
+            setSelectedBatches({});
+            setPaymentMode('Cash');
+            setReferenceNo('');
+            setShowUpiModal(false);
+            if (result.invoiceId) {
+                setGeneratedInvoiceId(result.invoiceId);
             }
-        }));
-
-        const successMessage = matchedByGS1Batch 
-            ? `Successfully matched Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`
-            : `Auto-selected FIFO Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}"`;
-
-        showToast('success', successMessage);
-        setBarcodeQuery('');
+        }
     };
 
     const handleFinalDispense = async () => {
         if (!selectedPrescription || !selectedStoreId) return;
         
         // Ensure all pending items have a batch selected
-        const pendingItems = selectedPrescription.items.filter(i => i.status !== 'Dispensed');
-        if (pendingItems.length > 0 && Object.keys(selectedBatches).length === 0) {
+        // Pending = items that are not yet fully Dispensed (includes Partially Dispensed)
+        const pendingItems = selectedPrescription.items.filter(item => {
+            const invItem = inventoryItems.find(i => i.id === item.itemId);
+            const prescriptionBills = bills.filter(b => b.prescriptionId === selectedPrescription.id);
+            const dispensedQty = prescriptionBills.reduce((sum, b) => {
+                const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                return sum + matchingItems.reduce((acc, curr) => {
+                    const isSales = curr.itemType?.toUpperCase() === invItem?.salesUom?.toUpperCase();
+                    const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                    return acc + (curr.quantity * cf);
+                }, 0);
+            }, 0);
+            const remainingQty = Math.max(0, item.totalQty - dispensedQty);
+            return item.status !== 'Dispensed' && remainingQty > 0;
+        });
+        if (pendingItems.length > 0 && Object.keys(selectedBatches).filter(id => pendingItems.some(i => i.id === id)).length === 0) {
             showToast('error', 'Please select batches for the items before dispensing.');
             return;
         }
 
-        const result = await dispensePrescription(selectedPrescription.id, selectedStoreId, selectedBatches);
-        if (result.success) {
-            setSelectedBatches({});
-            if (result.invoiceId) {
-                setGeneratedInvoiceId(result.invoiceId);
-            }
+        if (paymentMode === 'UPI') {
+            const orderId = `order_UPI_OP_${Date.now().toString().slice(-6)}`;
+            setUpiOrderId(orderId);
+            const inrRate = getExchangeRateToINR(selectedCurrency);
+            const link = `upi://pay?pa=medicorepharmacy@hdfcbank&pn=MediCore%20Pharmacy&tr=${orderId}&am=${(totals.total * inrRate).toFixed(2)}&cu=INR&tn=Presc-${selectedPrescription.id.slice(-6)}`;
+            setUpiLink(link);
+            setShowUpiModal(true);
+            return;
         }
+
+        await executeDispensation(paymentMode, referenceNo, totals.total, 'Paid');
+    };
+
+    const handleUpiPaymentSuccess = async () => {
+        const paymentId = `pay_UPI_OP_${Date.now().toString().slice(-6)}`;
+        await executeDispensation('UPI', paymentId, totals.total, 'Paid');
     };
 
     return (
@@ -353,7 +782,11 @@ export const OPPharmacy: React.FC = () => {
                         <select 
                             className="w-full p-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-slate-700 focus:ring-2 focus:ring-blue-500"
                             value={selectedStoreId}
-                            onChange={(e) => setSelectedStoreId(e.target.value)}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                setSelectedStoreId(val);
+                                localStorage.setItem('selected_pharmacy_store_id', val);
+                            }}
                         >
                             <option value="">Select Dispensary Store...</option>
                             {stores.map(s => (
@@ -407,13 +840,18 @@ export const OPPharmacy: React.FC = () => {
                                     </div>
                                     <p className="font-bold text-slate-800 text-sm truncate">{pat?.firstName} {pat?.lastName}</p>
                                     <div className="flex items-center gap-2 mt-2">
-                                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                                            p.status === 'Dispensed' ? 'bg-emerald-100 text-emerald-700' : 
-                                            p.status === 'Partially Dispensed' ? 'bg-indigo-100 text-indigo-700' :
-                                            'bg-amber-100 text-amber-700'
-                                        }`}>
-                                            {p.status}
-                                        </span>
+                                        {(() => {
+                                            const computedDispStatus = getPrescriptionStatus(p);
+                                            return (
+                                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                                    computedDispStatus === 'Dispensed' ? 'bg-emerald-100 text-emerald-700' : 
+                                                    computedDispStatus === 'Partially Dispensed' ? 'bg-indigo-100 text-indigo-700' :
+                                                    'bg-amber-100 text-amber-700'
+                                                }`}>
+                                                    {computedDispStatus}
+                                                </span>
+                                            );
+                                        })()}
                                         <span className="text-[10px] text-slate-400 font-semibold">{p.items.length} Items</span>
                                     </div>
                                 </button>
@@ -446,7 +884,7 @@ export const OPPharmacy: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
-                                {selectedPrescription.status === 'Dispensed' && (
+                                {isSelectedPrescriptionFullyDispensed && (
                                     <button 
                                         onClick={() => {
                                             // 1. Try direct link
@@ -471,7 +909,7 @@ export const OPPharmacy: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={handleFinalDispense}
-                                    disabled={selectedPrescription.status === 'Dispensed' || Object.keys(selectedBatches).length === 0}
+                                    disabled={isSelectedPrescriptionFullyDispensed || Object.keys(selectedBatches).length === 0}
                                     className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all active:scale-95"
                                 >
                                     <CheckCircle className="w-5 h-5" /> Confirm Dispensing
@@ -482,7 +920,7 @@ export const OPPharmacy: React.FC = () => {
                         {/* Barcode Scanner Bar */}
                         <div className="px-6 py-3 bg-slate-100/50 border-b border-slate-200 flex flex-col gap-2 shrink-0">
                             <div className="flex items-center justify-between gap-4">
-                                <form onSubmit={handleBarcodeScan} className="flex-1 max-w-md">
+                                <div className="flex-1 max-w-md">
                                     <div className="relative group">
                                         <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 group-hover:text-blue-600 transition-colors" />
                                         <input
@@ -495,6 +933,12 @@ export const OPPharmacy: React.FC = () => {
                                             onChange={e => setBarcodeQuery(e.target.value)}
                                             onFocus={() => setScannerFocused(true)}
                                             onBlur={() => setScannerFocused(false)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleBarcodeScan(e);
+                                                }
+                                            }}
                                         />
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                                             <span className={`w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
@@ -503,7 +947,7 @@ export const OPPharmacy: React.FC = () => {
                                             </span>
                                         </div>
                                     </div>
-                                </form>
+                                </div>
                                 <div className="flex items-center gap-4">
                                     <label className="flex items-center gap-1.5 cursor-pointer">
                                         <input
@@ -550,72 +994,195 @@ export const OPPharmacy: React.FC = () => {
                                             <th className="p-4">Drug Information</th>
                                             <th className="p-4 text-center">Dosage / Frequency</th>
                                             <th className="p-4 text-center w-32">Req. Qty</th>
+                                            <th className="p-4 text-center w-32">Issue Qty</th>
+                                            <th className="p-4 text-center w-28">UOM</th>
                                             <th className="p-4">Stock Status</th>
                                             <th className="p-4 text-center">Batch / Dispense</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {selectedPrescription.items.map((item, idx) => {
-                                            const invItem = inventoryItems.find(i => i.id === item.itemId);
-                                            const totalStock = invItem?.stock?.reusableCount || 0;
-                                            const hasStock = totalStock >= item.totalQty;
+                                             const invItem = inventoryItems.find(i => i.id === item.itemId);
+                                             const totalStock = invItem?.stock?.reusableCount || 0;
+                                             
+                                             const prescriptionBills = bills.filter(b => b.prescriptionId === selectedPrescription.id);
+                                             const dispensedQty = prescriptionBills.reduce((sum, b) => {
+                                                 const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                                                 return sum + matchingItems.reduce((acc, curr) => {
+                                                     const isSales = curr.itemType?.toUpperCase() === invItem?.salesUom?.toUpperCase();
+                                                     const cf = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                     return acc + (curr.quantity * cf);
+                                                 }, 0);
+                                             }, 0);
+                                             const remainingQty = Math.max(0, item.totalQty - dispensedQty);
 
-                                            return (
-                                                <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
-                                                    <td className="p-4 text-slate-300 font-black">{idx + 1}</td>
-                                                    <td className="p-4">
-                                                        <div>
-                                                            <p className="font-bold text-slate-800">{item.itemName}</p>
-                                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{item.genericName}</p>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <div className="inline-flex flex-col items-center">
-                                                            <span className="font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px] mb-1">{item.dose} {item.units}</span>
-                                                            <span className="text-[10px] font-bold text-slate-500 uppercase">{item.frequency}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4 text-center">
-                                                        <div className="font-black text-slate-700 text-lg">{item.totalQty}</div>
-                                                        <div className="text-[9px] text-slate-400 font-bold uppercase">Days: {item.noDays}</div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="flex flex-col gap-1">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className={`w-2 h-2 rounded-full ${hasStock ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                                                                <span className={`font-bold text-xs ${hasStock ? 'text-emerald-600' : 'text-red-500'}`}>
-                                                                    {hasStock ? 'Available' : 'Low Stock'}
-                                                                </span>
-                                                            </div>
-                                                            <span className="text-[10px] text-slate-400 font-bold">Total Physical: {totalStock}</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="p-4">
-                                                        <div className="flex items-center justify-center gap-2">
-                                                            {selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' ? (
-                                                                <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
-                                                                    <CheckCircle className="w-3.5 h-3.5" /> Dispensed
-                                                                </span>
-                                                            ) : selectedBatches[item.id] ? (
-                                                                <button 
-                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty, item.units)}
-                                                                    className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 hover:bg-blue-100 transition-colors border border-blue-200"
-                                                                >
-                                                                    <CheckCircle className="w-3.5 h-3.5" /> Batch {selectedBatches[item.id].batchNo}
-                                                                </button>
-                                                            ) : (
-                                                                <button 
-                                                                    onClick={() => handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', item.totalQty, item.units)}
-                                                                    className="px-4 py-2 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-                                                                >
-                                                                    <Package className="w-4 h-4" /> Select Batch
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
+                                             const selectedUom = dispensingUom[item.id] || item.units || 'EACH';
+                                             const isSales = selectedUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                                             const salesCF = isSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+
+                                             return (
+                                                 <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
+                                                     <td className="p-4 text-slate-300 font-black">{idx + 1}</td>
+                                                     <td className="p-4">
+                                                         <div>
+                                                             <p className="font-bold text-slate-800">{item.itemName}</p>
+                                                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{item.genericName}</p>
+                                                         </div>
+                                                     </td>
+                                                     <td className="p-4 text-center">
+                                                         <div className="inline-flex flex-col items-center">
+                                                             <span className="font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[11px] mb-1">{item.dose} {item.units}</span>
+                                                             <span className="text-[10px] font-bold text-slate-500 uppercase">{item.frequency}</span>
+                                                         </div>
+                                                     </td>
+                                                     <td className="p-4 text-center">
+                                                          {(() => {
+                                                              const prescUom = (item.units || 'EACH').trim().toUpperCase();
+                                                              const baseUom = (invItem?.baseUom || 'EACH').trim().toUpperCase();
+                                                              const prescIsSales = prescUom === (invItem?.salesUom || '').trim().toUpperCase();
+                                                              const prescCF = prescIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                              
+                                                              const prescribedQtyVal = item.totalQty / prescCF;
+                                                              
+                                                              return (
+                                                                  <div className="flex flex-col items-center">
+                                                                      <div className="font-black text-slate-700 text-lg">
+                                                                          {prescribedQtyVal} {prescUom}
+                                                                      </div>
+                                                                      {prescCF > 1 && (
+                                                                          <div className="text-[10px] text-slate-400 font-bold">
+                                                                              ({item.totalQty} {baseUom})
+                                                                          </div>
+                                                                      )}
+                                                                  </div>
+                                                              );
+                                                          })()}
+                                                          {dispensedQty > 0 && (
+                                                              <div className="text-[10px] flex flex-col gap-0.5 mt-0.5 font-bold">
+                                                                  <span className="text-emerald-600">Dispensed: {dispensedQty} {invItem?.baseUom}</span>
+                                                                  <span className="text-amber-600">Remaining: {remainingQty} {invItem?.baseUom}</span>
+                                                              </div>
+                                                          )}
+                                                          <div className="text-[9px] text-slate-400 font-bold uppercase">Days: {item.noDays}</div>
+                                                     </td>
+                                                     <td className="p-4 text-center">
+                                                         <input
+                                                             type="number"
+                                                             min={1}
+                                                             max={remainingQty / salesCF}
+                                                             value={remainingQty <= 0 ? 0 : (issueQty[item.id] ?? (remainingQty / salesCF))}
+                                                             disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
+                                                             onChange={e => {
+                                                                 const maxVal = remainingQty / salesCF;
+                                                                 const newQty = Math.max(1, Math.min(maxVal, Number(e.target.value)));
+                                                                 setIssueQty(prev => ({ ...prev, [item.id]: newQty }));
+
+                                                                 // Synchronize manual spinner change to selectedBatches helpers
+                                                                 if (selectedBatches[item.id]) {
+                                                                     const allocation = selectedBatches[item.id];
+                                                                     const itemPrice = allocation.rate * salesCF;
+                                                                     const total = Number((newQty * itemPrice).toFixed(decimals));
+                                                                     const itemMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+                                                                     const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+                                                                     const taxPercent = taxMaster?.percentage || 0;
+                                                                     const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                                                                     const baseAmount = Number((total - taxAmt).toFixed(decimals));
+
+                                                                     setSelectedBatches(prev => ({
+                                                                         ...prev,
+                                                                         [item.id]: {
+                                                                             ...allocation,
+                                                                             amount: total,
+                                                                             taxAmount: taxAmt,
+                                                                             baseAmount: baseAmount
+                                                                         }
+                                                                     }));
+                                                                 }
+                                                             }}
+                                                             className={`w-20 text-center px-2 py-1.5 border rounded-lg text-sm font-black outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                                                                 (issueQty[item.id] ?? (remainingQty / salesCF)) < (remainingQty / salesCF)
+                                                                     ? 'border-amber-400 bg-amber-50 text-amber-700 focus:ring-amber-400'
+                                                                     : 'border-slate-200 bg-white text-slate-800'
+                                                             } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                                         />
+                                                     </td>
+                                                     <td className="p-4 text-center">
+                                                         <select
+                                                             className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500 bg-white font-bold text-slate-700"
+                                                             value={dispensingUom[item.id] || item.units || 'EACH'}
+                                                             onChange={e => {
+                                                                 const oldUom = dispensingUom[item.id] || item.units || 'EACH';
+                                                                 const newUom = e.target.value;
+                                                                 
+                                                                 const oldIsSales = oldUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                                                                 const oldCF = oldIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                                 
+                                                                 const newIsSales = newUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                                                                 const newCF = newIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                                 
+                                                                 const currentVal = issueQty[item.id] ?? (remainingQty / oldCF);
+                                                                 const qtyInBase = currentVal * oldCF;
+                                                                 const qtyInNew = Number((qtyInBase / newCF).toFixed(2));
+                                                                 
+                                                                 setDispensingUom(prev => ({ ...prev, [item.id]: newUom }));
+                                                                 setIssueQty(prev => ({ ...prev, [item.id]: qtyInNew }));
+                                                             }}
+                                                             disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
+                                                         >
+                                                             {[(invItem?.baseUom || item.units || 'EACH').trim().toUpperCase(), 
+                                                               (invItem?.salesUom || '').trim().toUpperCase()]
+                                                               .filter((v, i, a) => v && a.indexOf(v) === i)
+                                                               .map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                                         </select>
+                                                     </td>
+                                                     <td className="p-4">
+                                                          {batchesLoading ? (
+                                                              <div className="text-xs text-slate-400 animate-pulse font-semibold">Checking stock...</div>
+                                                          ) : (
+                                                              (() => {
+                                                                  if (remainingQty <= 0) return <span className="text-xs text-slate-400 font-semibold">-</span>;
+                                                                  const itemBatches = storeBatches[item.itemId] || [];
+                                                                  const nonExpiredBatches = itemBatches.filter(b => !b.expiryDate || new Date(b.expiryDate) >= new Date());
+                                                                  const totalStoreStock = nonExpiredBatches.reduce((sum, b) => sum + (b.currentStock || 0), 0);
+                                                                  const iqty = issueQty[item.id] ?? (remainingQty / salesCF);
+                                                                  const baseQtyRequired = iqty * salesCF;
+                                                                  const stockInSelectedUom = Number((totalStoreStock / salesCF).toFixed(2));
+                                                                  
+                                                                  if (!selectedStoreId) return <span className="text-xs font-semibold text-slate-400">Select store</span>;
+                                                                  if (totalStoreStock === 0) return <span className="text-xs font-bold text-red-500">Out of Stock</span>;
+                                                                  if (totalStoreStock < baseQtyRequired) return <span className="text-xs font-bold text-orange-500">Partial: {stockInSelectedUom} {selectedUom}</span>;
+                                                                  return <span className="text-xs font-bold text-emerald-600">Available ({stockInSelectedUom} {selectedUom})</span>;
+                                                              })()
+                                                          )}
+                                                     </td>
+                                                     <td className="p-4">
+                                                         <div className="flex items-center justify-center gap-2">
+                                                             {selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0 ? (
+                                                                 <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5">
+                                                                     <CheckCircle className="w-3.5 h-3.5" /> Dispensed
+                                                                 </span>
+                                                             ) : (
+                                                                 <button 
+                                                                     onClick={() => {
+                                                                         const reqQtyInSelectedUom = issueQty[item.id] ?? (remainingQty / salesCF);
+                                                                         handleDispenseItem(item.itemId, item.id, item.itemName || 'Unknown', reqQtyInSelectedUom, selectedUom);
+                                                                     }}
+                                                                     className="px-4 py-2 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+                                                                 >
+                                                                     <Package className="w-4 h-4" /> {selectedBatches[item.id] ? (() => {
+                                                                         const allocation = selectedBatches[item.id];
+                                                                         const iqty = issueQty[item.id] ?? (remainingQty / salesCF);
+                                                                         const itemPrice = allocation.rate * salesCF;
+                                                                         const total = Number((iqty * itemPrice).toFixed(2));
+                                                                         return `Batch ${allocation.batchNo} (${formatCurrency(total)})`;
+                                                                     })() : 'Select Batch'}
+                                                                 </button>
+                                                             )}
+                                                         </div>
+                                                     </td>
+                                                 </tr>
+                                             );
+                                         })}
                                     </tbody>
                                 </table>
                             </div>
@@ -658,17 +1225,17 @@ export const OPPharmacy: React.FC = () => {
                                     <div className="flex flex-col">
                                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tax Amount</span>
                                         <span className="text-sm font-bold text-slate-500">
-                                            SAR {selectedPrescription.status === 'Dispensed' 
-                                                ? (selectedPrescription.taxAmount || 0).toFixed(2)
-                                                : Object.values(selectedBatches).reduce((sum, b) => sum + (b.taxAmount || 0), 0).toFixed(2)}
+                                            {formatCurrency(isSelectedPrescriptionFullyDispensed 
+                                                ? (selectedPrescription.taxAmount || 0)
+                                                : totals.tax)}
                                         </span>
                                     </div>
                                     <div className="flex flex-col">
                                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Total Billable</span>
                                         <span className="text-2xl font-black text-slate-800">
-                                            SAR {selectedPrescription.status === 'Dispensed' 
-                                                ? selectedPrescription.totalAmount.toFixed(2)
-                                                : Object.values(selectedBatches).reduce((sum, b) => sum + (b.amount || 0), 0).toFixed(2)}
+                                            {formatCurrency(isSelectedPrescriptionFullyDispensed 
+                                                ? selectedPrescription.totalAmount
+                                                : totals.total)}
                                         </span>
                                     </div>
                                 </div>
@@ -676,6 +1243,38 @@ export const OPPharmacy: React.FC = () => {
                                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Items Status</span>
                                     <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">All Items Available</span>
                                 </div>
+
+                                {!isSelectedPrescriptionFullyDispensed && (
+                                    <div className="flex items-center gap-4 border-l border-slate-200 pl-6 animate-in fade-in duration-300">
+                                        <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Mode:</span>
+                                            <select 
+                                                className="text-xs font-bold text-blue-700 bg-transparent outline-none cursor-pointer"
+                                                value={paymentMode}
+                                                onChange={e => {
+                                                    setPaymentMode(e.target.value as any);
+                                                    setReferenceNo('');
+                                                }}
+                                            >
+                                                <option value="Cash">Cash</option>
+                                                <option value="Card">Card</option>
+                                                <option value="UPI">UPI</option>
+                                            </select>
+                                        </div>
+                                        {paymentMode === 'Card' && (
+                                            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm animate-in fade-in slide-in-from-left-2 duration-200">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Card Ref No:</span>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Enter Ref No"
+                                                    className="text-xs font-bold text-slate-700 bg-transparent outline-none w-28 placeholder-slate-300"
+                                                    value={referenceNo}
+                                                    onChange={e => setReferenceNo(e.target.value)}
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                             <div className="flex gap-4">
                                 <button className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl text-sm hover:bg-slate-200 transition-all">
@@ -686,10 +1285,18 @@ export const OPPharmacy: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={handleFinalDispense}
-                                    disabled={selectedPrescription.status === 'Dispensed' || Object.keys(selectedBatches).length === 0}
-                                    className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-black rounded-xl text-sm shadow-xl shadow-blue-200 hover:shadow-blue-300 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+                                    disabled={isSelectedPrescriptionFullyDispensed || Object.keys(selectedBatches).length === 0 || loading}
+                                    className="px-8 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 text-white font-black rounded-xl text-sm shadow-xl shadow-blue-200 hover:shadow-blue-300 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 flex items-center justify-center gap-2"
                                 >
-                                    Dispense & Print Label
+                                    {loading ? (
+                                        <>
+                                            <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                            </svg>
+                                            Dispensing...
+                                        </>
+                                    ) : 'Dispense & Print Label'}
                                 </button>
                             </div>
                         </div>
@@ -730,6 +1337,206 @@ export const OPPharmacy: React.FC = () => {
                     })()}
                     onClose={() => setGeneratedInvoiceId(null)}
                 />
+            )}
+
+            {showUpiModal && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-100 p-6 flex flex-col space-y-6 text-center animate-in fade-in zoom-in-95 duration-200">
+                        <div>
+                            <h3 className="text-base font-extrabold text-slate-800 tracking-tight">UPI Dynamic QR Payment</h3>
+                            <p className="text-xs text-slate-400 mt-1">Scan the QR code below using any UPI App (BHIM, Google Pay, PhonePe, Paytm)</p>
+                        </div>
+
+                        <div className="bg-slate-50 p-6 rounded-xl border border-slate-100 flex justify-center items-center">
+                            <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-100 flex flex-col items-center gap-2">
+                                <svg className="w-48 h-48" viewBox="0 0 100 100">
+                                    <rect x="2" y="2" width="96" height="96" rx="8" fill="none" stroke="#e2e8f0" strokeWidth="2" />
+                                    
+                                    <rect x="8" y="8" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                                    <rect x="14" y="14" width="8" height="8" fill="#6d28d9" />
+                                    
+                                    <rect x="72" y="8" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                                    <rect x="78" y="14" width="8" height="8" fill="#6d28d9" />
+                                    
+                                    <rect x="8" y="72" width="20" height="20" fill="none" stroke="#6d28d9" strokeWidth="4" />
+                                    <rect x="14" y="78" width="8" height="8" fill="#6d28d9" />
+                                    
+                                    <g fill="#1e293b">
+                                        <rect x="36" y="8" width="4" height="8" />
+                                        <rect x="44" y="12" width="8" height="4" />
+                                        <rect x="56" y="8" width="12" height="4" />
+                                        <rect x="8" y="36" width="8" height="4" />
+                                        <rect x="16" y="44" width="4" height="8" />
+                                        <rect x="8" y="56" width="4" height="12" />
+                                        
+                                        <rect x="40" y="40" width="20" height="20" rx="4" fill="#6d28d9" />
+                                        
+                                        <rect x="32" y="32" width="8" height="4" />
+                                        <rect x="60" y="32" width="4" height="8" />
+                                        <rect x="32" y="60" width="4" height="8" />
+                                        <rect x="60" y="60" width="8" height="4" />
+                                        <rect x="44" y="72" width="12" height="4" />
+                                        <rect x="36" y="84" width="8" height="8" />
+                                        <rect x="72" y="44" width="8" height="8" />
+                                        <rect x="80" y="56" width="12" height="4" />
+                                        <rect x="72" y="72" width="20" height="4" />
+                                        <rect x="84" y="80" width="8" height="8" />
+                                    </g>
+                                    <text x="50" y="52" fill="white" fontSize="6" fontWeight="bold" textAnchor="middle">UPI</text>
+                                </svg>
+                                <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded tracking-wide max-w-[200px] truncate select-all" title={upiLink}>
+                                    {upiOrderId}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1 bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs font-semibold text-slate-600">
+                            <div className="flex justify-between">
+                                <span>Subtotal:</span>
+                                <span className="font-mono text-slate-800">{formatCurrency(totals.total)}</span>
+                            </div>
+                            {selectedCurrency !== 'INR' && (
+                                <div className="flex justify-between border-t border-slate-100 pt-1.5 text-sm font-extrabold text-violet-700">
+                                    <span>INR Equivalent (1 {selectedCurrency} = ₹{getExchangeRateToINR(selectedCurrency).toFixed(2)}):</span>
+                                    <span className="font-mono text-base">₹{(totals.total * getExchangeRateToINR(selectedCurrency)).toFixed(2)}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                            <button
+                                onClick={handleUpiPaymentSuccess}
+                                disabled={loading}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-100 transition-all active:scale-[0.98] disabled:opacity-50"
+                            >
+                                Bypass & Simulate Webhook Success (Local Dev)
+                            </button>
+                            <button
+                                onClick={() => { setShowUpiModal(false); setUpiOrderId(''); setUpiLink(''); }}
+                                className="w-full px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-bold transition-all"
+                            >
+                                Cancel UPI Payment
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Unrecognized Barcode Mapping Modal with Supervisor Bypass */}
+            {unrecognizedScan && (
+                <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                        
+                        {/* Modal Header */}
+                        <div className="p-6 bg-amber-50 border-b border-amber-100">
+                            <h3 className="text-base font-black text-amber-800 flex items-center gap-2">
+                                <AlertCircle className="w-5 h-5 text-amber-600" />
+                                ⚠️ UNRECOGNIZED BARCODE DETECTED
+                            </h3>
+                            <p className="text-[11px] text-amber-600 mt-1 font-semibold">Link this barcode to a drug in the catalog to proceed dispensing.</p>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 flex flex-col gap-4 overflow-auto max-h-[380px]">
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 text-xs flex flex-col gap-1.5 font-semibold text-slate-600">
+                                <div>Scanned GTIN: <span className="font-mono font-bold text-slate-800">{unrecognizedScan.gtin}</span></div>
+                                <div className="grid grid-cols-2 gap-4 mt-0.5">
+                                    <div>Parsed Batch: <span className="font-bold text-slate-800">{unrecognizedScan.batch || 'N/A'}</span></div>
+                                    <div>Parsed Expiry: <span className="font-bold text-slate-800">{unrecognizedScan.expiry || 'N/A'}</span></div>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Search Catalog to Link this Barcode</label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search by drug name or code..."
+                                        className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white placeholder-slate-400 font-medium"
+                                        value={mappingSearchQuery}
+                                        onChange={e => setMappingSearchQuery(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Matching items selector */}
+                            <div className="flex flex-col gap-2">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-semibold">Matching Items Found:</span>
+                                <div className="border border-slate-200 rounded-xl max-h-40 overflow-y-auto divide-y divide-slate-100 shadow-inner">
+                                    {inventoryItems
+                                        .filter(i => 
+                                            i.isActive && 
+                                            (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                                             i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                                        )
+                                        .slice(0, 15)
+                                        .map(item => (
+                                            <label 
+                                                key={item.id} 
+                                                className={`flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 cursor-pointer transition-colors ${
+                                                    mappingItemId === item.id ? 'bg-blue-50/50' : ''
+                                                }`}
+                                            >
+                                                <input
+                                                    type="radio"
+                                                    name="mappingItem"
+                                                    className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-500 border-slate-300"
+                                                    checked={mappingItemId === item.id}
+                                                    onChange={() => setMappingItemId(item.id)}
+                                                />
+                                                <div className="text-xs">
+                                                    <p className="font-bold text-slate-800">{item.itemName}</p>
+                                                    <p className="text-[9px] text-slate-400 font-bold uppercase">{item.itemCode} · {item.itemCategory}</p>
+                                                </div>
+                                            </label>
+                                        ))}
+                                    {inventoryItems.filter(i => 
+                                        i.isActive && 
+                                        (i.itemName.toLowerCase().includes(mappingSearchQuery.toLowerCase()) || 
+                                         i.itemCode.toLowerCase().includes(mappingSearchQuery.toLowerCase()))
+                                    ).length === 0 && (
+                                        <div className="p-4 text-center text-xs text-slate-400 italic">No items match your search.</div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Supervisor Approval Bypass */}
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 flex flex-col gap-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-semibold">🔒 Supervisor Approval Required</label>
+                                <input
+                                    type="password"
+                                    placeholder="Enter Supervisor PIN (Demo: 4321)"
+                                    className={`w-full px-3 py-1.5 border ${pinError ? 'border-red-400 focus:ring-red-400' : 'border-slate-200 focus:ring-blue-500'} rounded-lg text-xs outline-none bg-white placeholder-slate-300 font-bold tracking-widest text-center`}
+                                    value={supervisorPin}
+                                    onChange={e => { setSupervisorPin(e.target.value); setPinError(''); }}
+                                />
+                                {pinError && <p className="text-[10px] text-red-500 font-bold text-center mt-0.5">{pinError}</p>}
+                            </div>
+
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setUnrecognizedScan(null)}
+                                className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-50 transition-all active:scale-95"
+                            >
+                                CANCEL
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmMapping}
+                                disabled={!mappingItemId || !supervisorPin}
+                                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-md shadow-blue-100 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                CONFIRM & BIND BARCODE
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -13,7 +13,8 @@ export const VendorCompliance: React.FC = () => {
   const { 
     showToast, vendors, grns, saveJournalVoucher, deleteJournalVoucher,
     journalVouchers, chartOfAccounts,
-    gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled
+    gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled,
+    formatCurrency
   } = useData();
 
   // Tab State
@@ -663,14 +664,7 @@ export const VendorCompliance: React.FC = () => {
     showToast('success', `${actionName} request sent for ${vendor}`);
   };
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(val);
-  };
+
 
   // Filter leaderboard
   const filteredLeaderboard = leaderboard.filter(item => {

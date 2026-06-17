@@ -7,8 +7,7 @@ import {
   X, Hash, BarChart2, ShieldAlert, Plus, Layers
 } from 'lucide-react';
 
-const fmtCurrency = (v: number) =>
-  new Intl.NumberFormat('en-SA', { style: 'currency', currency: 'SAR', minimumFractionDigits: 2 }).format(v);
+
 
 const today = () => new Date().toISOString().split('T')[0];
 const genDocNo = () => `EXP-RTN-${Date.now().toString().slice(-8)}`;
@@ -16,8 +15,12 @@ const genDocNo = () => `EXP-RTN-${Date.now().toString().slice(-8)}`;
 export const ExpiryItemReturnPage: React.FC = () => {
   const {
     expiryReturns, saveExpiryReturn, deleteExpiryReturn, fetchExpiryItems,
-    vendors, stores, showToast
+    vendors, stores, showToast,
+    formatCurrency, selectedCurrency
   } = useData();
+
+  const fmtCurrency = formatCurrency;
+  const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
   // ── View Mode ───────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
@@ -56,7 +59,7 @@ export const ExpiryItemReturnPage: React.FC = () => {
   // ── Recalculate net amount ───────────────────────────────────────────────────
   useEffect(() => {
     const total = items.reduce((sum, item) => sum + (item.quantity * item.rate), 0);
-    setNetAmount(Number(total.toFixed(2)));
+    setNetAmount(Number(total.toFixed(decimals)));
   }, [items]);
 
   // ── Reset Form ───────────────────────────────────────────────────────────────
@@ -121,7 +124,7 @@ export const ExpiryItemReturnPage: React.FC = () => {
         currentStock: c.currentStock,
         quantity: c.currentStock, // Default return quantity to the full expired batch stock
         rate: c.rate,
-        value: Number((c.currentStock * c.rate).toFixed(2)),
+        value: Number((c.currentStock * c.rate).toFixed(decimals)),
         remarks: ''
       }));
 
@@ -144,7 +147,7 @@ export const ExpiryItemReturnPage: React.FC = () => {
       const qty = Number(field === 'quantity' ? value : updated.quantity || 0);
       const rate = Number(field === 'rate' ? value : updated.rate || 0);
       
-      updated.value = Number((qty * rate).toFixed(2));
+      updated.value = Number((qty * rate).toFixed(decimals));
       return updated;
     }));
   };
@@ -500,7 +503,7 @@ export const ExpiryItemReturnPage: React.FC = () => {
                           <th className="px-4 py-3">Expiry Date</th>
                           <th className="px-4 py-3">Current Stock</th>
                           <th className="px-4 py-3">Return Qty</th>
-                          <th className="px-4 py-3">Rate (SAR)</th>
+                          <th className="px-4 py-3">Rate ({selectedCurrency})</th>
                           <th className="px-4 py-3">Value</th>
                           <th className="px-4 py-3">Remarks</th>
                           <th className="px-4 py-3"></th>
@@ -540,7 +543,7 @@ export const ExpiryItemReturnPage: React.FC = () => {
                                 className="w-16 px-2 py-1 border border-slate-200 rounded-lg font-bold text-xs focus:ring-2 focus:ring-amber-400 outline-none"
                               />
                             </td>
-                            <td className="px-4 py-3 font-black text-amber-700">SAR {item.value.toFixed(2)}</td>
+                            <td className="px-4 py-3 font-black text-amber-700">{formatCurrency(item.value)}</td>
                             <td className="px-4 py-3">
                               <input
                                 type="text"
@@ -621,8 +624,8 @@ export const ExpiryItemReturnPage: React.FC = () => {
                       { label: 'Expiry Date', value: activeItem.expiryDate },
                       { label: 'Current Stock', value: activeItem.currentStock },
                       { label: 'Return Qty', value: activeItem.quantity, highlight: true },
-                      { label: 'Rate (SAR)', value: `${activeItem.rate.toFixed(2)} SAR` },
-                      { label: 'Line Value', value: `${activeItem.value.toFixed(2)} SAR` }
+                      { label: `Rate (${selectedCurrency})`, value: formatCurrency(activeItem.rate) },
+                      { label: 'Line Value', value: formatCurrency(activeItem.value) }
                     ].map((row, i) => (
                       <div key={i} className="flex justify-between items-center text-xs">
                         <span className="text-slate-500 font-medium">{row.label}</span>

@@ -1,4 +1,4 @@
--- Enable UUID extension
+﻿-- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
 -- 1. Departments
@@ -42,8 +42,19 @@ create table if not exists patients (
   phone text,
   email text,
   address text,
-  registration_date timestamp with time zone default now()
+  registration_date timestamp with time zone default now(),
+  arabic_name text,
+  national_id text,
+  sponsor_name text,
+  policy_no text,
+  card_no text
 );
+-- Migration: Add columns to patients if not exists
+alter table patients add column if not exists arabic_name text;
+alter table patients add column if not exists national_id text;
+alter table patients add column if not exists sponsor_name text;
+alter table patients add column if not exists policy_no text;
+alter table patients add column if not exists card_no text;
 
 -- 5. Appointments
 create table if not exists appointments (
@@ -927,9 +938,9 @@ CREATE INDEX IF NOT EXISTS idx_procurement_prn_store ON procurement_purchase_rec
 CREATE INDEX IF NOT EXISTS idx_procurement_prn_grn ON procurement_purchase_receipts(grn_id);
 CREATE INDEX IF NOT EXISTS idx_procurement_prn_items ON procurement_purchase_receipt_items(receipt_id);
 
--- ─────────────────────────────────────────────────────────────────────────────
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 -- 54. Procurement Purchase Returns (Header)
--- ─────────────────────────────────────────────────────────────────────────────
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CREATE TABLE IF NOT EXISTS procurement_purchase_returns (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     return_no VARCHAR(50) UNIQUE NOT NULL,
@@ -1157,4 +1168,5 @@ CREATE POLICY "Enable all write operations for all users" ON procurement_gstr2b_
 
 CREATE POLICY "Enable read access for all users" ON procurement_gstr2b_invoices FOR SELECT USING (true);
 CREATE POLICY "Enable all write operations for all users" ON procurement_gstr2b_invoices FOR ALL TO public USING (true) WITH CHECK (true);
+
 

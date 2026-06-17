@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { useData } from '../context/DataContext';
+import { useData, getCurrencySymbol } from '../context/DataContext';
+import { Pagination } from '../components/Pagination';
 import { Plus, Search, Printer, DollarSign, FileText, Trash2, X, History, CreditCard, Package, Pill, Stethoscope, Save, ArrowLeft, MoreHorizontal, CheckSquare, Square, Loader2, Ban, AlertTriangle, ChevronDown } from 'lucide-react';
 import { Bill, BillItem, Payment, ServiceDefinition } from '../types';
 
@@ -7,8 +8,10 @@ export const Billing = () => {
     const {
         bills, createBill, cancelBill, addPayment, patients, appointments, showToast,
         serviceDefinitions, serviceTariffs, serviceOrders, employees, departments,
-        organizations, resolveNegotiatedPrice
+        organizations, resolveNegotiatedPrice, formatCurrency, selectedCurrency
     } = useData();
+
+    const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
 
     // --- Tabs State ---
@@ -17,6 +20,9 @@ export const Billing = () => {
     // --- Invoice List View State ---
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pendingPage, setPendingPage] = useState(1);
+    const itemsPerPage = 10;
 
     // --- Pending Invoice List State ---
     const [pendingFilters, setPendingFilters] = useState({
@@ -81,10 +87,13 @@ export const Billing = () => {
     // --- Derived Data: Invoice List ---
     const filteredBills = bills.filter(b => {
         const p = patients.find(pat => pat.id === b.patientId);
-        const nameMatch = p ? `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) : false;
+        const patientName = b.patientName || (p ? `${p.firstName} ${p.lastName}` : 'Walk-in Patient');
+        const nameMatch = patientName.toLowerCase().includes(searchTerm.toLowerCase());
         const statusMatch = statusFilter === 'All' || b.status === statusFilter;
         return nameMatch && statusMatch;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const paginatedBills = filteredBills.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     // --- Derived Data: Pending Invoices ---
     const pendingInvoices = serviceOrders.filter(order => {
@@ -106,6 +115,8 @@ export const Billing = () => {
         return true;
     });
 
+    const paginatedPendingInvoices = pendingInvoices.slice((pendingPage - 1) * itemsPerPage, pendingPage * itemsPerPage);
+
     // Derived Totals
     const patientGrossAmount = billItems.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitPrice || 0)), 0);
     const calculatedDiscount = billItems.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0);
@@ -114,7 +125,7 @@ export const Billing = () => {
 
     // Custom round-off to nearest integer:
     const totalAmount = Math.ceil(calculatedNet);
-    const roundOff = Number((totalAmount - calculatedNet).toFixed(2));
+    const roundOff = Number((totalAmount - calculatedNet).toFixed(decimals));
 
     // Balance calculation
     const balanceAmount = Math.max(0, totalAmount - (paymentMode === 'Credit' ? 0 : Number(amountReceived || 0)));
@@ -146,7 +157,7 @@ export const Billing = () => {
 
         item.discountAmount = discAmount;
         item.taxAmount = taxAmount;
-        item.total = Number(total.toFixed(2));
+        item.total = Number(total.toFixed(decimals));
 
         newItems[index] = item;
         setBillItems(newItems);
@@ -222,7 +233,7 @@ export const Billing = () => {
                 unitPrice: price,
                 discountAmount: discAmount,
                 taxAmount: taxAmount,
-                total: Number(total.toFixed(2))
+                total: Number(total.toFixed(decimals))
             };
             return newItems;
         });
@@ -308,7 +319,7 @@ export const Billing = () => {
     const openPaymentModal = (bill: Bill) => {
         setSelectedBill(bill);
         const remaining = bill.totalAmount - bill.paidAmount;
-        setPaymentAmount(remaining > 0 ? remaining.toFixed(2) : '0');
+        setPaymentAmount(remaining > 0 ? remaining.toFixed(decimals) : '0');
         setAmountError('');
         setShowPaymentModal(true);
     };
@@ -329,7 +340,7 @@ export const Billing = () => {
         if (isNaN(amount) || amount <= 0) {
             setAmountError('Enter a valid positive amount');
         } else if (amount > remaining + 0.01) { // 0.01 buffer for float issues
-            setAmountError(`Amount cannot exceed $${remaining.toFixed(2)}`);
+            setAmountError(`Amount cannot exceed ${formatCurrency(remaining)}`);
         } else {
             setAmountError('');
         }
@@ -348,7 +359,7 @@ export const Billing = () => {
         }
 
         if (amount > remaining + 0.01) {
-            showToast('error', `Amount exceeds remaining balance of $${remaining.toFixed(2)}`);
+            showToast('error', `Amount exceeds remaining balance of ${formatCurrency(remaining)}`);
             return;
         }
 
@@ -371,6 +382,13 @@ export const Billing = () => {
 
     const handlePrint = (bill: Bill) => {
         const patient = patients.find(p => p.id === bill.patientId);
+        const apt = appointments.find(a => a.id === bill.appointmentId);
+        const doctorId = bill.doctorId || apt?.doctorId;
+        const doctor = doctorId ? employees.find(e => e.id === doctorId) : undefined;
+        const consultantName = doctor ? `Dr. ${doctor.firstName} ${doctor.lastName}` : '';
+        const patientAge = patient?.dob ? (new Date().getFullYear() - new Date(patient.dob).getFullYear()) : '';
+        const mrnFormatted = patient ? patient.id.slice(-8).toUpperCase() : '';
+        const visitNo = apt ? `OPD-${apt.id.slice(-6).toUpperCase()}` : (bill.appointmentId ? `OPD-${bill.appointmentId.slice(-6).toUpperCase()}` : '-');
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
 
@@ -422,23 +440,23 @@ export const Billing = () => {
         <body>
           <div class="header-info">
               <div class="info-card">
-                  <div class="info-row"><span class="info-label">MRN :</span><span class="info-value">${patient?.id?.toUpperCase() || 'ALH0000030173'}</span><span class="info-arabic">: رقم السجل الطبي</span></div>
-                  <div class="info-row"><span class="info-label">Patient Name:</span><span class="info-value">${patient?.firstName || ''} ${patient?.lastName || ''}</span><span class="info-arabic">: اسم المريض</span></div>
-                  <div class="info-row"><span class="info-label">Nationality:</span><span class="info-value">BAHRAINI</span><span class="info-arabic">: جنسية</span></div>
-                  <div class="info-row"><span class="info-label">Identification No:</span><span class="info-value">0000000000</span><span class="info-arabic">: رقم الهوية / الاقامة</span></div>
-                  <div class="info-row"><span class="info-label">Visit No:</span><span class="info-value">OP-001</span><span class="info-arabic">: عدد الزيارات</span></div>
-                  <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">14Yrs/${patient?.gender?.toUpperCase() || 'MALE'}</span><span class="info-arabic">: العمر / الجنس</span></div>
+                  <div class="info-row"><span class="info-label">MRN :</span><span class="info-value">${mrnFormatted || '-'}</span><span class="info-arabic">: رقم السجل الطبي</span></div>
+                  <div class="info-row"><span class="info-label">Patient Name:</span><span class="info-value">${patient ? `${patient.firstName} ${patient.lastName}` : (bill.patientName || '-')}</span><span class="info-arabic">: اسم المريض</span></div>
+                  <div class="info-row"><span class="info-label">Nationality:</span><span class="info-value">-</span><span class="info-arabic">: جنسية</span></div>
+                  <div class="info-row"><span class="info-label">Identification No:</span><span class="info-value">${patient?.nationalId || '-'}</span><span class="info-arabic">: رقم الهوية / الاقامة</span></div>
+                  <div class="info-row"><span class="info-label">Visit No:</span><span class="info-value">${visitNo}</span><span class="info-arabic">: عدد الزيارات</span></div>
+                  <div class="info-row"><span class="info-label">Age/Sex:</span><span class="info-value">${patientAge ? `${patientAge}Yrs` : '-'}/${patient?.gender?.toUpperCase() || '-'}</span><span class="info-arabic">: العمر / الجنس</span></div>
               </div>
               <div class="info-card">
                   <div class="info-row"><span class="info-label">Bill No:</span><span class="info-value">${bill.invoiceNo || 'INV-O-ALH-' + bill.id}</span><span class="info-arabic">: رقم الفاتورة</span></div>
                   <div class="info-row"><span class="info-label">Bill Date:</span><span class="info-value">${new Date(bill.date).toLocaleString()}</span><span class="info-arabic">: تاريخ الفاتورة</span></div>
-                  <div class="info-row"><span class="info-label">Consultant :</span><span class="info-value">Dr Hebtulla Hajrs</span><span class="info-arabic">: الطبيب المعالج</span></div>
-                  <div class="info-row"><span class="info-label">Insurance Name :</span><span class="info-value">CASH</span><span class="info-value">VATNO-</span></div>
-                  <div class="info-row"><span class="info-label">City :</span><span class="info-value"></span><span class="info-value">Postal Code-</span></div>
-                  <div class="info-row"><span class="info-label">Policy No :</span><span class="info-value">C001</span><span class="info-arabic"></span></div>
-                  <div class="info-row"><span class="info-label">Policy Name :</span><span class="info-value">Cash Plan</span><span class="info-arabic"></span></div>
-                  <div class="info-row"><span class="info-label">Membership No.:</span><span class="info-value"></span><span class="info-arabic"></span></div>
-                  <div class="info-row"><span class="info-label">Address:</span><span class="info-value">Dammam</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Consultant :</span><span class="info-value">${consultantName || '-'}</span><span class="info-arabic">: الطبيب المعالج</span></div>
+                  <div class="info-row"><span class="info-label">Insurance Name :</span><span class="info-value">${patient?.sponsorName || 'CASH'}</span><span class="info-value"></span></div>
+                  <div class="info-row"><span class="info-label">City :</span><span class="info-value"></span><span class="info-value"></span></div>
+                  <div class="info-row"><span class="info-label">Policy No :</span><span class="info-value">${patient?.policyNo || '-'}</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Policy Name :</span><span class="info-value">${patient?.sponsorName ? patient.sponsorName + ' Plan' : '-'}</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Card No.:</span><span class="info-value">${patient?.cardNo || '-'}</span><span class="info-arabic"></span></div>
+                  <div class="info-row"><span class="info-label">Address:</span><span class="info-value">${patient?.address || '-'}</span><span class="info-arabic"></span></div>
               </div>
           </div>
           
@@ -466,27 +484,27 @@ export const Billing = () => {
                     <td class="text-left">${item.description}</td>
                     <td>ALH-5888/0</td>
                     <td>${item.quantity}</td>
-                    <td>${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(decimals)}</td>
                     <td>0.00</td>
-                    <td>${item.total.toFixed(2)}</td>
-                    <td>${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(decimals)}</td>
+                    <td>${item.total.toFixed(decimals)}</td>
                     <td>0.00</td>
                     <td>0.00</td>
                     <td>0.00</td>
-                    <td>${item.total.toFixed(2)}</td>
+                    <td>${item.total.toFixed(decimals)}</td>
                     <td>0.00</td>
                 </tr>
                 `).join('')}
                 <tr class="group-row" style="font-weight: 700;">
                     <td colspan="3" class="text-left">Sub Total:</td>
-                    <td>${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(decimals)}</td>
                     <td>0.00</td>
-                    <td>${bill.totalAmount.toFixed(2)}</td>
-                    <td>${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(decimals)}</td>
+                    <td>${bill.totalAmount.toFixed(decimals)}</td>
                     <td>0.00</td>
                     <td>0.00</td>
                     <td>0.00</td>
-                    <td>${bill.totalAmount.toFixed(2)}</td>
+                    <td>${bill.totalAmount.toFixed(decimals)}</td>
                     <td>0.00</td>
                 </tr>
                 <tr class="group-row"><td colspan="12">Others</td></tr>
@@ -520,18 +538,253 @@ export const Billing = () => {
           </table>
           
           <div class="summary-box">
-              <div class="summary-row"><div class="summary-label"><span>اجمالي القيمة</span><span>Gross Total :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>اجمالي القيمة</span><span>Gross Total :</span></div><div class="summary-value">${bill.totalAmount.toFixed(decimals)}</div></div>
               <div class="summary-row"><div class="summary-label"><span>الخصم</span><span>Discount :</span></div><div class="summary-value">0.00</div></div>
               <div class="summary-row"><div class="summary-label"><span>ضريبة شركة التأمين</span><span>VAT :</span></div><div class="summary-value">0.00</div></div>
-              <div class="summary-row"><div class="summary-label"><span>الاجمالي بعد الخصم بالضريبة</span><span>Total Amount including VAT :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
-              <div class="summary-row"><div class="summary-label"><span>التحمل المدفوع نقدا</span><span>Patient Net Amount :</span></div><div class="summary-value">${bill.totalAmount.toFixed(2)}</div></div>
-              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Collected Amount :</span></div><div class="summary-value">${(bill.paidAmount || bill.totalAmount).toFixed(2)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>الاجمالي بعد الخصم بالضريبة</span><span>Total Amount including VAT :</span></div><div class="summary-value">${bill.totalAmount.toFixed(decimals)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span>التحمل المدفوع نقدا</span><span>Patient Net Amount :</span></div><div class="summary-value">${bill.totalAmount.toFixed(decimals)}</div></div>
+              <div class="summary-row"><div class="summary-label"><span></span><span>Patient Collected Amount :</span></div><div class="summary-value">${(bill.paidAmount || bill.totalAmount).toFixed(decimals)}</div></div>
               <div class="summary-row"><div class="summary-label"><span></span><span>Patient Balance Amount :</span></div><div class="summary-value">0.00</div></div>
               <div class="summary-row"><div class="summary-label"><span>الصافي بالضريبة</span><span>Insurance Net Amount :</span></div><div class="summary-value">0.00</div></div>
           </div>
           
           <div style="clear: both;"></div>
           <div class="remarks">Remarks:</div>
+          <script>setTimeout(() => { window.print(); }, 500);</script>
+        </body>
+        </html>
+      `;
+        printWindow.document.write(html);
+        printWindow.document.close();
+    };
+
+    const handlePrintReceipt = (bill: Bill) => {
+        const patient = patients.find(p => p.id === bill.patientId);
+        const mrnFormatted = patient ? patient.id.slice(-8).toUpperCase() : '';
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+
+        const html = `
+        <!DOCTYPE html>
+        <html dir="ltr">
+        <head>
+          <title>Receipt - ${bill.receiptNo || 'RCP-' + bill.id.slice(-8).toUpperCase()}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+            body { 
+                font-family: 'Inter', 'Tajawal', sans-serif; 
+                padding: 20px; 
+                color: #1e293b; 
+                max-width: 800px; 
+                margin: 0 auto; 
+                font-size: 13px;
+                line-height: 1.5;
+            }
+            .header {
+                text-align: center;
+                margin-bottom: 25px;
+                border-bottom: 2px solid #e2e8f0;
+                padding-bottom: 15px;
+            }
+            .header h1 {
+                font-size: 22px;
+                font-weight: 800;
+                margin: 0;
+                color: #0f172a;
+            }
+            .header p {
+                margin: 5px 0 0;
+                font-size: 14px;
+                font-weight: 700;
+                color: #64748b;
+                letter-spacing: 2px;
+            }
+            .details-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 25px;
+            }
+            .card {
+                border: 1px solid #cbd5e1;
+                border-radius: 12px;
+                padding: 15px;
+                background-color: #f8fafc;
+            }
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 4px 0;
+                border-bottom: 1px dashed #e2e8f0;
+            }
+            .info-row:last-child {
+                border-bottom: none;
+            }
+            .label-group {
+                display: flex;
+                gap: 5px;
+                color: #475569;
+                font-weight: 600;
+            }
+            .value {
+                font-weight: 700;
+                color: #0f172a;
+            }
+            .arabic {
+                color: #64748b;
+                font-size: 11px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 25px;
+            }
+            th, td {
+                padding: 10px;
+                text-align: left;
+                border-bottom: 1px solid #e2e8f0;
+            }
+            th {
+                background-color: #f1f5f9;
+                font-weight: 700;
+                color: #334155;
+            }
+            .text-right {
+                text-align: right;
+            }
+            .total-section {
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                margin-bottom: 40px;
+                gap: 5px;
+            }
+            .total-row {
+                display: flex;
+                width: 320px;
+                justify-content: space-between;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            .grand-total {
+                font-size: 18px;
+                font-weight: 800;
+                color: #1e3a8a;
+                border-top: 2px solid #e2e8f0;
+                padding-top: 10px;
+            }
+            .footer {
+                margin-top: 80px;
+                display: flex;
+                justify-content: space-between;
+                text-align: center;
+            }
+            .signature-line {
+                width: 200px;
+                border-top: 1px solid #94a3b8;
+                margin-top: 50px;
+                padding-top: 5px;
+                font-weight: 600;
+                color: #64748b;
+            }
+            @media print {
+                body { padding: 0; }
+                .card { background-color: transparent; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+              <h1>KIMC MEDICAL COMPLEX</h1>
+              <p>PAYMENT RECEIPT / سند قبض</p>
+          </div>
+          
+          <div class="details-grid">
+              <div class="card">
+                  <div class="info-row">
+                      <span class="label-group"><span>Patient Name</span><span class="arabic">/ اسم المريض</span>:</span>
+                      <span class="value">${bill.patientName || (patient ? `${patient.firstName} ${patient.lastName}` : 'Walk-in Patient')}</span>
+                  </div>
+                  <div class="info-row">
+                      <span class="label-group"><span>MRN</span><span class="arabic">/ الرقم الطبي</span>:</span>
+                      <span class="value">${mrnFormatted || '-'}</span>
+                  </div>
+                  <div class="info-row">
+                      <span class="label-group"><span>Phone</span><span class="arabic">/ الهاتف</span>:</span>
+                      <span class="value">${patient?.phone || '-'}</span>
+                  </div>
+              </div>
+              <div class="card">
+                  <div class="info-row">
+                      <span class="label-group"><span>Receipt No</span><span class="arabic">/ رقم السند</span>:</span>
+                      <span class="value">${bill.receiptNo || 'RCP-' + bill.id.slice(-8).toUpperCase()}</span>
+                  </div>
+                  <div class="info-row">
+                      <span class="label-group"><span>Receipt Date</span><span class="arabic">/ تاريخ السند</span>:</span>
+                      <span class="value">${new Date(bill.date).toLocaleString()}</span>
+                  </div>
+                  <div class="info-row">
+                      <span class="label-group"><span>Invoice No</span><span class="arabic">/ رقم الفاتورة</span>:</span>
+                      <span class="value">${bill.invoiceNo || 'INV-' + bill.id}</span>
+                  </div>
+                  <div class="info-row">
+                      <span class="label-group"><span>Payment Mode</span><span class="arabic">/ طريقة الدفع</span>:</span>
+                      <span class="value">${bill.paymentMode || 'Cash'}</span>
+                  </div>
+                  ${bill.referenceNo ? `
+                  <div class="info-row">
+                      <span class="label-group"><span>Ref No</span><span class="arabic">/ رقم المرجع</span>:</span>
+                      <span class="value">${bill.referenceNo}</span>
+                  </div>` : ''}
+              </div>
+          </div>
+          
+          <table>
+            <thead>
+                <tr>
+                    <th>Item Description / وصف الخدمة</th>
+                    <th class="text-right">Qty / العدد</th>
+                    <th class="text-right">Unit Price / سعر الوحدة</th>
+                    <th class="text-right">Total Price / السعر الإجمالي</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${bill.items.map(item => `
+                <tr>
+                    <td>${item.description}</td>
+                    <td class="text-right">${item.quantity}</td>
+                    <td class="text-right">${formatCurrency(item.unitPrice)}</td>
+                    <td class="text-right">${formatCurrency(item.total)}</td>
+                </tr>
+                `).join('')}
+            </tbody>
+          </table>
+          
+          <div class="total-section">
+              <div class="total-row">
+                  <span class="label-group"><span>Total Invoice Amount</span><span class="arabic">/ اجمالي الفاتورة</span>:</span>
+                  <span>${formatCurrency(bill.totalAmount)}</span>
+              </div>
+              <div class="total-row">
+                  <span class="label-group"><span>Total Discount</span><span class="arabic">/ اجمالي الخصم</span>:</span>
+                  <span>${formatCurrency(bill.discountAmount || 0)}</span>
+              </div>
+              <div class="total-row grand-total">
+                  <span class="label-group"><span>Amount Paid</span><span class="arabic">/ المبلغ المدفوع</span>:</span>
+                  <span>${formatCurrency(bill.paidAmount || bill.totalAmount)}</span>
+              </div>
+          </div>
+          
+          <div class="footer">
+              <div>
+                  <div class="signature-line">Customer Signature / توقيع العميل</div>
+              </div>
+              <div>
+                  <div class="signature-line">Authorized Cashier / توقيع المستلم</div>
+              </div>
+          </div>
+          
           <script>setTimeout(() => { window.print(); }, 500);</script>
         </body>
         </html>
@@ -583,13 +836,13 @@ export const Billing = () => {
                                     className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                     placeholder="Search patient..."
                                     value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
+                                    onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                                 />
                             </div>
                             <select
                                 className="bg-white border border-slate-300 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none"
                                 value={statusFilter}
-                                onChange={e => setStatusFilter(e.target.value)}
+                                onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}
                             >
                                 <option value="All">All Status</option>
                                 <option value="Unpaid">Unpaid</option>
@@ -622,15 +875,15 @@ export const Billing = () => {
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredBills.map(bill => {
+                                        paginatedBills.map(bill => {
                                             const patient = patients.find(p => p.id === bill.patientId);
                                             return (
                                                 <tr key={bill.id} className="hover:bg-slate-50 transition-colors">
                                                     <td className="px-6 py-4 font-mono text-xs text-slate-500">{bill.invoiceNo || `#${bill.id.slice(-6)}`}</td>
                                                     <td className="px-6 py-4">{new Date(bill.date).toLocaleDateString()}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">{patient?.firstName} {patient?.lastName}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">${bill.totalAmount.toFixed(2)}</td>
-                                                    <td className="px-6 py-4 text-green-600">${bill.paidAmount.toFixed(2)}</td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900">{bill.patientName || (patient ? `${patient.firstName} ${patient.lastName}` : 'Walk-in Patient')}</td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900">{formatCurrency(bill.totalAmount)}</td>
+                                                    <td className="px-6 py-4 text-green-600">{formatCurrency(bill.paidAmount)}</td>
                                                     <td className="px-6 py-4">
                                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.status === 'Paid' ? 'bg-green-100 text-green-800' :
                                                                 bill.status === 'Partial' ? 'bg-orange-100 text-orange-800' :
@@ -651,7 +904,13 @@ export const Billing = () => {
                                                                         }`}
                                                                     title={bill.status === 'Paid' ? "View Payment History" : "Record Payment"}
                                                                 >
-                                                                    {bill.status === 'Paid' ? <History className="w-4 h-4" /> : <DollarSign className="w-4 h-4" />}
+                                                                    {bill.status === 'Paid' ? (
+                                                                        <History className="w-4 h-4" />
+                                                                    ) : (
+                                                                        <span className="text-[10px] font-black leading-none min-w-[16px] h-4 flex items-center justify-center">
+                                                                            {getCurrencySymbol(selectedCurrency)}
+                                                                        </span>
+                                                                    )}
                                                                 </button>
                                                             )}
 
@@ -662,6 +921,16 @@ export const Billing = () => {
                                                                     title="Cancel Invoice"
                                                                 >
                                                                     <Ban className="w-4 h-4" />
+                                                                </button>
+                                                            )}
+
+                                                            {bill.status !== 'Cancelled' && (bill.status === 'Paid' || bill.status === 'Partial' || bill.invoiceNo?.startsWith('INV-D-')) && (
+                                                                <button
+                                                                    onClick={() => handlePrintReceipt(bill)}
+                                                                    className="p-2 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-55 rounded-lg transition-colors"
+                                                                    title="Print Receipt"
+                                                                >
+                                                                    <FileText className="w-4 h-4" />
                                                                 </button>
                                                             )}
 
@@ -681,6 +950,14 @@ export const Billing = () => {
                                 </tbody>
                             </table>
                         </div>
+                        <Pagination
+                            currentPage={currentPage}
+                            totalPages={Math.ceil(filteredBills.length / itemsPerPage)}
+                            totalItems={filteredBills.length}
+                            itemsPerPage={itemsPerPage}
+                            onPageChange={setCurrentPage}
+                            colorTheme="blue"
+                        />
                     </div>
                 </div>
             )}
@@ -695,7 +972,7 @@ export const Billing = () => {
                                 <input
                                     className="border border-slate-300 rounded px-2 py-1 w-24 outline-none focus:border-blue-500 bg-white"
                                     value={pendingFilters.mrNo}
-                                    onChange={e => setPendingFilters({ ...pendingFilters, mrNo: e.target.value })}
+                                    onChange={e => { setPendingFilters({ ...pendingFilters, mrNo: e.target.value }); setPendingPage(1); }}
                                 />
                             </div>
                             <div className="flex items-center gap-2">
@@ -704,7 +981,7 @@ export const Billing = () => {
                                     type="date"
                                     className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white"
                                     value={pendingFilters.fromDate}
-                                    onChange={e => setPendingFilters({ ...pendingFilters, fromDate: e.target.value })}
+                                    onChange={e => { setPendingFilters({ ...pendingFilters, fromDate: e.target.value }); setPendingPage(1); }}
                                 />
                             </div>
                             <div className="flex items-center gap-2">
@@ -713,7 +990,7 @@ export const Billing = () => {
                                     type="date"
                                     className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white"
                                     value={pendingFilters.toDate}
-                                    onChange={e => setPendingFilters({ ...pendingFilters, toDate: e.target.value })}
+                                    onChange={e => { setPendingFilters({ ...pendingFilters, toDate: e.target.value }); setPendingPage(1); }}
                                 />
                             </div>
                             <div className="flex items-center gap-2">
@@ -721,7 +998,7 @@ export const Billing = () => {
                                 <select
                                     className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white w-28"
                                     value={pendingFilters.visitType}
-                                    onChange={e => setPendingFilters({ ...pendingFilters, visitType: e.target.value })}
+                                    onChange={e => { setPendingFilters({ ...pendingFilters, visitType: e.target.value }); setPendingPage(1); }}
                                 >
                                     <option value="">-- Select --</option>
                                     <option value="New Visit">New Visit</option>
@@ -734,7 +1011,7 @@ export const Billing = () => {
                                     <input
                                         className="border border-slate-300 rounded px-2 py-1 pr-7 w-32 outline-none focus:border-blue-500 bg-white"
                                         value={pendingFilters.consultant}
-                                        onChange={e => setPendingFilters({ ...pendingFilters, consultant: e.target.value })}
+                                        onChange={e => { setPendingFilters({ ...pendingFilters, consultant: e.target.value }); setPendingPage(1); }}
                                     />
                                     <Search className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
                                 </div>
@@ -745,7 +1022,7 @@ export const Billing = () => {
                                     <input
                                         className="border border-slate-300 rounded px-2 py-1 pr-7 w-32 outline-none focus:border-blue-500 bg-white"
                                         value={pendingFilters.department}
-                                        onChange={e => setPendingFilters({ ...pendingFilters, department: e.target.value })}
+                                        onChange={e => { setPendingFilters({ ...pendingFilters, department: e.target.value }); setPendingPage(1); }}
                                     />
                                     <Search className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
                                 </div>
@@ -789,7 +1066,7 @@ export const Billing = () => {
                                         <td colSpan={9} className="p-12 text-center text-slate-400 italic">No pending orders found.</td>
                                     </tr>
                                 ) : (
-                                    pendingInvoices.map((order, idx) => {
+                                    paginatedPendingInvoices.map((order, idx) => {
                                         const apt = appointments.find(a => a.id === order.appointmentId);
                                         const patient = patients.find(p => p.id === apt?.patientId);
                                         const doctor = employees.find(e => e.id === order.orderingDoctorId);
@@ -830,6 +1107,14 @@ export const Billing = () => {
                             </tbody>
                         </table>
                     </div>
+                    <Pagination
+                        currentPage={pendingPage}
+                        totalPages={Math.ceil(pendingInvoices.length / itemsPerPage)}
+                        totalItems={pendingInvoices.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setPendingPage}
+                        colorTheme="blue"
+                    />
                 </div>
             )}
 
@@ -1164,7 +1449,7 @@ export const Billing = () => {
                                                                                 <div className="font-bold text-slate-800">{s.name}</div>
                                                                                 <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
                                                                                     <span className="font-mono bg-slate-100 px-1 rounded">{s.code}</span>
-                                                                                    <span className="font-extrabold text-blue-600">${getServicePrice(s.id).toFixed(2)}</span>
+                                                                                    <span className="font-extrabold text-blue-600">{formatCurrency(getServicePrice(s.id))}</span>
                                                                                 </div>
                                                                             </div>
                                                                         ))}
@@ -1182,11 +1467,11 @@ export const Billing = () => {
                                                             </td>
                                                             <td className="p-2">
                                                                 <div className="relative">
-                                                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">$</span>
+                                                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">{getCurrencySymbol(selectedCurrency)}</span>
                                                                     <input
                                                                         type="number"
                                                                         min="0"
-                                                                        step="0.01"
+                                                                        step={selectedCurrency === 'BHD' ? "0.001" : "0.01"}
                                                                         className="w-full pl-5 pr-1 bg-transparent hover:bg-slate-100/50 focus:bg-white outline-none border border-transparent focus:border-slate-300 focus:ring-1 focus:ring-slate-100 rounded-lg py-1 text-right font-mono font-bold text-slate-700 text-xs"
                                                                         value={item.unitPrice}
                                                                         onChange={e => updateItem(idx, 'unitPrice', e.target.value)}
@@ -1214,7 +1499,7 @@ export const Billing = () => {
                                                                 />
                                                             </td>
                                                             <td className="p-3 text-right font-mono font-extrabold text-slate-800 text-xs">
-                                                                ${(item.total || 0).toFixed(2)}
+                                                                {formatCurrency(item.total || 0)}
                                                             </td>
                                                             <td className="p-3 text-center">
                                                                 <button
@@ -1295,33 +1580,33 @@ export const Billing = () => {
                                 <div className="space-y-3 font-semibold text-xs text-slate-500">
                                     <div className="flex justify-between">
                                         <span>Sub Total</span>
-                                        <span className="text-slate-700 font-mono">${patientGrossAmount.toFixed(2)}</span>
+                                        <span className="text-slate-700 font-mono">{formatCurrency(patientGrossAmount)}</span>
                                     </div>
                                     <div className="flex justify-between items-center text-red-500">
                                         <span>Discount</span>
-                                        <span className="font-mono">(${calculatedDiscount.toFixed(2)})</span>
+                                        <span className="font-mono">({formatCurrency(calculatedDiscount)})</span>
                                     </div>
                                     <div className="flex justify-between text-slate-700">
                                         <span>Tax</span>
-                                        <span className="font-mono">${calculatedTax.toFixed(2)}</span>
+                                        <span className="font-mono">{formatCurrency(calculatedTax)}</span>
                                     </div>
 
                                     <hr className="border-slate-100" />
 
                                     <div className="flex justify-between text-slate-800 text-sm font-bold">
                                         <span>Net Amount</span>
-                                        <span className="font-mono text-slate-900">${calculatedNet.toFixed(2)}</span>
+                                        <span className="font-mono text-slate-900">{formatCurrency(calculatedNet)}</span>
                                     </div>
                                     <div className="flex justify-between text-[11px] text-slate-400">
                                         <span>Round Off</span>
-                                        <span className="font-mono">${roundOff.toFixed(2)}</span>
+                                        <span className="font-mono">{formatCurrency(roundOff)}</span>
                                     </div>
 
                                     <hr className="border-slate-200" />
 
                                     <div className="flex justify-between items-center text-blue-600 text-base font-extrabold">
                                         <span>Total Amount</span>
-                                        <span className="font-mono font-black text-lg">${totalAmount.toFixed(2)}</span>
+                                        <span className="font-mono font-black text-lg">{formatCurrency(totalAmount)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1361,9 +1646,10 @@ export const Billing = () => {
                                             <div>
                                                 <label className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide mb-1 block">Amount Received *</label>
                                                 <div className="relative">
-                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">$</span>
+                                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{getCurrencySymbol(selectedCurrency)}</span>
                                                     <input
                                                         type="number"
+                                                        step={selectedCurrency === 'BHD' ? "0.001" : "0.01"}
                                                         className="w-full bg-slate-50 hover:bg-slate-100/50 focus:bg-white border border-slate-200 focus:border-blue-500 rounded-xl pl-8 pr-3 py-2 text-xs font-bold text-slate-700 outline-none transition-all font-mono"
                                                         value={amountReceived}
                                                         onChange={e => setAmountReceived(e.target.value)}
@@ -1397,7 +1683,7 @@ export const Billing = () => {
                                     {/* Balance Amount Strip */}
                                     <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex justify-between items-center text-xs font-extrabold">
                                         <span>Balance Amount</span>
-                                        <span className="font-mono text-sm">${balanceAmount.toFixed(2)}</span>
+                                        <span className="font-mono text-sm">{formatCurrency(balanceAmount)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -1454,7 +1740,7 @@ export const Billing = () => {
                         <h3 className="text-lg font-bold text-slate-800 mb-1">
                             {selectedBill.status === 'Paid' ? 'Payment History' : 'Record Payment'}
                         </h3>
-                        <p className="text-sm text-slate-500 mb-4">Invoice #{selectedBill.id.slice(-6)} • Total: ${selectedBill.totalAmount.toFixed(2)}</p>
+                        <p className="text-sm text-slate-500 mb-4">Invoice #{selectedBill.id.slice(-6)} • Total: {formatCurrency(selectedBill.totalAmount)}</p>
 
                         {/* Payment History Section */}
                         <div className={`bg-slate-50 p-4 rounded-xl border border-slate-100 mb-5 overflow-y-auto ${selectedBill.status === 'Paid' ? 'max-h-[60vh]' : 'max-h-40'}`}>
@@ -1472,7 +1758,7 @@ export const Billing = () => {
                                                     {p.reference && <span className="text-slate-400">• Ref: {p.reference}</span>}
                                                 </div>
                                             </div>
-                                            <span className="font-bold text-green-600 bg-green-50 px-2 py-1 rounded-md border border-green-100">+${p.amount.toFixed(2)}</span>
+                                            <span className="font-bold text-green-600 bg-green-50 px-2 py-1 rounded-md border border-green-100">+{formatCurrency(p.amount)}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -1489,9 +1775,9 @@ export const Billing = () => {
                                 <div>
                                     <label className="form-label">Payment Amount</label>
                                     <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">{getCurrencySymbol(selectedCurrency)}</span>
                                         <input
-                                            type="number" step="0.01"
+                                            type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"}
                                             className={`form-input pl-8 font-medium ${amountError ? 'border-red-500 focus:ring-red-200' : ''}`}
                                             value={paymentAmount}
                                             onChange={handleAmountChange}
@@ -1500,7 +1786,7 @@ export const Billing = () => {
                                     {amountError ? (
                                         <p className="text-xs text-red-500 mt-1 font-medium">{amountError}</p>
                                     ) : (
-                                        <p className="text-xs text-slate-500 mt-1">Remaining Balance: ${(selectedBill.totalAmount - selectedBill.paidAmount).toFixed(2)}</p>
+                                        <p className="text-xs text-slate-500 mt-1">Remaining Balance: {formatCurrency(selectedBill.totalAmount - selectedBill.paidAmount)}</p>
                                     )}
                                 </div>
 

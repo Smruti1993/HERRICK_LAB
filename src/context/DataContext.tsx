@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency
 } from '../types';
 import { 
     getSupabase, 
@@ -94,7 +94,7 @@ interface DataContextType {
   fetchStockLedger: (filters: { storeId: string; fromDate?: string; toDate?: string; itemCategory?: string; searchQuery?: string }) => Promise<StockLedgerEntry[]>;
   fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
   repairPh000006: (storeId: string) => Promise<void>;
-  dispensePrescription: (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>) => Promise<{ success: boolean; invoiceId?: string }>;
+  dispensePrescription: (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>, issueQty?: Record<string, number>, dispensingUom?: Record<string, string>, paymentMode?: string, referenceNo?: string, paidAmount?: number, paymentStatus?: string) => Promise<{ success: boolean; invoiceId?: string }>;
   processPharmacyReturn: (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string, taxPercentage?: number }>) => Promise<{ success: boolean; invoiceId?: string }>;
   fetchBillItems: (billId: string) => Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; taxPercentage: number; taxAmount: number; }>>;
   addVitalSignGroup: (group: VitalSignGroup) => void;
@@ -188,6 +188,7 @@ interface DataContextType {
       gross?: number;
       partyName?: string;
       description?: string;
+      paymentMode?: string;
     }
   ) => Promise<boolean>;
 
@@ -196,11 +197,38 @@ interface DataContextType {
   saveGstr2bUpload: (upload: GSTR2BUpload, invoices: GSTR2BInvoice[]) => Promise<boolean>;
   markUploadReconciled: (uploadId: string) => Promise<boolean>;
 
+  currencies: Currency[];
+  selectedCurrency: string;
+  setSelectedCurrency: (code: string) => void;
+  saveCurrency: (curr: Currency) => Promise<boolean>;
+  deleteCurrency: (id: string) => Promise<boolean>;
+  formatCurrency: (amount: number | string) => string;
+  completeDirectSalePayment: (sale: DirectSale, paymentId: string, orderId: string) => Promise<boolean>;
+
   isLoading: boolean;
   isDbConnected: boolean;
   updateDbConnection: (url: string, key: string) => void;
   disconnectDb: () => void;
 }
+
+export const getCurrencySymbol = (code: string): string => {
+  try {
+    const local = localStorage.getItem('medicore_currencies');
+    if (local) {
+      const list = JSON.parse(local);
+      const found = list.find((c: any) => c.code === code);
+      if (found) return found.symbol;
+    }
+  } catch (e) {}
+  switch (code) {
+    case 'INR': return '₹';
+    case 'SAR': return 'SAR';
+    case 'USD': return '$';
+    case 'BHD': return 'BD';
+    case 'QAR': return 'QR';
+    default: return code;
+  }
+};
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
@@ -209,6 +237,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<AppUser | null>(() => {
       const saved = localStorage.getItem('medicore_user');
       return saved ? JSON.parse(saved) : null;
+  });
+
+  // Currency State
+  const [currencies, setCurrencies] = useState<Currency[]>(() => {
+    const local = localStorage.getItem('medicore_currencies');
+    if (local) return JSON.parse(local);
+    return [
+      { id: 'c1', code: 'INR', name: 'Indian Rupee', symbol: '₹', isActive: true, isDefault: true },
+      { id: 'c2', code: 'SAR', name: 'Saudi Riyal', symbol: 'SAR', isActive: true, isDefault: false },
+      { id: 'c3', code: 'BHD', name: 'Bahraini Dinar', symbol: 'BD', isActive: true, isDefault: false },
+      { id: 'c4', code: 'USD', name: 'US Dollar', symbol: '$', isActive: true, isDefault: false },
+      { id: 'c5', code: 'QAR', name: 'Qatari Riyal', symbol: 'QR', isActive: true, isDefault: false }
+    ];
+  });
+
+  const [selectedCurrency, setSelectedCurrencyState] = useState<string>(() => {
+    return localStorage.getItem('medicore_selected_currency') || 'INR';
   });
 
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -648,6 +693,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     id: m.id,
     item_id: m.itemId,
     tax_id: m.taxId
+  });
+
+  const mapCurrencyFromDb = (c: any): Currency => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    symbol: c.symbol,
+    isActive: !!c.is_active,
+    isDefault: !!c.is_default,
+    createdAt: c.created_at
+  });
+
+  const mapCurrencyToDb = (c: Currency) => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    symbol: c.symbol,
+    is_active: c.isActive,
+    is_default: c.isDefault
   });
 
   const mapInventoryItemFromDb = (i: any): InventoryItem => ({
@@ -1328,7 +1392,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('procurement_expiry_return_items').select('*'),
           supabase.from('finance_chart_of_accounts').select('*'),
           supabase.from('finance_journal_vouchers').select('*'),
-          supabase.from('finance_journal_voucher_items').select('*')
+          supabase.from('finance_journal_voucher_items').select('*'),
+          supabase.from('currency_master').select('*')
         ]);
 
         const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
@@ -1350,7 +1415,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'procurement_expiry_returns', 'procurement_expiry_return_items',
             'finance_chart_of_accounts',
             'finance_journal_vouchers',
-            'finance_journal_voucher_items'
+            'finance_journal_voucher_items',
+            'currency_master'
         ];
 
         const [
@@ -1359,7 +1425,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
             prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes,
             pvRes, pvtRes, poRes, poiRes, grnRes, grniRes, prnRes, prniRes,
-            prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes
+            prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes, curRes
         ] = results;
 
         console.log(`Sync: Fetched ${bRes.data?.length || 0} raw bills from DB.`);
@@ -1439,6 +1505,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
          if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
          if (tmRes && tmRes.data) setTaxMasters(tmRes.data.map(mapTaxMasterFromDb));
          if (itmRes && itmRes.data) setItemTaxMappings(itmRes.data.map(mapItemTaxMappingFromDb));
+         if (curRes && curRes.data && curRes.data.length > 0) {
+           const dbCurrencies = curRes.data.map(mapCurrencyFromDb);
+           setCurrencies(dbCurrencies);
+           const defaultCurr = dbCurrencies.find((c: Currency) => c.isDefault);
+           if (defaultCurr && !localStorage.getItem('medicore_selected_currency')) {
+             setSelectedCurrencyState(defaultCurr.code);
+           }
+         }
          if (osRes && osRes.data) {
             const mappedOS = osRes.data.map((os: any) => ({
              id: os.id, storeId: os.store_id, entryDate: os.entry_date, status: os.status,
@@ -1884,7 +1958,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // --- Actions ---
 
   const showToast = (type: 'success' | 'error' | 'info', message: string) => {
-    const id = Date.now().toString();
+    const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     setToasts(prev => [...prev, { id, type, message }]);
     setTimeout(() => removeToast(id), 5000);
   };
@@ -2266,7 +2340,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         nationality: sale.nationality,
         is_insured: sale.isInsured,
         is_new_external_patient: sale.isNewExternalPatient,
-        total_amount: sale.totalAmount
+        total_amount: sale.totalAmount,
+        payment_mode: sale.paymentMode || 'Cash',
+        payment_status: sale.paymentStatus || 'paid',
+        reference_no: sale.referenceNo || null,
+        pg_order_id: sale.pgOrderId || null,
+        pg_payment_id: sale.pgPaymentId || null
       };
 
       const { data: savedSale, error: saleError } = await supabase
@@ -2306,6 +2385,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       const { error: itemsError } = await supabase.from('pharmacy_direct_sale_items').insert(dbItems);
       if (itemsError) throw itemsError;
+
+      const savedDirectSale: DirectSale = {
+        ...sale,
+        id: saleId,
+        invoiceNo: invoiceNo,
+        receiptNo: receiptNo,
+        taxAmount: totalTaxAmount,
+        items: sale.items.map((item, idx) => {
+          const dbItem = dbItems[idx];
+          return {
+            ...item,
+            taxPercentage: dbItem.tax_percentage,
+            taxAmount: dbItem.tax_amount
+          };
+        })
+      };
+
+      if (sale.paymentStatus === 'pending') {
+        showToast('info', 'Direct sale saved as pending payment.');
+        setRefreshTrigger(prev => prev + 1);
+        return { success: true, savedSale: savedDirectSale };
+      }
 
       // 3. Update Stock Ledger (STOCKOUT)
       const ledgerEntries = [];
@@ -2386,7 +2487,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           sgst: Number((totalTaxAmount / 2).toFixed(2)),
           igst: 0,
           gross: Number((sale.totalAmount - totalTaxAmount).toFixed(2)),
-          partyName: partyName || 'Cash Patient'
+          partyName: partyName || 'Cash Patient',
+          paymentMode: sale.paymentMode
         });
       } catch (jvErr) {
         console.error("Error posting automated direct sale journal voucher:", jvErr);
@@ -2394,22 +2496,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       showToast('success', 'Pharmacy Sale completed successfully.');
       setRefreshTrigger(prev => prev + 1);
-
-      const savedDirectSale: DirectSale = {
-        ...sale,
-        id: saleId,
-        invoiceNo: invoiceNo,
-        receiptNo: receiptNo,
-        taxAmount: totalTaxAmount,
-        items: sale.items.map((item, idx) => {
-          const dbItem = dbItems[idx];
-          return {
-            ...item,
-            taxPercentage: dbItem.tax_percentage,
-            taxAmount: dbItem.tax_amount
-          };
-        })
-      };
 
       return { success: true, savedSale: savedDirectSale };
 
@@ -2484,6 +2570,142 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.error('Error fetching direct sales:', error);
       showToast('error', `Failed to fetch direct sales: ${error.message}`);
       return [];
+    }
+  };
+
+  const completeDirectSalePayment = async (
+    sale: DirectSale,
+    paymentId: string,
+    orderId: string
+  ): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+
+      // 1. Retrieve the existing sale header from the DB to verify it exists
+      const { data: dbSale, error: fetchError } = await supabase
+        .from('pharmacy_direct_sales')
+        .select('*, items:pharmacy_direct_sale_items(*)')
+        .eq('sale_no', sale.saleNo)
+        .single();
+
+      if (fetchError || !dbSale) {
+        throw new Error(fetchError?.message || 'Sale record not found.');
+      }
+
+      // If already paid, return true to avoid duplicate processing
+      if (dbSale.payment_status === 'paid') {
+        return true;
+      }
+
+      // 2. Update status to 'paid', record payment IDs
+      const { error: updateError } = await supabase
+        .from('pharmacy_direct_sales')
+        .update({
+          payment_status: 'paid',
+          pg_payment_id: paymentId,
+          pg_order_id: orderId,
+          reference_no: paymentId
+        })
+        .eq('id', dbSale.id);
+
+      if (updateError) throw updateError;
+
+      // 3. Update Stock Ledger (STOCKOUT)
+      const ledgerEntries = [];
+      const localBalances = new Map<string, { quantity: number, rate: number }>();
+
+      for (const i of sale.items) {
+        const cleanBatch = (i.batchNo || '').trim().toUpperCase();
+        const itemKey = `${sale.storeId}-${i.itemId}`;
+        let currentItemBalance = 0;
+        let currentAverageRate = 0;
+
+        if (localBalances.has(itemKey)) {
+          const val = localBalances.get(itemKey)!;
+          currentItemBalance = val.quantity;
+          currentAverageRate = val.rate;
+        } else {
+          const val = await getItemValuation(sale.storeId, i.itemId);
+          currentItemBalance = val.quantity;
+          currentAverageRate = val.rate;
+        }
+
+        // Resolve Sales Conversion Factor
+        const itemDef = inventoryItems.find(inv => inv.id === i.itemId);
+        const isSalesUom = i.unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+        // Batch-Specific Validation
+        const batchBalance = await getBatchStockBalance(sale.storeId, i.itemId, cleanBatch);
+        const qty = Number(i.quantity || 0) * salesCF;
+        if (batchBalance < qty) {
+            throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${itemDef?.itemName || i.itemId} (Available in batch: ${batchBalance}, Required: ${qty})`);
+        }
+
+        const newBalance = currentItemBalance - qty;
+        localBalances.set(itemKey, { quantity: newBalance, rate: currentAverageRate });
+
+        const valuationRate = currentAverageRate;
+
+        ledgerEntries.push({
+          store_id: sale.storeId,
+          item_id: i.itemId,
+          transaction_type: 'STOCKOUT',
+          ref_type: 'DIRECT SALE',
+          ref_doc_no: sale.saleNo,
+          ref_doc_date: sale.saleDate,
+          stock_in_quantity: 0,
+          stock_out_quantity: qty,
+          closing_stock: newBalance,
+          closing_stock_rate: valuationRate,
+          closing_stock_value: newBalance * valuationRate,
+          batch_no: cleanBatch,
+          batch_date: i.batchDate || null,
+          expiry_date: i.expiryDate || null,
+          currency: 'SAR'
+        });
+      }
+
+      const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert(ledgerEntries);
+      if (ledgerError) throw ledgerError;
+
+      // Trigger automatic PO checks
+      for (const i of sale.items) {
+        const itemKey = `${sale.storeId}-${i.itemId}`;
+        const val = localBalances.get(itemKey);
+        if (val) {
+          await checkAndAutoRaisePO(sale.storeId, i.itemId, val.quantity);
+        }
+      }
+
+      // Calculate total tax amount from dbSale.items
+      const totalTaxAmount = (dbSale.items || []).reduce((sum: number, item: any) => sum + Number(item.tax_amount || 0), 0);
+
+      // Auto JV Posting
+      try {
+        const partyName = `${sale.firstName} ${sale.lastName || ''}`.trim();
+        await postAutoJournalVoucher('PHARMACY_SALE', dbSale.id, sale.saleNo, {
+          net: sale.totalAmount,
+          tax: totalTaxAmount,
+          cgst: Number((totalTaxAmount / 2).toFixed(2)),
+          sgst: Number((totalTaxAmount / 2).toFixed(2)),
+          igst: 0,
+          gross: Number((sale.totalAmount - totalTaxAmount).toFixed(2)),
+          partyName: partyName || 'Cash Patient',
+          paymentMode: sale.paymentMode
+        });
+      } catch (jvErr) {
+        console.error("Error posting automated direct sale journal voucher:", jvErr);
+      }
+
+      showToast('success', 'Pharmacy Sale payment completed successfully.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (error: any) {
+      console.error('Error completing direct sale payment:', error);
+      showToast('error', `Payment completion failed: ${error.message}`);
+      return false;
     }
   };
 
@@ -3980,7 +4202,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
-  const dispensePrescription = async (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>): Promise<{ success: boolean; invoiceId?: string }> => {
+  const dispensePrescription = async (
+      prescriptionId: string, 
+      storeId: string, 
+      allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>, 
+      issueQty?: Record<string, number>,
+      dispensingUom?: Record<string, string>,
+      paymentMode?: string,
+      referenceNo?: string,
+      paidAmount?: number,
+      paymentStatus?: string
+  ): Promise<{ success: boolean; invoiceId?: string }> => {
       if (!requireDb()) return { success: false };
       const supabase = getSupabase();
       
@@ -4006,10 +4238,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   
                   // Resolve Sales Conversion Factor (e.g. 1 STRIP = 10 Tablets)
                   const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
-                  const isSalesUom = item.units?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                  const selectedUom = dispensingUom?.[item.id] || item.units || 'EACH';
+                  const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
                   const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
 
-                  const qty = Number(item.totalQty || 0) * salesCF;
+                  // Use issueQty if provided, otherwise fall back to totalQty
+                  const issueQtyForItem = issueQty?.[item.id];
+                  const dispensedQty = issueQtyForItem !== undefined ? Number(issueQtyForItem) : Number(item.totalQty || 0);
+                  const qty = dispensedQty * salesCF;
                   if (currentBatchBalance < qty) {
                       throw new Error(`Insufficient stock in Batch ${cleanBatch} for ${item.itemName} (Available in batch: ${currentBatchBalance}, Required: ${qty})`);
                   }
@@ -4069,13 +4305,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               
               prescription.items.filter(item => dispensedItemIds.includes(item.id)).forEach(item => {
                   const allocation = allocatedBatches[item.id];
-                  const qty = Number(item.totalQty || 0);
+                  const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                  const selectedUom = dispensingUom?.[item.id] || item.units || 'EACH';
+                  const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                  const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+                  const iqtyForItem = issueQty?.[item.id];
+                  const qty = iqtyForItem !== undefined ? Number(iqtyForItem) : Number(item.totalQty || 0);
                   const rate = Number(allocation.rate || 0);
+                  const itemPrice = rate * salesCF;
                   
                   const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                   const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                   const taxPercent = tax?.percentage || 0;
-                  const total = Number((qty * rate).toFixed(2));
+                  const total = Number((qty * itemPrice).toFixed(2));
                   const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
                   
                   transactionTotal += total;
@@ -4087,21 +4330,45 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               console.log(`Dispensing: Trans Total=${transactionTotal}, Trans Tax=${transactionTax}, Old Total=${existingHeaderTotal}, New Total=${newHeaderTotal}`);
 
+              // Find previously dispensed quantity for all items under this prescription
+              const prescriptionBills = bills.filter(b => b.prescriptionId === prescription.id && b.status !== 'Cancelled');
+
               // Update items status and pricing info
               const itemUpdates = prescription.items.filter(item => dispensedItemIds.includes(item.id)).map(item => {
                   const allocation = allocatedBatches[item.id];
-                  const qty = Number(item.totalQty || 0);
+                  const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                  const selectedUom = dispensingUom?.[item.id] || item.units || 'EACH';
+                  const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                  const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+                  const iqtyForItem = issueQty?.[item.id];
+                  const qty = iqtyForItem !== undefined ? Number(iqtyForItem) : Number(item.totalQty || 0);
                   const rate = Number(allocation.rate || 0);
+                  const itemPrice = rate * salesCF;
                   const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                   const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                   const taxPercent = tax?.percentage || 0;
-                  const total = Number((qty * rate).toFixed(2));
+                  const total = Number((qty * itemPrice).toFixed(2));
                   const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
+                  
+                  // Calculate cumulative dispensed quantity (past bills + current transaction) in base units
+                  const previouslyDispensed = prescriptionBills.reduce((sum, b) => {
+                      const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                      return sum + matchingItems.reduce((acc, curr) => {
+                          const isSales = curr.itemType?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                          const cf = isSales ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                          return acc + (curr.quantity * cf);
+                      }, 0);
+                  }, 0);
+
+                  const qtyInBase = qty * salesCF;
+                  const totalDispensedQtyInBase = previouslyDispensed + qtyInBase;
+                  const itemStatus = totalDispensedQtyInBase < Number(item.totalQty || 0) ? 'Partially Dispensed' : 'Dispensed';
 
                   return supabase.from('prescription_items')
                       .update({ 
-                          status: 'Dispensed',
-                          unit_price: rate,
+                          status: itemStatus,
+                          unit_price: itemPrice,
                           tax_percentage: taxPercent,
                           tax_amount: taxAmount,
                           total_amount: total
@@ -4111,7 +4378,30 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               await Promise.all(itemUpdates);
               
-              const allDispensed = prescription.items.every(item => item.status === 'Dispensed' || dispensedItemIds.includes(item.id));
+              // Fully dispensed only if every item's cumulative dispensed qty is >= its total required qty
+              const allDispensed = prescription.items.every(item => {
+                  const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                  const previouslyDispensed = prescriptionBills.reduce((sum, b) => {
+                      const matchingItems = b.items.filter(bi => bi.itemId === item.itemId);
+                      return sum + matchingItems.reduce((acc, curr) => {
+                          const isSales = curr.itemType?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                          const cf = isSales ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                          return acc + (curr.quantity * cf);
+                      }, 0);
+                  }, 0);
+
+                  let currentDispensedInBase = 0;
+                  if (dispensedItemIds.includes(item.id)) {
+                      const selectedUom = dispensingUom?.[item.id] || item.units || 'EACH';
+                      const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                      const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                      const iqty = issueQty?.[item.id];
+                      currentDispensedInBase = (iqty !== undefined ? Number(iqty) : Number(item.totalQty || 0)) * salesCF;
+                  }
+
+                  const totalDispensedQtyInBase = previouslyDispensed + currentDispensedInBase;
+                  return totalDispensedQtyInBase >= Number(item.totalQty || 0);
+              });
               const newStatus = allDispensed ? 'Dispensed' : 'Partially Dispensed';
               
               const totalPrescriptionTax = (Number(prescription.taxAmount) || 0) + transactionTax;
@@ -4138,17 +4428,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const invoiceNo = await generateSequentialInvoiceNumber(storeId);
               const billId = crypto.randomUUID();
               
+              const finalPaymentStatus = paymentStatus || 'Unpaid';
+              const finalPaidAmount = paidAmount !== undefined ? Number(paidAmount) : 0;
+
               const newBill: any = {
                   id: billId,
                   patient_id: prescription.patientId,
                   appointment_id: prescription.appointmentId || null,
                   date: new Date().toISOString(),
-                  status: 'Unpaid',
+                  status: finalPaymentStatus,
                   total_amount: transactionTotal,
                   tax_amount: transactionTax,
-                  paid_amount: 0,
+                  paid_amount: finalPaidAmount,
                   invoice_no: invoiceNo,
-                  created_by: user?.username || user?.email || 'admin'
+                  created_by: user?.username || user?.email || 'admin',
+                  is_pharmacy: true,
+                  prescription_id: prescription.id,
+                  payment_mode: paymentMode || null,
+                  amount_received: finalPaidAmount,
+                  reference_no: referenceNo || null
               };
 
               const { error: billError } = await supabase.from('bills').insert(newBill);
@@ -4157,17 +4455,40 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   throw new Error(`Invoice generation failed: ${billError.message}`);
               }
 
+              // Record payment if paidAmount > 0
+              if (finalPaidAmount > 0) {
+                  const paymentId = crypto.randomUUID();
+                  const { error: payError } = await supabase.from('payments').insert({
+                      id: paymentId,
+                      bill_id: billId,
+                      date: newBill.date,
+                      amount: finalPaidAmount,
+                      method: paymentMode === 'Card' || paymentMode === 'UPI' ? 'Online' : (paymentMode || 'Cash'),
+                      reference: referenceNo || null
+                  });
+                  if (payError) {
+                      console.error("Failed to insert payment record during dispensePrescription:", payError);
+                  }
+              }
+
               console.log("Pharmacy bill header created successfully:", billId);
                   const billItems = prescription.items
                     .filter(item => dispensedItemIds.includes(item.id))
                     .map(item => {
                         const allocation = allocatedBatches[item.id];
-                        const qty = Number(item.totalQty || 0);
+                        const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                        const selectedUom = dispensingUom?.[item.id] || item.units || 'EACH';
+                        const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                        const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+
+                        const iqtyForBill = issueQty?.[item.id];
+                        const qty = iqtyForBill !== undefined ? Number(iqtyForBill) : Number(item.totalQty || 0);
                         const rate = Number(allocation.rate || 0);
+                        const itemPrice = rate * salesCF;
                         const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
                         const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
                         const taxPercent = tax?.percentage || 0;
-                        const total = Number((qty * rate).toFixed(2));
+                        const total = Number((qty * itemPrice).toFixed(2));
                         const taxAmount = Number((total * taxPercent / (100 + taxPercent)).toFixed(2));
                         return {
                             id: crypto.randomUUID(),
@@ -4176,10 +4497,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                             batch_no: allocation.batchNo,
                             description: item.itemName || '',
                             quantity: qty,
-                            unit_price: rate,
+                            unit_price: itemPrice,
                             tax_percentage: taxPercent,
                             tax_amount: taxAmount,
-                            total: total
+                            total: total,
+                            item_type: selectedUom
                         };
                     });
                   
@@ -4202,14 +4524,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       patientId: prescription.patientId,
                       appointmentId: prescription.appointmentId,
                       date: newBill.date,
-                      status: 'Unpaid',
+                      status: finalPaymentStatus as any,
                       totalAmount: transactionTotal,
                       taxAmount: transactionTax,
-                      paidAmount: 0,
+                      paidAmount: finalPaidAmount,
                       isPharmacy: true,
                       prescriptionId: prescriptionId,
                       doctorId: prescription.doctorId,
                       createdBy: user?.username || user?.email || 'admin',
+                      paymentMode: paymentMode,
+                      amountReceived: finalPaidAmount,
+                      referenceNo: referenceNo,
                       items: billItems.map(bi => ({
                           id: bi.id,
                           description: bi.description || '',
@@ -4219,9 +4544,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                           taxAmount: bi.tax_amount,
                           total: bi.total,
                           itemId: bi.item_id,
-                          batchNo: bi.batch_no
+                          batchNo: bi.batch_no,
+                          itemType: bi.item_type
                       })),
-                      payments: []
+                      payments: finalPaidAmount > 0 ? [{
+                          id: crypto.randomUUID(),
+                          date: newBill.date,
+                          amount: finalPaidAmount,
+                          method: paymentMode === 'Card' || paymentMode === 'UPI' ? 'Online' : (paymentMode as any),
+                          reference: referenceNo || ''
+                      }] : []
                   };
                   setBills(prev => [localBill, ...prev]);
 
@@ -4231,7 +4563,32 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       ...p,
                       status: newStatus as any,
                       totalAmount: newHeaderTotal,
-                      items: p.items.map(i => dispensedItemIds.includes(i.id) ? { ...i, status: 'Dispensed' as any } : i)
+                      items: p.items.map(i => {
+                          const itemDef = inventoryItems.find(inv => inv.id === i.itemId);
+                          // Calculate cumulative quantity dispensed for local state update
+                          const previouslyDispensed = prescriptionBills.reduce((sum, b) => {
+                              const matchingItems = b.items.filter(bi => bi.itemId === i.itemId);
+                              return sum + matchingItems.reduce((acc, curr) => {
+                                  const isSales = curr.itemType?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                                  const cf = isSales ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                                  return acc + (curr.quantity * cf);
+                              }, 0);
+                          }, 0);
+
+                          let currentDispensedInBase = 0;
+                          if (dispensedItemIds.includes(i.id)) {
+                              const selectedUom = dispensingUom?.[i.id] || i.units || 'EACH';
+                              const isSalesUom = selectedUom.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                              const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                              const iqtyLocal = issueQty?.[i.id];
+                              const issuedLocal = iqtyLocal !== undefined ? Number(iqtyLocal) : Number(i.totalQty || 0);
+                              currentDispensedInBase = issuedLocal * salesCF;
+                          }
+
+                          const totalDispensedQtyInBase = previouslyDispensed + currentDispensedInBase;
+                          const localStatus = totalDispensedQtyInBase < Number(i.totalQty || 0) ? 'Partially Dispensed' : 'Dispensed';
+                          return { ...i, status: localStatus as any };
+                      })
                   };
               }));
               
@@ -4247,7 +4604,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   sgst: Number((transactionTax / 2).toFixed(2)),
                   igst: 0,
                   gross: Number((transactionTotal - transactionTax).toFixed(2)),
-                  partyName: patientName
+                  partyName: patientName,
+                  paymentMode: paymentMode || 'Cash'
                 });
               } catch (jvErr) {
                 console.error("Error posting automated prescription dispense journal voucher:", jvErr);
@@ -4909,6 +5267,73 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const setSelectedCurrency = (code: string) => {
+    setSelectedCurrencyState(code);
+    localStorage.setItem('medicore_selected_currency', code);
+    showToast('info', `Active currency set to ${code}`);
+  };
+
+  const saveCurrency = async (curr: Currency): Promise<boolean> => {
+    setCurrencies(prev => {
+      const updated = [...prev];
+      const idx = updated.findIndex(c => c.id === curr.id || c.code === curr.code);
+      if (idx > -1) {
+        updated[idx] = curr;
+      } else {
+        updated.push(curr);
+      }
+      localStorage.setItem('medicore_currencies', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected && checkConfigured()) {
+      try {
+        const { error } = await getSupabase()
+          .from('currency_master')
+          .upsert(mapCurrencyToDb(curr));
+        if (error) throw error;
+      } catch (err: any) {
+        console.error('Error saving currency to DB:', err);
+        showToast('error', `DB Error saving currency: ${err.message}`);
+        return false;
+      }
+    }
+    showToast('success', `Currency ${curr.code} saved.`);
+    return true;
+  };
+
+  const deleteCurrency = async (id: string): Promise<boolean> => {
+    setCurrencies(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      localStorage.setItem('medicore_currencies', JSON.stringify(updated));
+      return updated;
+    });
+
+    if (isDbConnected && checkConfigured()) {
+      try {
+        const { error } = await getSupabase()
+          .from('currency_master')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
+      } catch (err: any) {
+        console.error('Error deleting currency from DB:', err);
+        showToast('error', `DB Error deleting currency: ${err.message}`);
+        return false;
+      }
+    }
+    showToast('info', 'Currency deleted.');
+    return true;
+  };
+
+  const formatCurrency = (amount: number | string): string => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(num)) return '0.00';
+    const symbol = getCurrencySymbol(selectedCurrency);
+    const decimals = selectedCurrency === 'BHD' ? 3 : 2;
+    return `${symbol} ${num.toFixed(decimals)}`;
+  };
+
   const saveItemTaxMapping = async (mapping: ItemTaxMapping) => {
     setItemTaxMappings(prev => {
         const index = prev.findIndex(m => m.id === mapping.id);
@@ -5148,6 +5573,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       gross?: number;
       partyName?: string;
       description?: string;
+      paymentMode?: string;
     }
   ): Promise<boolean> => {
     // Generate sequential voucher number JV-YYYYMMDD-XXXX
@@ -5229,7 +5655,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
       }
     } else if (type === 'PHARMACY_SALE' || type === 'OP_DISPENSE') {
-      const cashAcc = getAccountByCode('111000');
+      const isDigital = amountDetails.paymentMode === 'Card' || amountDetails.paymentMode === 'UPI' || amountDetails.paymentMode === 'Online';
+      const paymentAcc = isDigital ? getAccountByCode('112000') : getAccountByCode('111000');
       const salesRevenueAcc = getAccountByCode('410000');
       const outputCgstAcc = getAccountByCode('221000');
       const outputSgstAcc = getAccountByCode('222000');
@@ -5244,13 +5671,13 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const gross = amountDetails.gross ?? Number((amountDetails.net - taxTotal).toFixed(2));
       const net = amountDetails.net;
 
-      if (cashAcc && net > 0) {
+      if (paymentAcc && net > 0) {
         items.push({
           id: crypto.randomUUID(),
-          accountId: cashAcc.id,
+          accountId: paymentAcc.id,
           postingNature: 'Debit',
           amount: net,
-          description: `Cash collections for ${type} ${refDocNo}`
+          description: `${amountDetails.paymentMode || 'Cash'} collections for ${type} ${refDocNo}`
         });
       }
 
@@ -5793,9 +6220,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       chartOfAccounts, saveChartOfAccount, deleteChartOfAccount,
       journalVouchers, saveJournalVoucher, deleteJournalVoucher, postAutoJournalVoucher,
       gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled,
+      currencies, selectedCurrency, setSelectedCurrency, saveCurrency, deleteCurrency, formatCurrency, completeDirectSalePayment,
       toasts, showToast, addToast, removeToast,
       isLoading, isDbConnected, updateDbConnection, disconnectDb
-
     }}>
       {children}
     </DataContext.Provider>

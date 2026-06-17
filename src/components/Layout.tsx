@@ -251,7 +251,11 @@ export const Layout = () => {
                 {toast.type === 'info' && <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>}
               </div>
               <p className="flex-1 text-sm font-medium">{toast.message}</p>
-              <button onClick={() => removeToast(toast.id)} className="ml-3 text-slate-400 hover:text-slate-600 transition-colors">
+              <button 
+                type="button"
+                onClick={() => removeToast(toast.id)} 
+                className="ml-3 p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors focus:outline-none"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>

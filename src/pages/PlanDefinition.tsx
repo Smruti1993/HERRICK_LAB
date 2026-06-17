@@ -69,7 +69,7 @@ interface PolicyItem {
 }
 
 export const PlanDefinition: React.FC = () => {
-    const { organizations, branches, showToast, serviceDefinitions, drugGenerics, isDbConnected } = useData();
+    const { organizations, branches, showToast, serviceDefinitions, drugGenerics, isDbConnected, selectedCurrency, formatCurrency } = useData();
 
     // Tab management inside Create/Edit Mode
     const [subTab, setSubTab] = useState<'policy' | 'policyRule' | 'classHospitalMapping'>('policy');
@@ -376,7 +376,7 @@ export const PlanDefinition: React.FC = () => {
             tariffValue: ruleTariffClassValue,
             dayOfService: ruleDayOfService,
             exclude: ruleExclusion,
-            patientCoPay: `${rulePatientCoPay}${rulePatientCoPayIsPercent ? '%' : ' SAR'}`,
+            patientCoPay: `${rulePatientCoPay}${rulePatientCoPayIsPercent ? '%' : ` ${selectedCurrency}`}`,
             sponsorPay: `${ruleSponsorPayment}%`,
             active: ruleActive,
             groupName: ruleGroup
@@ -858,7 +858,7 @@ export const PlanDefinition: React.FC = () => {
                                     </div>
                                     <div>
                                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Patient Amt</label>
-                                        <input type="number" step="0.1" value={patientAmt} onChange={(e) => setPatientAmt(Number(e.target.value))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none" />
+                                        <input type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"} value={patientAmt} onChange={(e) => setPatientAmt(Number(e.target.value))} className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none" />
                                     </div>
                                 </div>
                             </div>
@@ -1012,8 +1012,8 @@ export const PlanDefinition: React.FC = () => {
                                         <input type="text" value={ruleTariffClassValue} onChange={(e) => setRuleTariffClassValue(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700" />
                                     </div>
                                     <div>
-                                        <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Amount Limit (SAR)</label>
-                                        <input type="number" value={ruleAmountLimit} onChange={(e) => setRuleAmountLimit(Number(e.target.value))} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700" />
+                                        <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Amount Limit ({selectedCurrency})</label>
+                                        <input type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"} value={ruleAmountLimit} onChange={(e) => setRuleAmountLimit(Number(e.target.value))} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700" />
                                     </div>
                                     <div>
                                         <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider mb-1">Quantity Limit</label>
@@ -1138,17 +1138,17 @@ export const PlanDefinition: React.FC = () => {
                                         <input type="text" value={macCircleName} onChange={(e) => setMacCircleName(e.target.value)} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" placeholder="Gold Circle" />
                                     </div>
                                     <div>
-                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Patient Max Amount (SAR) <span className="text-red-500">*</span></label>
-                                        <input type="number" value={macPatMaxAmt} onChange={(e) => setMacPatMaxAmt(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
+                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Patient Max Amount ({selectedCurrency}) <span className="text-red-500">*</span></label>
+                                        <input type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"} value={macPatMaxAmt} onChange={(e) => setMacPatMaxAmt(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
                                     </div>
                                     <div>
-                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Minimum Amount (SAR)</label>
-                                        <input type="number" value={macMinimumAmt} onChange={(e) => setMacMinimumAmt(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
+                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Minimum Amount ({selectedCurrency})</label>
+                                        <input type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"} value={macMinimumAmt} onChange={(e) => setMacMinimumAmt(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
                                     </div>
 
                                     <div>
-                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Max Approval Limit (SAR)</label>
-                                        <input type="number" value={macMaxApprovalLimit} onChange={(e) => setMacMaxApprovalLimit(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
+                                        <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Max Approval Limit ({selectedCurrency})</label>
+                                        <input type="number" step={selectedCurrency === 'BHD' ? "0.001" : "0.01"} value={macMaxApprovalLimit} onChange={(e) => setMacMaxApprovalLimit(Number(e.target.value))} className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700" />
                                     </div>
                                     <div>
                                         <label className="block text-[8px] font-black text-slate-500 uppercase tracking-wider mb-1">Branch</label>
@@ -1204,9 +1204,9 @@ export const PlanDefinition: React.FC = () => {
                                                         <td className="px-4 py-1.5 text-blue-600">{m.className}</td>
                                                         <td className="px-4 py-1.5 text-slate-600">{m.circleName}</td>
                                                         <td className="px-4 py-1.5 text-slate-500">{m.branch}</td>
-                                                        <td className="px-4 py-1.5 text-slate-800">{m.patMaxAmt} SAR</td>
-                                                        <td className="px-4 py-1.5 text-slate-500">{m.minimumAmt} SAR</td>
-                                                        <td className="px-4 py-1.5 text-emerald-600">{m.approvalLimit} SAR</td>
+                                                        <td className="px-4 py-1.5 text-slate-800">{formatCurrency(m.patMaxAmt)}</td>
+                                                        <td className="px-4 py-1.5 text-slate-500">{formatCurrency(m.minimumAmt)}</td>
+                                                        <td className="px-4 py-1.5 text-emerald-600">{formatCurrency(m.approvalLimit)}</td>
                                                         <td className="px-4 py-1.5"><span className="px-1.5 py-0.5 bg-slate-100 rounded text-[9px]">{m.visitType}</span></td>
                                                         <td className="px-4 py-1.5 text-right">
                                                             <button type="button" onClick={() => handleRemoveMac(m.id)} className="p-1 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-3.5 h-3.5" /></button>

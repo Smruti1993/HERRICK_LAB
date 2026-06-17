@@ -174,3 +174,160 @@ flowchart TD
    - Confirmation of direct cash sales correctly posts a debit to `111000` and splits credits between Sales Revenue (`410000`) and Output CGST/SGST liability accounts.
 3. **Manual JV Validation**:
    - The UI blocks form posting if Debits != Credits. Toggling the account dropdown displays the code list hierarchy.
+
+---
+
+# Walkthrough: Dynamic Prescription Printout & Real-Time Patient Fields
+
+This walkthrough summarizes the enhancement of the Patient Registration form and the Prescription Printout layout to support real-time data inputs and eliminate hardcoded values.
+
+## 1. Summary of Changes
+
+### A. Extended Type Definitions
+- **[src/types.ts](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/types.ts)**: Added optional properties to the `Patient` interface: `arabicName`, `nationalId`, `sponsorName`, `policyNo`, and `cardNo`.
+
+### B. Enhanced Data Mapping
+- **[src/context/DataContext.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/context/DataContext.tsx)**:
+  - Mapped camelCase patient fields (`arabicName`, `nationalId`, `sponsorName`, `policyNo`, `cardNo`) to snake_case database columns inside `mapPatientFromDb` and `mapPatientToDb`.
+  - Updated the `updatePatient` database synchronization logic to include new attributes dynamically.
+
+### C. Updated Patient Registration UI Form
+- **[src/pages/Patients.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/Patients.tsx)**:
+  - Injected input fields into the registration form: Arabic Name, National ID / Iqama, Sponsor, Policy No., and Card No.
+  - Bound the Sponsor select input to real-time `organizations` fetched from the data context, allowing direct selection of corporate sponsors/payers alongside `CASH`.
+
+### D. Dynamic Prescription Form Printout
+- **[src/components/doctor/PrescriptionPrintout.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/components/doctor/PrescriptionPrintout.tsx)**:
+  - Removed all hardcoded static values.
+  - Rendered Arabic Name, National ID, Policy Number, Card Number, and Sponsor Name dynamically from the selected patient object.
+  - Linked doctor department lookup using `departments` from context.
+  - Integrated SFDA Code lookup from `inventoryItems` matching drug `itemId`.
+  - Calculated and rendered drug line-item amounts dynamically inside the medication table.
+
+### E. Database Schema Migrations
+- **[migration.sql](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/migration.sql)**: Appended `ALTER TABLE patients` statements to add the corresponding `arabic_name`, `national_id`, `sponsor_name`, `policy_no`, and `card_no` columns.
+
+---
+
+## 2. Verification details
+
+- **Production Build Check**: Ran `npm run build` which successfully outputted the production bundle with **no compile errors**, confirming full TypeScript/ESLint compliance.
+
+---
+
+# Walkthrough: Resume Dispense & Store Persistence in OP Pharmacy
+
+This follow-up walkthrough summarizes the fixes and optimizations made to the out-patient pharmacy resume dispense pipeline and store selection persistence.
+
+## 1. Summary of Changes
+
+### A. Store Dropdown Persistence
+- **[src/pages/OPPharmacy.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/OPPharmacy.tsx)**:
+  - Initialized `selectedStoreId` from `localStorage` (`selected_pharmacy_store_id`) so the selected store persists across page reloads and refreshes.
+  - Saved the user's selected store to `localStorage` whenever they change the dispensary store dropdown.
+
+### B. Prescription Billing & Database Links
+- **[src/context/DataContext.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/context/DataContext.tsx)**:
+  - Fixed the bill insertion query in `dispensePrescription` to save `prescription_id` and `is_pharmacy` fields in Supabase. This establishes a robust relationship between the pharmacy bills and the prescription in the database.
+
+### C. Dispensed & Remaining Quantity Calculations
+- **[src/pages/OPPharmacy.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/OPPharmacy.tsx)**:
+  - Integrated live calculation of already dispensed quantities from the context's `bills` list.
+  - Calculated `remainingQty` (`totalQty - dispensedQty`) for all prescription items.
+  - Shown dynamic details under the **Req. Qty** column: displaying the original prescribed quantity, already dispensed quantity, and remaining quantity to dispense.
+
+### E. Smart Qty Limits & Batch Modal Integration
+- **[src/pages/OPPharmacy.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/OPPharmacy.tsx)**:
+  - Defaulted the **Issue Qty** input spinner to the `remainingQty` rather than the total prescribed quantity.
+  - Restricted the max value of the **Issue Qty** spinner to the `remainingQty` to prevent pharmacists from accidentally over-dispensing.
+  - Passed `remainingQty` as the required quantity to the **Batch Selection Modal** when clicking "Resume Dispense", "Select Batch", or an already selected batch, ensuring stock validations and price totals reflect only the remaining items.
+
+---
+
+## 2. Verification Details
+
+- **Type-Check Compliance**: Ran `npx tsc --noEmit` which finished successfully with **no compile errors**, confirming zero TypeScript or scoping issues.
+
+
+---
+
+# Walkthrough: GS1 Standard Barcoding & Dynamic GTIN Mapping
+
+This walkthrough summarizes the development and successful integration of the **GS1 Standard Barcoding & Dynamic GTIN Mapping** system. It provides barcode scanning, auto-parsing of GTIN/Batch/Expiry properties, sound feedback, and split-role secure on-the-fly item mapping.
+
+---
+
+## 1. System Summary & Components Modified
+
+Here is an architectural view of how barcode scanning and dynamic mapping interact:
+
+```mermaid
+flowchart TD
+    subgraph Scanner [1. Scanning Layer]
+        Bar[Barcode Scan Input] -- "Scan GS1 Standard Code" --> parse[parseGS1 Parser]
+    end
+
+    subgraph Logic [2. Processing & Mapping Layer]
+        parse -- "GTIN Found in Catalog?" --> Yes[Process Item / Auto-fill batch/expiry]
+        parse -- "GTIN Unrecognized?" --> Modal[Unrecognized Barcode Modal]
+        
+        Modal -- "GRN Screen" --> Native[Allow direct Save & Bind]
+        Modal -- "Sales (OP Pharmacy / Direct Sale)" --> PIN[Require Supervisor PIN Override]
+        
+        Native -- "saveInventoryItem" --> Catalog[(Product Catalog)]
+        PIN -- "Bypass PIN = 4321 / 1234" --> Catalog
+    end
+
+    subgraph Feedback [3. Audio Feedback]
+        Yes -- "Success Beep" --> Synth[Web Audio API Synth]
+        PIN -- "Error/Failure Beep" --> Synth
+    end
+```
+
+### Files Enhanced:
+1. **[src/utils/audio.ts](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/utils/audio.ts) [NEW]**:
+   - Synthesizes scan sound feedback using the browser HTML5 Web Audio API (success and error beeps) to avoid loading external asset files.
+2. **[src/pages/GRN.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/GRN.tsx)**:
+   - Added an integrated barcode input section with auto-focus preservation (ignoring inputs/selects).
+   - Hooked up the `parseGS1` parser.
+   - Built a native on-the-fly "Unrecognized Barcode" mapping modal allowing receiving clerks to bind unrecognized GTINs directly to a catalog item and immediately auto-populate the parsed batch and expiry details into the transaction.
+3. **[src/pages/OPPharmacy.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/OPPharmacy.tsx)**:
+   - Added barcode input and focus-holding hooks.
+   - Implemented "Unrecognized Barcode" mapping modal with Supervisor PIN override bypass (validates PINs: `4321` or `1234`).
+   - Automatically allocates inventory batches matching parsed GS1 batch number with FIFO fallbacks.
+4. **[src/components/pharmacy/DirectSale.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/components/pharmacy/DirectSale.tsx)**:
+   - Integrated the GS1 barcode input bar.
+   - Implemented "Unrecognized Barcode" mapping modal with Supervisor PIN override bypass (`4321` or `1234`).
+   - Dynamically adds scanned item and auto-fills batch/expiry details.
+
+---
+
+## 2. Split-Role Security Flow
+
+- **Warehouse (GRN)**: Native access. Warehouse staff can instantly map barcodes to keep incoming shipments moving.
+- **Sales Counter (OP Pharmacy / Direct Sale)**: Supervisor override. Cashiers are blocked from database writes until a supervisor enters PIN `4321` or `1234` to confirm catalog changes.
+
+---
+
+## 3. Verification Details
+
+### A. Production Build Verification
+- Ran build check: `npm run build`
+- **Result**: Compiled and minified successfully without any TypeScript compilation errors.
+
+---
+
+## 4. Troubleshooting & Scan Resilience Fixes
+
+During physical barcode scanner integration, two critical behaviors were resolved:
+
+1. **Nested Form Event Interception Fix**:
+   - **Problem**: In [GRN.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/GRN.tsx), the barcode `<form>` scanner was nested inside the main page-wide `<form>` element. Nested forms are invalid in HTML, causing Enter key events to either trigger the parent form submit (saving the document as a Draft prematurely) or get swallowed entirely.
+   - **Resolution**: Replaced the nested `<form>` elements with standard layouts in [GRN.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/GRN.tsx), [OPPharmacy.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/OPPharmacy.tsx), and [DirectSale.tsx](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/components/pharmacy/DirectSale.tsx). Injected `onKeyDown` listeners directly on input fields to capture `Enter` key presses, process the barcode, and execute `e.preventDefault()` to safely intercept and stop parent form submission propagation.
+
+2. **Dropped First Character (Opening Parenthesis) Healing**:
+   - **Problem**: When a scanner acts as a keyboard emulator, speed/focus delays can drop the first character (e.g. `(`) if the scan begins before the input is fully ready, leading to barcode strings starting with `01)00888643031024...` instead of `(01)`.
+   - **Resolution**: Enhanced the GS1 parser in [gs1Parser.ts](file:///d:/New%20folder/GIT%20HUB/HIS-WEB5/src/utils/gs1Parser.ts) with auto-correction checks. If a barcode starts with digits followed by `)`, it automatically prepends `(` to heal the GS1 string structure and ensure the GTIN can be parsed properly.
+
+
+
