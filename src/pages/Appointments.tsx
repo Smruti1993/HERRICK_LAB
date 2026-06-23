@@ -4,6 +4,13 @@ import { useData } from '../context/DataContext';
 import { analyzeSymptoms } from '../services/geminiService';
 import { Sparkles, Loader2, Calendar as CalendarIcon, Clock, Filter, RefreshCw, XCircle, AlertTriangle, ChevronLeft, ChevronRight, User, Search, X, Plus } from 'lucide-react';
 
+const getTodayStr = () => {
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    return localToday.toISOString().split('T')[0];
+};
+
 // --- Mini Calendar Component ---
 const MiniCalendar = ({ selectedDate, onDateSelect }: { selectedDate: Date, onDateSelect: (d: Date) => void }) => {
     const [viewDate, setViewDate] = useState(new Date(selectedDate));
@@ -147,6 +154,11 @@ const BookingModal = ({
             return;
         }
         
+        if (formData.date < getTodayStr()) {
+            showToast('error', 'Cannot book appointments on past dates');
+            return;
+        }
+        
         bookAppointment({
             id: Date.now().toString(),
             patientId: selectedPatient,
@@ -231,7 +243,13 @@ const BookingModal = ({
                         <div className="space-y-1">
                             <label className="block text-slate-600">Appointment Date</label>
                             <div className="flex gap-1">
-                                <input type="date" className="form-input py-1" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} />
+                                <input 
+                                    type="date" 
+                                    className="form-input py-1" 
+                                    value={formData.date} 
+                                    min={getTodayStr()} 
+                                    onChange={e => setFormData({...formData, date: e.target.value})} 
+                                />
                             </div>
                         </div>
 
@@ -540,6 +558,10 @@ export const Appointments = () => {
   };
 
   const handleSlotClick = (time: string) => {
+      if (selectedDateStr < getTodayStr()) {
+          showToast('error', 'Cannot book appointments on past dates');
+          return;
+      }
       // Open modal
       setBookingSlotDetails({
           date: selectedDateStr,
@@ -716,11 +738,18 @@ export const Appointments = () => {
                                         <div className="flex-1 relative p-0.5">
                                             {/* Available Slot */}
                                             {slot.isWorkingHour && slot.slotType === 'available' && !slot.bookedApt && (
-                                                <div 
-                                                    onClick={() => handleSlotClick(slot.time)}
-                                                    className="w-full h-full border border-yellow-200/50 cursor-pointer transition-all bg-[#fffbeb] hover:bg-[#fef3c7] rounded-sm"
-                                                    title="Click to Book"
-                                                ></div>
+                                                selectedDateStr < getTodayStr() ? (
+                                                    <div 
+                                                        className="w-full h-full border border-slate-100 bg-slate-100/50 rounded-sm cursor-not-allowed"
+                                                        title="Cannot book past slots"
+                                                    ></div>
+                                                ) : (
+                                                    <div 
+                                                        onClick={() => handleSlotClick(slot.time)}
+                                                        className="w-full h-full border border-yellow-200/50 cursor-pointer transition-all bg-[#fffbeb] hover:bg-[#fef3c7] rounded-sm"
+                                                        title="Click to Book"
+                                                    ></div>
+                                                )
                                             )}
                                             
                                             {/* Break Slot */}
