@@ -63,6 +63,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- Helpers for Snake Case (DB) <-> Camel Case (App) Mapping ---
   const mapDeptFromDb = (d: any): Department => ({ id: d.id, name: d.name, code: d.code, status: d.status });
+  const mapServiceCentreFromDb = (d: any): ServiceCentre => ({ id: d.id, name: d.name, code: d.code, status: d.status, departmentId: d.department_id });
   
   const mapEmpFromDb = (e: any): Employee => ({
     id: e.id,
@@ -190,7 +191,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (eRes.data) setEmployees(eRes.data.map(mapEmpFromDb));
         if (dRes.data) setDepartments(dRes.data.map(mapDeptFromDb));
         if (uRes.data) setUnits(uRes.data.map(mapDeptFromDb)); 
-        if (sRes.data) setServiceCentres(sRes.data.map(mapDeptFromDb));
+        if (sRes.data) setServiceCentres(sRes.data.map(mapServiceCentreFromDb));
         if (avRes.data) setAvailabilities(avRes.data.map(mapAvailFromDb));
         if (apRes.data) setAppointments(apRes.data.map(mapAptFromDb));
         
@@ -286,17 +287,11 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateEmployee = async (id: string, data: Partial<Employee>) => {
+    const original = employees.find(e => e.id === id);
     setEmployees(prev => prev.map(emp => emp.id === id ? { ...emp, ...data } : emp));
     
-    const dbData: any = {};
-    if (data.firstName) dbData.first_name = data.firstName;
-    if (data.lastName) dbData.last_name = data.lastName;
-    if (data.departmentId) dbData.department_id = data.departmentId;
-    if (data.status) dbData.status = data.status;
-    
-    const updatedEmp = employees.find(e => e.id === id);
-    if(updatedEmp) {
-        const fullNewData = { ...updatedEmp, ...data };
+    if(original) {
+        const fullNewData = { ...original, ...data };
         const { error } = await getSupabase().from('employees').update(mapEmpToDb(fullNewData)).eq('id', id);
         if (error) {
             console.error(error);
@@ -323,7 +318,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const addServiceCentre = async (s: ServiceCentre) => {
     setServiceCentres(prev => [...prev, s]);
-    const { error } = await getSupabase().from('service_centres').insert(s);
+    const { id, name, code, status, departmentId } = s;
+    const { error } = await getSupabase().from('service_centres').insert({ id, name, code, status, department_id: departmentId });
     if(error) showToast('error', error.message);
     else showToast('success', 'Service Centre added.');
   };

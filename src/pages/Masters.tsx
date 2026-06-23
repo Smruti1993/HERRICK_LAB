@@ -40,25 +40,41 @@ const MasterList = <T extends MasterEntity>({
   data: T[], 
   onAdd: (item: any) => void 
 }) => {
+  const { departments } = useData();
   const [isAdding, setIsAdding] = useState(false);
-  const [newItem, setNewItem] = useState<{ name: string; code: string; status: string; vatRegNo?: string }>({
+  const [newItem, setNewItem] = useState<{ name: string; code: string; status: string; vatRegNo?: string; departmentId?: string }>({
     name: '',
     code: '',
     status: 'Active',
-    vatRegNo: ''
+    vatRegNo: '',
+    departmentId: ''
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newItem.name || !newItem.code) return;
+    if (title === 'Service Location' && !newItem.departmentId) return;
     
-    onAdd({
+    const payload: any = {
       id: crypto.randomUUID(),
-      ...newItem
-    });
-    setNewItem({ name: '', code: '', status: 'Active', vatRegNo: '' });
+      name: newItem.name,
+      code: newItem.code,
+      status: newItem.status
+    };
+
+    if (title === 'Hospital') {
+      payload.vatRegNo = newItem.vatRegNo;
+    }
+    if (title === 'Service Location') {
+      payload.departmentId = newItem.departmentId;
+    }
+    
+    onAdd(payload);
+    setNewItem({ name: '', code: '', status: 'Active', vatRegNo: '', departmentId: '' });
     setIsAdding(false);
   };
+
+  const showExtra = title === 'Hospital' || title === 'Service Location';
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -73,14 +89,16 @@ const MasterList = <T extends MasterEntity>({
       </div>
       
       {isAdding && (
-        <form onSubmit={handleSubmit} className={`p-4 bg-blue-50/50 border-b border-blue-100 grid grid-cols-1 ${title === 'Hospital' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 animate-in slide-in-from-top-2`}>
+        <form onSubmit={handleSubmit} className={`p-4 bg-blue-50/50 border-b border-blue-100 grid grid-cols-1 ${showExtra ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 animate-in slide-in-from-top-2`}>
           <input 
+            required
             placeholder={`${title} Name`} 
             className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             value={newItem.name}
             onChange={e => setNewItem({...newItem, name: e.target.value})}
           />
           <input 
+            required
             placeholder="Code (e.g. DEPT-01)" 
             className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             value={newItem.code}
@@ -94,6 +112,19 @@ const MasterList = <T extends MasterEntity>({
               onChange={e => setNewItem({...newItem, vatRegNo: e.target.value})}
             />
           )}
+          {title === 'Service Location' && (
+            <select 
+              required
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              value={newItem.departmentId || ''}
+              onChange={e => setNewItem({...newItem, departmentId: e.target.value})}
+            >
+              <option value="">Select Department</option>
+              {departments.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          )}
           <button type="submit" className="bg-blue-600 text-white rounded-lg text-sm font-medium">Save</button>
         </form>
       )}
@@ -104,20 +135,28 @@ const MasterList = <T extends MasterEntity>({
             <tr>
               <th className="px-6 py-3 font-semibold">Name</th>
               <th className="px-6 py-3 font-semibold">Code</th>
-              {title === 'Hospital' && <th className="px-6 py-3 font-semibold">VAT Reg No</th>}
+              {showExtra && (
+                <th className="px-6 py-3 font-semibold">
+                  {title === 'Hospital' ? 'VAT Reg No' : 'Department'}
+                </th>
+              )}
               <th className="px-6 py-3 font-semibold">Status</th>
             </tr>
           </thead>
           <tbody>
             {data.length === 0 ? (
-               <tr><td colSpan={title === 'Hospital' ? 4 : 3} className="px-6 py-4 text-center text-slate-400">No records found.</td></tr>
+               <tr><td colSpan={showExtra ? 4 : 3} className="px-6 py-4 text-center text-slate-400">No records found.</td></tr>
             ) : (
                data.map((item) => (
                 <tr key={item.id} className="bg-white border-b border-slate-100 hover:bg-slate-50">
                   <td className="px-6 py-3 font-medium text-slate-900">{item.name}</td>
                   <td className="px-6 py-3 font-mono text-slate-500">{item.code}</td>
-                  {title === 'Hospital' && (
-                    <td className="px-6 py-3 font-mono text-slate-500">{(item as any).vatRegNo || '-'}</td>
+                  {showExtra && (
+                    <td className={`px-6 py-3 text-slate-700 ${title === 'Hospital' ? 'font-mono text-slate-500' : ''}`}>
+                      {title === 'Hospital' 
+                        ? ((item as any).vatRegNo || '-')
+                        : (departments.find(d => d.id === (item as any).departmentId)?.name || '-')}
+                    </td>
                   )}
                   <td className="px-6 py-3">
                     <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">Active</span>

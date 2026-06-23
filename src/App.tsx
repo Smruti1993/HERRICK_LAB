@@ -38,6 +38,7 @@ import { ExpiryItemReturnPage } from './pages/ExpiryItemReturn';
 import { ChartOfAccounts } from './pages/ChartOfAccounts';
 import { JournalVouchers } from './pages/JournalVouchers';
 import { VendorCompliance } from './pages/VendorCompliance';
+import { Refund } from './pages/Refund';
 
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
@@ -68,7 +69,6 @@ const AppRoutes = () => {
             <Route index element={<Dashboard />} />
             <Route path="appointments" element={<Appointments />} />
             <Route path="patients" element={<Patients />} />
-            <Route path="billing" element={<Billing />} />
             <Route path="doctor-workbench" element={<DoctorWorkbench />} />
             <Route path="consultation/:appointmentId" element={<Consultation />} />
             <Route path="reports" element={<Reports />} />
@@ -117,11 +117,13 @@ const AppRoutes = () => {
             </Route>
             <Route path="finance">
               <Route index element={<Navigate to="masters/organization" replace />} />
+              <Route path="billing" element={<Billing />} />
               <Route path="masters/organization" element={<OrganizationMaster />} />
               <Route path="masters/plan-definition" element={<PlanDefinition />} />
               <Route path="masters/sponsor-tariff" element={<SponsorTariff />} />
               <Route path="masters/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="transactions/journal-vouchers" element={<JournalVouchers />} />
+              <Route path="transactions/refund" element={<Refund />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

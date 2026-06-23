@@ -9,7 +9,9 @@ export interface MasterEntity {
 
 export interface Department extends MasterEntity {}
 export interface Unit extends MasterEntity {}
-export interface ServiceCentre extends MasterEntity {}
+export interface ServiceCentre extends MasterEntity {
+  departmentId?: string; // Foreign Key to Department
+}
 
 export enum EmployeeRole {
   DOCTOR = 'Doctor',

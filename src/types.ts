@@ -20,7 +20,9 @@ export interface Currency {
 
 export interface Department extends MasterEntity {}
 export interface Unit extends MasterEntity {}
-export interface ServiceCentre extends MasterEntity {}
+export interface ServiceCentre extends MasterEntity {
+  departmentId?: string; // Foreign Key to Department
+}
 export interface Branch extends MasterEntity {
   vatRegNo?: string;
 }
@@ -165,6 +167,67 @@ export interface DoctorAvailability {
   slotDurationMinutes: number;
 }
 
+// --- Redesigned Doctor Weekly Availability Schedules (Time Range version) ---
+export type SlotType = 'available' | 'break' | 'blocked';
+
+// One contiguous time block within a day (e.g. 09:00-13:00, type=available)
+export interface TimeRange {
+  from:     string;   // "09:00"
+  to:       string;   // "13:00"
+  type:     SlotType;
+}
+
+// State for one day in the schedule
+export interface DaySchedule {
+  on:    boolean;       // whether the day is active
+  slots: TimeRange[];   // ordered list of time ranges
+}
+
+// Full weekly state — keyed by day index 0 (Sun) to 6 (Sat)
+export type WeekScheduleState = Record<number, DaySchedule>;
+
+// What gets sent to the RPC after expansion
+export interface SlotConfig {
+  day_of_week:   number;
+  start_time:    string;   // "09:00"
+  end_time:      string;   // "09:30"
+  slot_type:     SlotType;
+  slot_duration: number;
+}
+
+// Stats bar data
+export interface ScheduleStats {
+  activeDays:  number;
+  totalSlots:  number;
+  bookedSlots: number;
+}
+
+// DB row shape returned from doctor_schedules
+export interface DoctorSchedule {
+  id:           string;
+  doctorId:     string;
+  dayOfWeek:    number;
+  startTime:    string;
+  endTime:      string;
+  slotType:     SlotType;
+  slotDuration: number;
+  isActive:     boolean;
+  createdBy?:   string;
+  createdAt?:   string;
+  updatedAt?:   string;
+}
+
+export interface ScheduleTemplate {
+  id: string;
+  doctorId: string;
+  templateName: string;
+  weekStart: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
+
+
 export interface Appointment {
   id: string;
   patientId: string; // Foreign Key to Patient
@@ -231,7 +294,23 @@ export interface Bill {
   createdBy?: string;
   patientName?: string;
   receiptNo?: string;
+  refundStatus?: string; // 'Pending' | 'Refunded'
+  refundId?: string;
+  cancelledAt?: string;
 }
+
+export interface PatientRefund {
+  id: string;
+  refundNo: string;
+  patientId: string;
+  refundDate: string;
+  totalAmount: number;
+  paymentMethod: string;
+  remarks?: string;
+  createdBy?: string;
+  createdAt?: string;
+}
+
 
 // --- Clinical / Workbench Types ---
 

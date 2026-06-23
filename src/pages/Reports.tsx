@@ -33,8 +33,8 @@ export const Reports = () => {
   const [activeReport, setActiveReport] = useState('Patient Ledger');
   
   // Filters
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchPatient, setSearchPatient] = useState('');
 
   // --- Logic for Patient Ledger ---
@@ -112,26 +112,73 @@ export const Reports = () => {
         // 3. Process Bill Items (Invoices)
         bill.items.forEach(item => {
             const isReturn = item.description.startsWith('RETURN:');
+            const isRefund = item.description.startsWith('REFUND:');
             
-            group.rows.push({
-                id: item.id,
-                date: bill.date,
-                voucherType: isReturn ? 'RETURN' : 'CASH',
-                invoiceNo: bill.invoiceNo || `INV-${bill.id.slice(-8).toUpperCase()}`,
-                type: 'Invoice',
-                doctorName: getBillDoctor(bill.appointmentId),
-                serviceCode: getServiceCode(item.description),
-                serviceName: item.description,
-                debit: isReturn ? 0 : item.total,
-                credit: isReturn ? Math.abs(item.total) : 0,
-                insurance: 0, 
-                tax: 0
-            });
-
-            if (isReturn) {
-                group.totalCredit += Math.abs(item.total);
-            } else {
+            if (bill.status === 'Cancelled') {
+                // 1. Original Charge Row (Debit)
+                group.rows.push({
+                    id: `${item.id}-orig`,
+                    date: bill.date,
+                    voucherType: 'CASH',
+                    invoiceNo: bill.invoiceNo || `INV-${bill.id.slice(-8).toUpperCase()}`,
+                    type: 'Invoice',
+                    doctorName: getBillDoctor(bill.appointmentId),
+                    serviceCode: getServiceCode(item.description),
+                    serviceName: item.description,
+                    debit: item.total,
+                    credit: 0,
+                    insurance: 0, 
+                    tax: 0
+                });
                 group.totalDebit += item.total;
+
+                // 2. Cancellation Row (Credit offsets the debit)
+                // Guard: If there is already an independent return document for this invoice, do not double-count the credit.
+                const hasReturnDoc = bill.invoiceNo && bills.some(b => 
+                    b.items.some(i => i.description.includes(`(From ${bill.invoiceNo})`))
+                );
+
+                if (!hasReturnDoc) {
+                    group.rows.push({
+                        id: `${item.id}-cancelled`,
+                        date: bill.cancelledAt || bill.date,
+                        voucherType: 'RETURN',
+                        invoiceNo: bill.invoiceNo ? bill.invoiceNo.replace('INV-', 'RET-') : `RET-${bill.id.slice(-8).toUpperCase()}`,
+                        type: 'Invoice',
+                        doctorName: getBillDoctor(bill.appointmentId),
+                        serviceCode: getServiceCode(item.description),
+                        serviceName: `[Cancelled] ${item.description}`,
+                        debit: 0,
+                        credit: item.total,
+                        insurance: 0, 
+                        tax: 0
+                    });
+                    group.totalCredit += item.total;
+                }
+            } else {
+                // Normal Active Bill Item (CASH, RETURN, or REFUND)
+                group.rows.push({
+                    id: item.id,
+                    date: bill.date,
+                    voucherType: isReturn ? 'RETURN' : isRefund ? 'REFUND' : 'CASH',
+                    invoiceNo: bill.invoiceNo || `INV-${bill.id.slice(-8).toUpperCase()}`,
+                    type: 'Invoice',
+                    doctorName: getBillDoctor(bill.appointmentId),
+                    serviceCode: getServiceCode(item.description),
+                    serviceName: item.description,
+                    debit: isReturn || isRefund ? 0 : item.total,
+                    credit: isReturn ? Math.abs(item.total) : isRefund ? -Math.abs(item.total) : 0,
+                    insurance: 0, 
+                    tax: 0
+                });
+
+                if (isReturn) {
+                    group.totalCredit += Math.abs(item.total);
+                } else if (isRefund) {
+                    group.totalCredit -= Math.abs(item.total);
+                } else {
+                    group.totalDebit += item.total;
+                }
             }
         });
 
@@ -297,28 +344,36 @@ export const Reports = () => {
                                 </div>
 
                                 {/* Rows */}
-                                {group.rows.map((row, idx) => (
-                                    <div key={idx} className={`grid grid-cols-12 text-[11px] border-b border-slate-200 hover:bg-yellow-50 transition-colors ${row.voucherType === 'RETURN' ? 'text-red-700 font-bold bg-red-50' : 'text-slate-600'}`}>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
-                                            {row.voucherType}
-                                        </div>
-                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 truncate ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium'}`}>{row.invoiceNo}</div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.type}</div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
-                                            {new Date(row.date).toLocaleString([], {year: 'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}
-                                        </div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate" title={row.doctorName}>{row.doctorName}</div>
-                                        <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.serviceCode}</div>
-                                        <div className="col-span-3 p-1.5 border-r border-slate-200 font-medium" title={row.serviceName}>{row.serviceName}</div>
-                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-bold'}`}>
-                                            {row.debit !== 0 ? row.debit.toFixed(2) : '0.00'}
-                                        </div>
-                                        <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium text-slate-800'}`}>
-                                            {row.credit > 0 ? row.credit.toFixed(2) : ''}
-                                        </div>
-                                        <div className="col-span-1 p-1.5 text-right text-slate-400">0.00</div>
-                                    </div>
-                                ))}
+                                {(() => {
+                                    let runningBalance = 0;
+                                    return group.rows.map((row, idx) => {
+                                        runningBalance += row.debit - row.credit;
+                                        return (
+                                            <div key={idx} className={`grid grid-cols-12 text-[11px] border-b border-slate-200 hover:bg-yellow-50 transition-colors ${row.voucherType === 'RETURN' ? 'text-red-700 font-bold bg-red-50' : row.voucherType === 'REFUND' ? 'text-blue-700 font-bold bg-blue-50/50' : 'text-slate-600'}`}>
+                                                <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
+                                                    {row.voucherType}
+                                                </div>
+                                                <div className={`col-span-1 p-1.5 border-r border-slate-200 truncate ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium'}`}>{row.invoiceNo}</div>
+                                                <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.type}</div>
+                                                <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">
+                                                    {new Date(row.date).toLocaleString([], {year: 'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'})}
+                                                </div>
+                                                <div className="col-span-1 p-1.5 border-r border-slate-200 truncate" title={row.doctorName}>{row.doctorName}</div>
+                                                <div className="col-span-1 p-1.5 border-r border-slate-200 truncate">{row.serviceCode}</div>
+                                                <div className="col-span-3 p-1.5 border-r border-slate-200 font-medium" title={row.serviceName}>{row.serviceName}</div>
+                                                <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : row.voucherType === 'REFUND' ? 'text-blue-700' : 'font-bold'}`}>
+                                                    {row.debit !== 0 ? row.debit.toFixed(2) : '0.00'}
+                                                </div>
+                                                <div className={`col-span-1 p-1.5 border-r border-slate-200 text-right ${row.voucherType === 'RETURN' ? 'text-red-700' : 'font-medium text-slate-800'}`}>
+                                                    {row.credit !== 0 ? row.credit.toFixed(2) : ''}
+                                                </div>
+                                                <div className={`col-span-1 p-1.5 text-right font-bold ${runningBalance < 0 ? 'text-red-600 font-bold' : 'text-slate-700'}`}>
+                                                    {runningBalance.toFixed(2)}
+                                                </div>
+                                            </div>
+                                        );
+                                    });
+                                })()}
 
                                 {/* Group Footer / Total */}
                                 <div className="grid grid-cols-12 bg-slate-50 text-[11px] font-bold border-b-2 border-slate-300 text-slate-800">

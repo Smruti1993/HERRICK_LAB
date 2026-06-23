@@ -23,7 +23,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: Home, category: 'Main' },
   { label: 'Appointments', path: '/appointments', icon: Calendar, category: 'Main' },
   { label: 'Patients', path: '/patients', icon: Users, category: 'Main' },
-  { label: 'Billing', path: '/billing', icon: CreditCard, category: 'Main' },
   
   // Patient Care Section
   { label: 'Doctor Workbench', path: '/doctor-workbench', icon: Stethoscope, category: 'Patient Care' },
@@ -129,6 +128,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: CreditCard,
     category: 'Finance',
     subItems: [
+      { label: 'Billing', path: '/finance/billing' },
       {
         label: 'Master',
         path: '/finance/masters',
@@ -143,7 +143,8 @@ export const NAV_ITEMS: NavItem[] = [
         label: 'Transactions',
         path: '/finance/transactions',
         subItems: [
-          { label: 'Journal Voucher', path: '/finance/transactions/journal-vouchers' }
+          { label: 'Journal Voucher', path: '/finance/transactions/journal-vouchers' },
+          { label: 'Process Refund', path: '/finance/transactions/refund' }
         ]
       }
     ]

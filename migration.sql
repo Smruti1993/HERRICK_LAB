@@ -42,3 +42,37 @@ ALTER TABLE patients ADD COLUMN IF NOT EXISTS national_id TEXT;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS sponsor_name TEXT DEFAULT 'CASH';
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS policy_no TEXT;
 ALTER TABLE patients ADD COLUMN IF NOT EXISTS card_no TEXT;
+
+-- 7. Add department_id to service_centres (Service Locations)
+ALTER TABLE service_centres ADD COLUMN IF NOT EXISTS department_id TEXT REFERENCES departments(id);
+
+-- 8. Patient Refunds Schema
+CREATE TABLE IF NOT EXISTS patient_refunds (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    refund_no TEXT UNIQUE NOT NULL,
+    patient_id TEXT REFERENCES patients(id) ON DELETE CASCADE,
+    refund_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    total_amount DECIMAL(12,2) DEFAULT 0,
+    payment_method TEXT DEFAULT 'Cash',
+    remarks TEXT,
+    created_by TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Add refund_status and refund_id to pharmacy_returns
+ALTER TABLE pharmacy_returns ADD COLUMN IF NOT EXISTS refund_status TEXT DEFAULT 'Pending';
+ALTER TABLE pharmacy_returns ADD COLUMN IF NOT EXISTS refund_id UUID REFERENCES patient_refunds(id) ON DELETE SET NULL;
+
+-- Add refund_status and refund_id to bills
+ALTER TABLE bills ADD COLUMN IF NOT EXISTS refund_status TEXT DEFAULT 'Pending';
+ALTER TABLE bills ADD COLUMN IF NOT EXISTS refund_id UUID REFERENCES patient_refunds(id) ON DELETE SET NULL;
+
+-- Enable RLS and create policies for patient_refunds
+ALTER TABLE patient_refunds ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON patient_refunds FOR SELECT USING (true);
+CREATE POLICY "Enable all write operations for all users" ON patient_refunds FOR ALL TO public USING (true) WITH CHECK (true);
+
+-- 9. Add cancelled_at column to bills table
+ALTER TABLE bills ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP WITH TIME ZONE;
+
+

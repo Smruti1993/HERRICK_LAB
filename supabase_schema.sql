@@ -1,4 +1,4 @@
-﻿-- Enable UUID extension
+-- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
 -- 1. Departments
@@ -289,7 +289,8 @@ create table if not exists service_centres (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
   code text,
-  status text default 'Active'
+  status text default 'Active',
+  department_id text references departments(id)
 );
 
 -- Seed Initial Admin User

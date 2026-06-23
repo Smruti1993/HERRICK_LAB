@@ -511,46 +511,46 @@ export const OPPharmacy: React.FC = () => {
 
                 showToast('success', `Switched allocation to Batch "${chosenBatch.batchNo}" for "${matchedItem.itemName}" (Quantity reset to 1)`);
                 playSuccessBeep();
-
             } else {
                 // Case B: Subsequent Scan (Same Batch) - Increment quantity by 1
                 const currentQty = issueQty[prescItem.id] ?? 1;
+                const nextQty = currentQty + 1;
+                const limit = Math.max(1, Math.ceil(remainingQty / salesCF));
 
-                if (currentQty + 1 <= maxQty) {
-                    const nextQty = currentQty + 1;
-                    const baseQtyRequired = nextQty * salesCF;
-
-                    // Verify the selected batch has enough stock
-                    const chosenBatch = nonExpiredBatches.find(b => b.batchNo === currentSelectedBatch.batchNo);
-                    if (chosenBatch && chosenBatch.currentStock < baseQtyRequired) {
-                        playErrorBeep();
-                        showToast('error', `Cannot increment. Insufficient stock in Batch "${currentSelectedBatch.batchNo}". Stock: ${chosenBatch.currentStock}, Required: ${baseQtyRequired}.`);
-                        return;
-                    }
-
-                    const itemPrice = currentSelectedBatch.rate * salesCF;
-                    const total = Number((nextQty * itemPrice).toFixed(decimals));
-                    const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
-                    const baseAmount = Number((total - taxAmt).toFixed(decimals));
-
-                    setIssueQty(prev => ({ ...prev, [prescItem.id]: nextQty }));
-                    setSelectedBatches(prev => ({
-                        ...prev,
-                        [prescItem.id]: {
-                            ...currentSelectedBatch,
-                            baseAmount: baseAmount,
-                            taxAmount: taxAmt,
-                            amount: total
-                        }
-                    }));
-
-                    showToast('success', `Incremented "${matchedItem.itemName}" to ${nextQty} units.`);
-                    playSuccessBeep();
-
-                } else {
+                if (nextQty > limit) {
                     playErrorBeep();
-                    showToast('error', `Required quantity of ${maxQty} already fully scanned.`);
+                    showToast('error', `Cannot increment. Issue quantity cannot exceed the remaining required quantity of ${remainingQty} base units (${limit} ${selectedUom}).`);
+                    return;
                 }
+
+                const baseQtyRequired = nextQty * salesCF;
+
+                // Verify the selected batch has enough stock
+                const chosenBatch = nonExpiredBatches.find(b => b.batchNo === currentSelectedBatch.batchNo);
+                if (chosenBatch && chosenBatch.currentStock < baseQtyRequired) {
+                    playErrorBeep();
+                    showToast('error', `Cannot increment. Insufficient stock in Batch "${currentSelectedBatch.batchNo}". Stock: ${chosenBatch.currentStock}, Required: ${baseQtyRequired}.`);
+                    return;
+                }
+
+                const itemPrice = currentSelectedBatch.rate * salesCF;
+                const total = Number((nextQty * itemPrice).toFixed(decimals));
+                const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                const baseAmount = Number((total - taxAmt).toFixed(decimals));
+
+                setIssueQty(prev => ({ ...prev, [prescItem.id]: nextQty }));
+                setSelectedBatches(prev => ({
+                    ...prev,
+                    [prescItem.id]: {
+                        ...currentSelectedBatch,
+                        baseAmount: baseAmount,
+                        taxAmount: taxAmt,
+                        amount: total
+                    }
+                }));
+
+                showToast('success', `Incremented "${matchedItem.itemName}" to ${nextQty} units.`);
+                playSuccessBeep();
             }
         }
     };
@@ -1065,69 +1065,71 @@ export const OPPharmacy: React.FC = () => {
                                                           )}
                                                           <div className="text-[9px] text-slate-400 font-bold uppercase">Days: {item.noDays}</div>
                                                      </td>
-                                                     <td className="p-4 text-center">
-                                                         <input
-                                                             type="number"
-                                                             min={1}
-                                                             max={remainingQty / salesCF}
-                                                             value={remainingQty <= 0 ? 0 : (issueQty[item.id] ?? (remainingQty / salesCF))}
-                                                             disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
-                                                             onChange={e => {
-                                                                 const maxVal = remainingQty / salesCF;
-                                                                 const newQty = Math.max(1, Math.min(maxVal, Number(e.target.value)));
-                                                                 setIssueQty(prev => ({ ...prev, [item.id]: newQty }));
+                                                      <td className="p-4 text-center">
+                                                          <input
+                                                              type="number"
+                                                              min={1}
+                                                              max={Math.max(1, Math.ceil(remainingQty / salesCF))}
+                                                              value={remainingQty <= 0 ? 0 : (issueQty[item.id] ?? Math.max(1, Math.ceil(remainingQty / salesCF)))}
+                                                              disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
+                                                              onChange={e => {
+                                                                  const limit = Math.max(1, Math.ceil(remainingQty / salesCF));
+                                                                  const newQty = Math.min(limit, Math.max(1, Number(e.target.value)));
+                                                                  setIssueQty(prev => ({ ...prev, [item.id]: newQty }));
 
-                                                                 // Synchronize manual spinner change to selectedBatches helpers
-                                                                 if (selectedBatches[item.id]) {
-                                                                     const allocation = selectedBatches[item.id];
-                                                                     const itemPrice = allocation.rate * salesCF;
-                                                                     const total = Number((newQty * itemPrice).toFixed(decimals));
-                                                                     const itemMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
-                                                                     const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
-                                                                     const taxPercent = taxMaster?.percentage || 0;
-                                                                     const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
-                                                                     const baseAmount = Number((total - taxAmt).toFixed(decimals));
+                                                                  // Synchronize manual spinner change to selectedBatches helpers
+                                                                  if (selectedBatches[item.id]) {
+                                                                      const allocation = selectedBatches[item.id];
+                                                                      const itemPrice = allocation.rate * salesCF;
+                                                                      const total = Number((newQty * itemPrice).toFixed(decimals));
+                                                                      const itemMapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+                                                                      const taxMaster = itemMapping ? taxMasters.find(t => t.id === itemMapping.taxId && t.status === 'Active') : null;
+                                                                      const taxPercent = taxMaster?.percentage || 0;
+                                                                      const taxAmt = Number((total * taxPercent / (100 + taxPercent)).toFixed(decimals));
+                                                                      const baseAmount = Number((total - taxAmt).toFixed(decimals));
 
-                                                                     setSelectedBatches(prev => ({
-                                                                         ...prev,
-                                                                         [item.id]: {
-                                                                             ...allocation,
-                                                                             amount: total,
-                                                                             taxAmount: taxAmt,
-                                                                             baseAmount: baseAmount
-                                                                         }
-                                                                     }));
-                                                                 }
-                                                             }}
-                                                             className={`w-20 text-center px-2 py-1.5 border rounded-lg text-sm font-black outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
-                                                                 (issueQty[item.id] ?? (remainingQty / salesCF)) < (remainingQty / salesCF)
-                                                                     ? 'border-amber-400 bg-amber-50 text-amber-700 focus:ring-amber-400'
-                                                                     : 'border-slate-200 bg-white text-slate-800'
-                                                             } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                                         />
-                                                     </td>
-                                                     <td className="p-4 text-center">
-                                                         <select
-                                                             className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500 bg-white font-bold text-slate-700"
-                                                             value={dispensingUom[item.id] || item.units || 'EACH'}
-                                                             onChange={e => {
-                                                                 const oldUom = dispensingUom[item.id] || item.units || 'EACH';
-                                                                 const newUom = e.target.value;
-                                                                 
-                                                                 const oldIsSales = oldUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
-                                                                 const oldCF = oldIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
-                                                                 
-                                                                 const newIsSales = newUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
-                                                                 const newCF = newIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
-                                                                 
-                                                                 const currentVal = issueQty[item.id] ?? (remainingQty / oldCF);
-                                                                 const qtyInBase = currentVal * oldCF;
-                                                                 const qtyInNew = Number((qtyInBase / newCF).toFixed(2));
-                                                                 
-                                                                 setDispensingUom(prev => ({ ...prev, [item.id]: newUom }));
-                                                                 setIssueQty(prev => ({ ...prev, [item.id]: qtyInNew }));
-                                                             }}
-                                                             disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
+                                                                      setSelectedBatches(prev => ({
+                                                                          ...prev,
+                                                                          [item.id]: {
+                                                                              ...allocation,
+                                                                              amount: total,
+                                                                              taxAmount: taxAmt,
+                                                                              baseAmount: baseAmount
+                                                                          }
+                                                                      }));
+                                                                  }
+                                                              }}
+                                                              className={`w-20 text-center px-2 py-1.5 border rounded-lg text-sm font-black outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
+                                                                  (issueQty[item.id] ?? Math.max(1, Math.ceil(remainingQty / salesCF))) < (remainingQty / salesCF)
+                                                                      ? 'border-amber-400 bg-amber-50 text-amber-700 focus:ring-amber-400'
+                                                                      : 'border-slate-200 bg-white text-slate-800'
+                                                              } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                                          />
+                                                      </td>
+                                                      <td className="p-4 text-center">
+                                                          <select
+                                                              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-blue-500 bg-white font-bold text-slate-700"
+                                                              value={dispensingUom[item.id] || item.units || 'EACH'}
+                                                              onChange={e => {
+                                                                  const oldUom = dispensingUom[item.id] || item.units || 'EACH';
+                                                                  const newUom = e.target.value;
+                                                                  
+                                                                  const oldIsSales = oldUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                                                                  const oldCF = oldIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                                  
+                                                                  const newIsSales = newUom.toUpperCase() === (invItem?.salesUom || '').toUpperCase();
+                                                                  const newCF = newIsSales ? Number(invItem?.salesConversionFactor || 1) : 1;
+                                                                  
+                                                                  const currentVal = issueQty[item.id] ?? Math.max(1, Math.ceil(remainingQty / oldCF));
+                                                                  const qtyInBase = currentVal * oldCF;
+                                                                  const newLimit = Math.max(1, Math.ceil(remainingQty / newCF));
+                                                                  const rawQtyInNew = Math.ceil(qtyInBase / newCF);
+                                                                  const qtyInNew = Math.min(newLimit, Math.max(1, rawQtyInNew));
+                                                                  
+                                                                  setDispensingUom(prev => ({ ...prev, [item.id]: newUom }));
+                                                                  setIssueQty(prev => ({ ...prev, [item.id]: qtyInNew }));
+                                                              }}
+                                                              disabled={selectedPrescription.status === 'Dispensed' || item.status === 'Dispensed' || remainingQty <= 0}
                                                          >
                                                              {[(invItem?.baseUom || item.units || 'EACH').trim().toUpperCase(), 
                                                                (invItem?.salesUom || '').trim().toUpperCase()]

@@ -387,7 +387,7 @@ const BookingModal = ({
 
 export const Appointments = () => {
   const { 
-    departments, employees, availabilities, appointments, 
+    departments, employees, doctorSchedules, appointments, 
     cancelAppointment, patients, showToast
   } = useData();
 
@@ -430,29 +430,39 @@ export const Appointments = () => {
       if (!selectedDoctor) return null;
 
       const dayOfWeek = selectedDateObj.getDay();
-      const availability = availabilities.find(a => a.doctorId === selectedDoctor && a.dayOfWeek === dayOfWeek);
       
-      const slots = [];
-      
+      // Filter slots for this doctor and day of week
+      const daySlots = (doctorSchedules || []).filter(s => 
+          s.doctorId === selectedDoctor && 
+          s.dayOfWeek === dayOfWeek && 
+          s.isActive
+      );
+
       // Determine View Range
       let startHour = 8; // Default 08:00
       let endHour = 20;  // Default 20:00
+      const duration = daySlots.length ? daySlots[0].slotDuration : 30;
 
-      if (availability) {
-          const [sH] = availability.startTime.split(':').map(Number);
-          const [eH, eM] = availability.endTime.split(':').map(Number);
-          
-          if (sH < startHour) startHour = sH;
-          
-          // If end time involves minutes (e.g. 23:12), we need to go to the next hour (24) to show the slot starting at 23:00 or 23:15
-          let viewEnd = eH;
-          if (eM > 0) viewEnd += 1;
-          
-          if (viewEnd > endHour) endHour = viewEnd;
+      if (daySlots.length) {
+          let minMins = 24 * 60;
+          let maxMins = 0;
+          daySlots.forEach(s => {
+              const [sH, sM] = s.startTime.split(':').map(Number);
+              const [eH, eM] = s.endTime.split(':').map(Number);
+              const sTotal = sH * 60 + sM;
+              const eTotal = eH * 60 + eM;
+              if (sTotal < minMins) minMins = sTotal;
+              if (eTotal > maxMins) maxMins = eTotal;
+          });
+
+          const defaultStartMins = 8 * 60;
+          const defaultEndMins = 20 * 60;
+          const finalStartMins = Math.min(defaultStartMins, minMins);
+          const finalEndMins = Math.max(defaultEndMins, maxMins);
+
+          startHour = Math.floor(finalStartMins / 60);
+          endHour = Math.ceil(finalEndMins / 60);
       }
-      
-      // Cap at 24 hours
-      if (endHour > 24) endHour = 24;
 
       let current = new Date(selectedDateObj);
       current.setHours(startHour, 0, 0, 0);
@@ -460,20 +470,14 @@ export const Appointments = () => {
       const endTime = new Date(selectedDateObj);
       endTime.setHours(endHour, 0, 0, 0);
 
-      while(current < endTime) {
+      const slots = [];
+      while (current < endTime) {
           const timeStr = current.toTimeString().substring(0, 5);
-          
-          let isWorkingHour = false;
-          if (availability) {
-              const [sH, sM] = availability.startTime.split(':').map(Number);
-              const [eH, eM] = availability.endTime.split(':').map(Number);
-              const t = current.getHours() * 60 + current.getMinutes();
-              const startT = sH * 60 + sM;
-              const endT = eH * 60 + eM;
-              isWorkingHour = t >= startT && t < endT;
-          }
+          current.setMinutes(current.getMinutes() + duration);
+          const nextTimeStr = current.toTimeString().substring(0, 5);
 
-          // Check if booked
+          const dbSlot = daySlots.find(s => s.startTime === timeStr);
+
           const bookedApt = appointments.find(a => 
               a.doctorId === selectedDoctor && 
               a.date === selectedDateStr && 
@@ -483,14 +487,15 @@ export const Appointments = () => {
 
           slots.push({
               time: timeStr,
-              isWorkingHour,
+              endTime: nextTimeStr,
+              isWorkingHour: dbSlot !== undefined,
+              slotType: dbSlot ? dbSlot.slotType : 'off',
               bookedApt
           });
-
-          current.setMinutes(current.getMinutes() + 15);
       }
-      return { availability, slots };
-  }, [selectedDoctor, selectedDateObj, availabilities, appointments]);
+
+      return { slots, hasSchedule: daySlots.length > 0 };
+  }, [selectedDoctor, selectedDateObj, doctorSchedules, appointments, selectedDateStr]);
 
 
   // --- Handlers ---
@@ -687,58 +692,72 @@ export const Appointments = () => {
                 {/* Left: Day View Scheduler */}
                 <div className="flex-1 flex flex-col overflow-hidden relative">
                     {/* Doctor Header */}
-                    <div className="h-8 bg-slate-100 border-b border-slate-300 flex">
-                        <div className="w-16 border-r border-slate-300 bg-slate-50 shrink-0"></div>
-                        <div className="flex-1 flex items-center justify-center font-bold text-sm text-slate-800 border-r border-slate-300">
-                            {selectedDocInfo ? `Dr ${selectedDocInfo.firstName} ${selectedDocInfo.lastName}` : <span className="text-slate-400 italic font-normal">Select a Doctor</span>}
-                        </div>
+                    <div className="h-10 bg-slate-100 border-b border-slate-300 flex items-center justify-center font-bold text-sm text-slate-800">
+                        {selectedDocInfo ? `Dr ${selectedDocInfo.firstName} ${selectedDocInfo.lastName} (${selectedDocInfo.specialization || 'General'})` : <span className="text-slate-400 italic font-normal">Select a Doctor</span>}
                     </div>
 
                     {/* Scrollable Slots */}
                     <div className="flex-1 overflow-y-auto bg-white custom-scrollbar">
-                        {selectedDoctor && schedulerData ? (
-                            schedulerData.slots.map((slot) => (
-                                <div key={slot.time} className="flex h-8 border-b border-slate-200 hover:bg-slate-50 transition-colors">
-                                    <div className="w-16 border-r border-slate-300 bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-500 select-none shrink-0">
-                                        {slot.time}
-                                    </div>
-                                    <div className="flex-1 relative p-0.5">
-                                        {/* Available Slot */}
-                                        {slot.isWorkingHour && !slot.bookedApt && (
-                                            <div 
-                                                onClick={() => handleSlotClick(slot.time)}
-                                                className="w-full h-full border border-yellow-200/50 cursor-pointer transition-all bg-[#fffbeb] hover:bg-[#fef3c7]"
-                                                title="Click to Book"
-                                            ></div>
-                                        )}
-                                        
-                                        {/* Unavailable / Off-time */}
-                                        {!slot.isWorkingHour && (
-                                            <div className="w-full h-full bg-slate-100 opacity-50 repeating-diagonal-stripes"></div>
-                                        )}
-
-                                        {/* Booked Appointment */}
-                                        {slot.bookedApt && (
-                                            <div className="absolute inset-0.5 bg-blue-100 border-l-4 border-blue-500 rounded-sm px-2 flex items-center gap-2 overflow-hidden shadow-sm z-10 cursor-not-allowed">
-                                                <span className="text-[10px] font-bold text-blue-900 truncate">
-                                                    {patients.find(p => p.id === slot.bookedApt?.patientId)?.firstName} {patients.find(p => p.id === slot.bookedApt?.patientId)?.lastName}
-                                                </span>
-                                                <span className="text-[9px] text-blue-700 bg-blue-200 px-1 rounded truncate">
-                                                    {slot.bookedApt.visitType}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-slate-400 bg-slate-50/30">
+                        {!selectedDoctor ? (
+                            <div className="h-full flex items-center justify-center text-slate-400">
                                 <div className="text-center">
-                                    <User className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                                    <p className="text-sm">Select a Doctor to view schedule</p>
+                                    <User className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                                    <p className="text-sm font-semibold">Select a Doctor to view schedule</p>
                                 </div>
                             </div>
-                        )}
+                        ) : schedulerData ? (
+                            <div className="divide-y divide-slate-100">
+                                {schedulerData.slots.map((slot) => (
+                                    <div key={slot.time} className="flex h-10 border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                                        <div className="w-20 border-r border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-[10px] font-bold text-slate-500 select-none shrink-0 font-mono leading-tight">
+                                            <span>{slot.time}</span>
+                                            <span className="text-[8px] text-slate-400 font-normal">to {slot.endTime}</span>
+                                        </div>
+                                        <div className="flex-1 relative p-0.5">
+                                            {/* Available Slot */}
+                                            {slot.isWorkingHour && slot.slotType === 'available' && !slot.bookedApt && (
+                                                <div 
+                                                    onClick={() => handleSlotClick(slot.time)}
+                                                    className="w-full h-full border border-yellow-200/50 cursor-pointer transition-all bg-[#fffbeb] hover:bg-[#fef3c7] rounded-sm"
+                                                    title="Click to Book"
+                                                ></div>
+                                            )}
+                                            
+                                            {/* Break Slot */}
+                                            {slot.isWorkingHour && slot.slotType === 'break' && (
+                                                <div className="w-full h-full bg-amber-50 border border-amber-200/50 opacity-80 px-2 flex items-center gap-2 rounded-sm cursor-not-allowed select-none">
+                                                    <span className="text-[10px] font-bold text-amber-800">Break</span>
+                                                </div>
+                                            )}
+
+                                            {/* Blocked Slot */}
+                                            {slot.isWorkingHour && slot.slotType === 'blocked' && (
+                                                <div className="w-full h-full bg-rose-50 border border-rose-200/50 opacity-80 px-2 flex items-center gap-2 rounded-sm cursor-not-allowed select-none">
+                                                    <span className="text-[10px] font-bold text-rose-800">Blocked</span>
+                                                </div>
+                                            )}
+
+                                            {/* Unavailable / Off-time */}
+                                            {!slot.isWorkingHour && (
+                                                <div className="w-full h-full repeating-diagonal-stripes"></div>
+                                            )}
+      
+                                            {/* Booked Appointment */}
+                                            {slot.isWorkingHour && slot.slotType === 'available' && slot.bookedApt && (
+                                                <div className="absolute inset-0.5 bg-blue-50 border-l-4 border-blue-500 rounded-sm px-2 flex items-center gap-2 overflow-hidden shadow-sm z-10 cursor-not-allowed">
+                                                    <span className="text-[10px] font-bold text-blue-900 truncate">
+                                                        {patients.find(p => p.id === slot.bookedApt?.patientId)?.firstName} {patients.find(p => p.id === slot.bookedApt?.patientId)?.lastName}
+                                                    </span>
+                                                    <span className="text-[9px] text-blue-700 bg-blue-100 px-1 rounded truncate">
+                                                        {slot.bookedApt.visitType || 'New Visit'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
@@ -765,7 +784,7 @@ export const Appointments = () => {
                                 {selectedDocInfo ? `Dr ${selectedDocInfo.lastName}` : 'No Doctor'}
                             </div>
                             <div className="flex justify-between"><span>Booked:</span> <span>{schedulerData?.slots.filter(s => s.bookedApt).length || 0}</span></div>
-                            <div className="flex justify-between"><span>Available:</span> <span>{schedulerData?.slots.filter(s => s.isWorkingHour && !s.bookedApt).length || 0}</span></div>
+                            <div className="flex justify-between"><span>Available:</span> <span>{schedulerData?.slots.filter(s => s.slotType === 'available' && !s.bookedApt).length || 0}</span></div>
                         </div>
                     </div>
 

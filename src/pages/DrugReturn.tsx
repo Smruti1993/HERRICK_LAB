@@ -16,6 +16,7 @@ type LiveBillItem = {
   returnedQty: number;    // already returned in prior transactions
   taxPercentage: number;
   taxAmount: number;      // total tax originally charged for the full qty
+  itemType?: string;      // UOM
 };
 
 export const DrugReturn: React.FC = () => {
@@ -30,6 +31,7 @@ export const DrugReturn: React.FC = () => {
     const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
     const [isProcessing, setIsProcessing] = useState(false);
     const [generatedReturnInvoiceId, setGeneratedReturnInvoiceId] = useState<string | null>(null);
+    const [reason, setReason] = useState('Doctor changed prescription');
 
     // Auto-select first store
     useEffect(() => {
@@ -88,11 +90,10 @@ export const DrugReturn: React.FC = () => {
     const totalReturnAmount = useMemo(() => {
         return liveItems.reduce((sum, item) => {
             const qty = returnQuantities[item.id] || 0;
-            const base = qty * item.unitPrice;
-            const tax = Number((base * (item.taxPercentage / 100)).toFixed(decimals));
-            return sum + base + tax;
+            const total = Number((qty * item.unitPrice).toFixed(decimals));
+            return sum + total;
         }, 0);
-    }, [liveItems, returnQuantities]);
+    }, [liveItems, returnQuantities, decimals]);
 
     const handleProcessReturn = async () => {
         if (!selectedBillId || !selectedStoreId) {
@@ -110,7 +111,8 @@ export const DrugReturn: React.FC = () => {
                     qty: qty,
                     rate: item?.unitPrice || 0,
                     description: item?.description || '',
-                    taxPercentage: item?.taxPercentage || 0
+                    taxPercentage: item?.taxPercentage || 0,
+                    itemType: item?.itemType || ''
                 };
             });
 
@@ -121,7 +123,7 @@ export const DrugReturn: React.FC = () => {
 
         setIsProcessing(true);
         try {
-            const result = await processPharmacyReturn(selectedBillId, selectedStoreId, itemsToReturn);
+            const result = await processPharmacyReturn(selectedBillId, selectedStoreId, itemsToReturn, reason);
             if (result.success) {
                 showToast('success', 'Return processed successfully.');
                 setGeneratedReturnInvoiceId(result.invoiceId || null);
@@ -295,14 +297,17 @@ export const DrugReturn: React.FC = () => {
                                                     <td className="px-4 py-4 text-right">
                                                         <div className="flex flex-col">
                                                             <span className="text-xs font-bold text-orange-600">
-                                                                {formatCurrency((returnQuantities[item.id] || 0) * item.unitPrice * (item.taxPercentage / 100))}
+                                                                {formatCurrency(
+                                                                    ((returnQuantities[item.id] || 0) * item.unitPrice * item.taxPercentage) / 
+                                                                    (100 + item.taxPercentage)
+                                                                )}
                                                             </span>
                                                             <span className="text-[9px] font-black text-slate-400 uppercase">({item.taxPercentage}%)</span>
                                                         </div>
                                                     </td>
                                                     <td className="px-4 py-4 text-right">
                                                         <span className="text-sm font-black text-slate-800">
-                                                            {formatCurrency((returnQuantities[item.id] || 0) * item.unitPrice * (1 + item.taxPercentage / 100))}
+                                                            {formatCurrency((returnQuantities[item.id] || 0) * item.unitPrice)}
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -313,7 +318,24 @@ export const DrugReturn: React.FC = () => {
                                 )}
                             </div>
 
-                            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex-1 max-w-xs">
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Reason for Return</label>
+                                    <select
+                                        value={reason}
+                                        onChange={e => setReason(e.target.value)}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer shadow-sm"
+                                    >
+                                        <option value="Doctor changed prescription">Doctor changed prescription</option>
+                                        <option value="Patient discharged">Patient discharged</option>
+                                        <option value="Medicine not required">Medicine not required</option>
+                                        <option value="Wrong medicine dispensed">Wrong medicine dispensed</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="p-6 bg-slate-100/50 border-t border-slate-100 flex justify-end gap-3">
                                 <button 
                                     onClick={() => { setSelectedBillId(null); setLiveItems([]); }}
                                     className="px-6 py-2.5 bg-white hover:bg-slate-100 text-slate-600 rounded-xl font-bold border border-slate-200 transition-all"

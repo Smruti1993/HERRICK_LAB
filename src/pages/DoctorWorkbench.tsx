@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
 import { DatePicker } from '../components/DatePicker';
-import { User, Activity, FileText, FlaskConical, Stethoscope, Microscope, X, Calendar, AlertTriangle, ChevronRight, Bell, Save } from 'lucide-react';
-import { Appointment } from '../types';
+import { User, Activity, FileText, FlaskConical, Stethoscope, Microscope, X, Calendar, AlertTriangle, ChevronRight, Bell, Save, Receipt, DollarSign } from 'lucide-react';
+import { Appointment, ServiceOrder, Prescription, PrescriptionItem } from '../types';
 import { useNavigate } from 'react-router-dom';
 
 const VitalIndicator = ({ value, paramName, unit, light, vitalSignParameters }: { 
@@ -32,6 +32,156 @@ const VitalIndicator = ({ value, paramName, unit, light, vitalSignParameters }: 
         </span>
     );
     return <span className={light ? "text-white" : "text-slate-700 font-medium"}>{val} {unit}</span>;
+};
+
+// ─── Pending Balance Modal ──────────────────────────────────────────────────
+type PendingSection = {
+    pendingServiceOrders: ServiceOrder[];
+    pendingRxItems: Array<PrescriptionItem & { rxDate: string; prescriptionId: string }>;
+};
+
+const PendingBalanceModal = ({ patientName, data, onClose }: {
+    patientName: string;
+    data: PendingSection;
+    onClose: () => void;
+}) => {
+    const serviceTotal = data.pendingServiceOrders.reduce((acc, o) => acc + o.totalPrice, 0);
+    const rxTotal = data.pendingRxItems.reduce((acc, i) => acc + (i.totalAmount ?? (i.unitPrice ?? 0) * i.totalQty), 0);
+    const grandTotal = serviceTotal + rxTotal;
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-amber-50">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-100 rounded-xl">
+                            <Receipt className="w-5 h-5 text-amber-600" />
+                        </div>
+                        <div>
+                            <h2 className="font-bold text-slate-800 text-base">Pending Balance</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">{patientName} — Services & Pharmacy yet to be invoiced/dispensed</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-amber-100 rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Body */}
+                <div className="p-5 overflow-y-auto max-h-[60vh] space-y-5">
+
+                    {/* Pending Services */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Pending Services (to be invoiced)</span>
+                            <span className="ml-auto font-mono font-bold text-blue-700 text-sm">₹{serviceTotal.toFixed(2)}</span>
+                        </div>
+                        {data.pendingServiceOrders.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic pl-4">No pending service orders.</p>
+                        ) : (
+                            <div className="border border-blue-100 rounded-xl overflow-hidden">
+                                {data.pendingServiceOrders.map((order, idx) => (
+                                    <div key={order.id} className={`px-4 py-2.5 flex justify-between items-center text-xs ${
+                                        idx % 2 === 0 ? 'bg-white' : 'bg-blue-50/30'
+                                    } border-b border-blue-50 last:border-0`}>
+                                        <div className="flex flex-col gap-0.5">
+                                            <span className="font-medium text-slate-700">{order.serviceName}</span>
+                                            <div className="flex items-center gap-2">
+                                                {order.serviceCenter && <span className="text-[10px] text-slate-400">{order.serviceCenter}</span>}
+                                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                                                    order.priority === 'Urgent' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'
+                                                }`}>{order.priority}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4 shrink-0 text-right">
+                                            <span className="text-slate-400">Qty: {order.quantity}</span>
+                                            <span className="text-slate-400">@₹{order.unitPrice.toFixed(2)}</span>
+                                            <span className="font-bold text-slate-800">₹{order.totalPrice.toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div className="bg-blue-50 px-4 py-2 flex justify-end text-xs font-bold text-blue-700 border-t border-blue-100">
+                                    Service Sub-total: ₹{serviceTotal.toFixed(2)}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Pending Pharmacy */}
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                            <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Pending Pharmacy (to be dispensed)</span>
+                            <span className="ml-auto font-mono font-bold text-purple-700 text-sm">₹{rxTotal.toFixed(2)}</span>
+                        </div>
+                        {data.pendingRxItems.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic pl-4">No pending pharmacy items.</p>
+                        ) : (
+                            <div className="border border-purple-100 rounded-xl overflow-hidden">
+                                {data.pendingRxItems.map((item, idx) => {
+                                    const amt = item.totalAmount ?? ((item.unitPrice ?? 0) * item.totalQty);
+                                    return (
+                                        <div key={item.id} className={`px-4 py-2.5 flex justify-between items-center text-xs ${
+                                            idx % 2 === 0 ? 'bg-white' : 'bg-purple-50/30'
+                                        } border-b border-purple-50 last:border-0`}>
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="font-medium text-slate-700">{item.itemName || item.genericName || 'Unknown Drug'}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-slate-400">{item.dose} — {item.frequency}</span>
+                                                    <span className="text-[10px] text-slate-400">{item.noDays} days</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4 shrink-0 text-right">
+                                                <span className="text-slate-400">Qty: {item.totalQty}</span>
+                                                {item.unitPrice != null && <span className="text-slate-400">@₹{item.unitPrice.toFixed(2)}</span>}
+                                                <span className="font-bold text-slate-800">₹{amt.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                <div className="bg-purple-50 px-4 py-2 flex justify-end text-xs font-bold text-purple-700 border-t border-purple-100">
+                                    Pharmacy Sub-total: ₹{rxTotal.toFixed(2)}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+                    <div className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                        <DollarSign className="w-4 h-4 text-red-500" />
+                        Total Pending: <span className="text-red-600 text-base ml-1">₹{grandTotal.toFixed(2)}</span>
+                    </div>
+                    <button onClick={onClose} className="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-sm transition-colors">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const getNoteLabel = (noteType: string) => {
+  const mapping: Record<string, string> = {
+    'Visit History': 'Visit History',
+    'Chief Complaint': 'Chief Complaint',
+    'History of Present Illness': 'History of Present Illness',
+    'Past History': 'Past History',
+    'Family History': 'Family History',
+    'Medication History': 'Medication History',
+    'Allergies': 'Allergies & Intolerances',
+    'Review of Systems': 'Review of Systems',
+    'Physical Examination': 'Physical Examination',
+    'Significant Sign': 'Significant Signs',
+    'Diagnosis': 'Provisional Diagnosis',
+    'Treatment Plan': 'Treatment Plan',
+    'Treatment Desc': 'Prescription Notes',
+    'Remark': 'Doctor Remarks'
+  };
+  return mapping[noteType] || noteType;
 };
 
 const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => void }) => {
@@ -202,7 +352,7 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                                             {new Date(note.recordedAt).toLocaleString()}
                                                         </span>
                                                         <span className="text-slate-300">|</span>
-                                                        <span className="text-xs font-medium text-blue-600">{note.noteType}</span>
+                                                        <span className="text-xs font-medium text-blue-600">{getNoteLabel(note.noteType)}</span>
                                                     </div>
                                                     <span className="text-xs text-slate-400">{getDocName(apt?.doctorId || '')}</span>
                                                 </div>
@@ -395,13 +545,19 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
              </div>
         </div>
     );
-};export const DoctorWorkbench = () => {
-  const { appointments, patients, vitals, diagnoses, allergies, saveVitalSign, updateAppointment, bills, vitalSignParameters } = useData();
+};
+
+export const DoctorWorkbench = () => {
+  const { appointments, patients, vitals, diagnoses, allergies, saveVitalSign, updateAppointment, bills, vitalSignParameters, serviceOrders, prescriptions } = useData();
   const navigate = useNavigate();
 
   // --- EMR State ---
   const [showEMR, setShowEMR] = useState(false);
   const [emrPatientId, setEmrPatientId] = useState<string | null>(null);
+
+  // --- Pending Invoices Modal State ---
+  // --- Pending Balance Modal State ---
+  const [pendingModal, setPendingModal] = useState<{ patientName: string; data: PendingSection } | null>(null);
 
   // --- Filter State ---
   const [visitDate, setVisitDate] = useState(new Date().toISOString().split('T')[0]);
@@ -427,11 +583,40 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
       return isDateMatch && isStatusMatch;
   });
 
+  // Get appointment IDs for this patient
+  const getPatientAptIds = (patientId: string) =>
+      appointments.filter(a => a.patientId === patientId).map(a => a.id);
+
+  // Pending service orders = ordered but not yet invoiced
+  const getPendingServiceOrders = (patientId: string): ServiceOrder[] => {
+      const aptIds = getPatientAptIds(patientId);
+      return serviceOrders.filter(o =>
+          aptIds.includes(o.appointmentId) &&
+          o.status !== 'Cancelled' &&
+          o.billingStatus === 'Pending'
+      );
+  };
+
+  // Pending pharmacy items = prescription items not yet dispensed
+  const getPendingRxItems = (patientId: string): Array<PrescriptionItem & { rxDate: string; prescriptionId: string }> => {
+      const patientRx = prescriptions.filter(rx =>
+          rx.patientId === patientId &&
+          rx.status !== 'Cancelled' &&
+          rx.status !== 'Dispensed'
+      );
+      const items: Array<PrescriptionItem & { rxDate: string; prescriptionId: string }> = [];
+      patientRx.forEach(rx => {
+          rx.items
+              .filter(i => i.status === 'Pending')
+              .forEach(i => items.push({ ...i, rxDate: rx.orderDate, prescriptionId: rx.id }));
+      });
+      return items;
+  };
+
   const getPatientBalance = (patientId: string) => {
-      const patientBills = bills.filter(b => b.patientId === patientId);
-      const total = patientBills.reduce((acc, b) => acc + b.totalAmount, 0);
-      const paid = patientBills.reduce((acc, b) => acc + b.paidAmount, 0);
-      return total - paid;
+      const svcTotal = getPendingServiceOrders(patientId).reduce((acc, o) => acc + o.totalPrice, 0);
+      const rxTotal = getPendingRxItems(patientId).reduce((acc, i) => acc + (i.totalAmount ?? ((i.unitPrice ?? 0) * i.totalQty)), 0);
+      return svcTotal + rxTotal;
   };
 
   const getLatestVitals = (aptId: string) => {
@@ -485,8 +670,25 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
       setShowEMR(true);
   };
 
+  const handleOpenPendingInvoices = (patientId: string, patientName: string) => {
+      setPendingModal({
+          patientName,
+          data: {
+              pendingServiceOrders: getPendingServiceOrders(patientId),
+              pendingRxItems: getPendingRxItems(patientId)
+          }
+      });
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#f8fafc] -m-6 p-6 overflow-hidden">
+      {pendingModal && (
+          <PendingBalanceModal
+              patientName={pendingModal.patientName}
+              data={pendingModal.data}
+              onClose={() => setPendingModal(null)}
+          />
+      )}
       
       {/* Header Area */}
       <div className="flex items-center justify-between mb-6 shrink-0">
@@ -689,7 +891,14 @@ const EMRModal = ({ patientId, onClose }: { patientId: string, onClose: () => vo
                                       </td>
                                       <td className="px-2 py-4 text-right align-middle font-mono font-bold text-[12px]">
                                           {balance > 0 ? (
-                                              <span className="text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg">-{balance.toFixed(2)}</span>
+                                              <button
+                                                  onClick={() => handleOpenPendingInvoices(apt.patientId, `${patient?.firstName} ${patient?.lastName}`)}
+                                                  className="inline-flex items-center gap-1 text-red-600 bg-red-50 px-2 py-1 rounded-lg hover:bg-red-100 hover:shadow-sm transition-all border border-red-100 group/bal cursor-pointer"
+                                                  title="Click to view pending invoices"
+                                              >
+                                                  <Receipt className="w-3 h-3 opacity-60 group-hover/bal:opacity-100" />
+                                                  {balance.toFixed(2)}
+                                              </button>
                                           ) : (
                                               <span className="text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-lg">0.00</span>
                                           )}

@@ -41,6 +41,7 @@ export const Billing = () => {
 
     // Header / Config State
     const [newBillPatient, setNewBillPatient] = useState('');
+    const [newBillAppointmentId, setNewBillAppointmentId] = useState('');
     const [ignoreSponsor, setIgnoreSponsor] = useState(false);
     const [selectedCarePlan, setSelectedCarePlan] = useState('');
     const [encounterType, setEncounterType] = useState('Outpatient');
@@ -84,14 +85,65 @@ export const Billing = () => {
     // --- Cancel Modal State ---
     const [billToCancel, setBillToCancel] = useState<string | null>(null);
 
-    // --- Derived Data: Invoice List ---
-    const filteredBills = bills.filter(b => {
-        const p = patients.find(pat => pat.id === b.patientId);
-        const patientName = b.patientName || (p ? `${p.firstName} ${p.lastName}` : 'Walk-in Patient');
-        const nameMatch = patientName.toLowerCase().includes(searchTerm.toLowerCase());
-        const statusMatch = statusFilter === 'All' || b.status === statusFilter;
-        return nameMatch && statusMatch;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // --- Derived Data: Invoice List (Invoices & Receipts) ---
+    const filteredBills = React.useMemo(() => {
+        const rows: any[] = [];
+        
+        bills.forEach(bill => {
+            const p = patients.find(pat => pat.id === bill.patientId);
+            const patientName = bill.patientName || (p ? `${p.firstName} ${p.lastName}` : 'Walk-in Patient');
+            
+            // 1. Add Invoice Row
+            rows.push({
+                keyId: `${bill.id}-inv`,
+                id: bill.id,
+                invoiceNo: bill.invoiceNo || `#${bill.id.slice(-6)}`,
+                date: bill.date,
+                patientName,
+                totalAmount: bill.totalAmount,
+                paidAmount: bill.paidAmount,
+                status: bill.status,
+                isReceipt: false,
+                parentBill: bill
+            });
+            
+            // 2. Add Receipt Row for each payment
+            if (bill.payments) {
+                bill.payments.forEach(pay => {
+                    rows.push({
+                        keyId: `${pay.id}-rcp`,
+                        id: pay.id,
+                        invoiceNo: `RCP-${pay.id.slice(-8).toUpperCase()}`,
+                        date: pay.date,
+                        patientName,
+                        totalAmount: pay.amount,
+                        paidAmount: pay.amount,
+                        status: 'Receipt',
+                        isReceipt: true,
+                        parentBill: bill,
+                        payment: pay
+                    });
+                });
+            }
+        });
+        
+        // Filter and Sort
+        return rows.filter(row => {
+            const nameMatch = row.patientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             row.invoiceNo.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            let statusMatch = false;
+            if (statusFilter === 'All') {
+                statusMatch = true;
+            } else if (statusFilter === 'Receipt') {
+                statusMatch = row.isReceipt;
+            } else {
+                statusMatch = !row.isReceipt && row.status === statusFilter;
+            }
+            
+            return nameMatch && statusMatch;
+        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [bills, patients, searchTerm, statusFilter]);
 
     const paginatedBills = filteredBills.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -248,54 +300,59 @@ export const Billing = () => {
 
         setIsSaving(true);
 
-        const processedItems = billItems.map((item, idx) => ({
-            id: `${Date.now()}-${idx}`,
-            description: item.description || 'Service Charges',
-            quantity: Number(item.quantity || 1),
-            unitPrice: Number(item.unitPrice || 0),
-            discountPercentage: Number(item.discountPercentage || 0),
-            discountAmount: Number(item.discountAmount || 0),
-            taxPercentage: Number(item.taxPercentage || 0),
-            taxAmount: Number(item.taxAmount || 0),
-            total: Number(item.total || 0),
-            itemType: item.itemType || 'Service',
-            itemId: item.itemId,
-            batchNo: item.batchNo
-        }));
+        try {
+            const processedItems = billItems.map((item) => ({
+                id: crypto.randomUUID(),
+                description: item.description || 'Service Charges',
+                quantity: Number(item.quantity || 1),
+                unitPrice: Number(item.unitPrice || 0),
+                discountPercentage: Number(item.discountPercentage || 0),
+                discountAmount: Number(item.discountAmount || 0),
+                taxPercentage: Number(item.taxPercentage || 0),
+                taxAmount: Number(item.taxAmount || 0),
+                total: Number(item.total || 0),
+                itemType: item.itemType || 'Service',
+                itemId: item.itemId,
+                batchNo: item.batchNo
+            }));
 
-        const finalBill: Bill = {
-            id: Date.now().toString(),
-            invoiceNo: invoiceNo,
-            patientId: newBillPatient,
-            appointmentId: linkedOrderIds[0] || undefined,
-            date: new Date(invoiceDate).toISOString(),
-            status: saveAsPending ? 'Unpaid' : (paymentMode === 'Credit' ? 'Unpaid' : (Number(amountReceived) >= totalAmount ? 'Paid' : 'Partial')),
-            totalAmount: totalAmount,
-            paidAmount: paymentMode === 'Credit' ? 0 : Number(amountReceived),
-            discountAmount: calculatedDiscount,
-            taxAmount: calculatedTax,
-            roundOff: roundOff,
-            paymentMode: paymentMode,
-            amountReceived: paymentMode === 'Credit' ? 0 : Number(amountReceived),
-            referenceNo: paymentMode === 'Credit' ? '' : referenceNo,
-            notes: notes,
-            departmentId: selectedDept || undefined,
-            doctorId: selectedDoctor || undefined,
-            items: processedItems,
-            payments: (paymentMode === 'Credit' || saveAsPending) ? [] : [{
-                id: `${Date.now()}-pay`,
-                date: new Date().toISOString(),
-                amount: Number(amountReceived),
-                method: (paymentMode === 'UPI' || paymentMode === 'Online') ? 'Online' : (paymentMode as any),
-                reference: referenceNo
-            }]
-        };
+            const finalBill: Bill = {
+                id: crypto.randomUUID(),
+                invoiceNo: invoiceNo,
+                patientId: newBillPatient,
+                appointmentId: newBillAppointmentId || undefined,
+                date: new Date(invoiceDate).toISOString(),
+                status: saveAsPending ? 'Unpaid' : (paymentMode === 'Credit' ? 'Unpaid' : (Number(amountReceived) >= totalAmount ? 'Paid' : 'Partial')),
+                totalAmount: totalAmount,
+                paidAmount: paymentMode === 'Credit' ? 0 : Number(amountReceived),
+                discountAmount: calculatedDiscount,
+                taxAmount: calculatedTax,
+                roundOff: roundOff,
+                paymentMode: paymentMode,
+                amountReceived: paymentMode === 'Credit' ? 0 : Number(amountReceived),
+                referenceNo: paymentMode === 'Credit' ? '' : referenceNo,
+                notes: notes,
+                departmentId: selectedDept || undefined,
+                doctorId: selectedDoctor || undefined,
+                items: processedItems,
+                payments: (paymentMode === 'Credit' || saveAsPending) ? [] : [{
+                    id: crypto.randomUUID(),
+                    date: new Date().toISOString(),
+                    amount: Number(amountReceived),
+                    method: (paymentMode === 'UPI' || paymentMode === 'Online') ? 'Online' : (paymentMode as any),
+                    reference: referenceNo
+                }]
+            };
 
-        const success = await createBill(finalBill, linkedOrderIds);
-        setIsSaving(false);
-
-        if (success) {
-            handleCloseModal();
+            const success = await createBill(finalBill, linkedOrderIds);
+            if (success) {
+                handleCloseModal();
+            }
+        } catch (err: any) {
+            console.error("Invoice creation error:", err);
+            showToast('error', 'Error creating invoice: ' + err.message);
+        } finally {
+            setIsSaving(false);
         }
     };
 
@@ -303,6 +360,7 @@ export const Billing = () => {
         setShowCreateModal(false);
         setLinkedOrderIds([]);
         setNewBillPatient('');
+        setNewBillAppointmentId('');
         setBillItems([{ description: 'Consultation Fee', quantity: 1, unitPrice: 30, discountPercentage: 0, discountAmount: 0, taxPercentage: 0, taxAmount: 0, total: 30, itemType: 'Service' }]);
         setSelectedDoctor('');
         setSelectedDept('');
@@ -364,7 +422,7 @@ export const Billing = () => {
         }
 
         const payment: Payment = {
-            id: Date.now().toString(),
+            id: crypto.randomUUID(),
             date: new Date().toISOString(),
             amount: amount,
             method: paymentMethod as any,
@@ -558,17 +616,23 @@ export const Billing = () => {
         printWindow.document.close();
     };
 
-    const handlePrintReceipt = (bill: Bill) => {
+    const handlePrintReceipt = (bill: Bill, payment?: Payment) => {
         const patient = patients.find(p => p.id === bill.patientId);
         const mrnFormatted = patient ? patient.id.slice(-8).toUpperCase() : '';
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
 
+        const displayReceiptNo = payment ? `RCP-${payment.id.slice(-8).toUpperCase()}` : (bill.receiptNo || 'RCP-' + bill.id.slice(-8).toUpperCase());
+        const displayReceiptDate = payment ? payment.date : bill.date;
+        const displayPaymentMode = payment ? payment.method : (bill.paymentMode || 'Cash');
+        const displayPaidAmount = payment ? payment.amount : (bill.paidAmount || bill.totalAmount);
+        const displayRefNo = payment ? payment.reference : bill.referenceNo;
+
         const html = `
         <!DOCTYPE html>
         <html dir="ltr">
         <head>
-          <title>Receipt - ${bill.receiptNo || 'RCP-' + bill.id.slice(-8).toUpperCase()}</title>
+          <title>Receipt - ${displayReceiptNo}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
             @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
@@ -718,11 +782,11 @@ export const Billing = () => {
               <div class="card">
                   <div class="info-row">
                       <span class="label-group"><span>Receipt No</span><span class="arabic">/ رقم السند</span>:</span>
-                      <span class="value">${bill.receiptNo || 'RCP-' + bill.id.slice(-8).toUpperCase()}</span>
+                      <span class="value">${displayReceiptNo}</span>
                   </div>
                   <div class="info-row">
                       <span class="label-group"><span>Receipt Date</span><span class="arabic">/ تاريخ السند</span>:</span>
-                      <span class="value">${new Date(bill.date).toLocaleString()}</span>
+                      <span class="value">${new Date(displayReceiptDate).toLocaleString()}</span>
                   </div>
                   <div class="info-row">
                       <span class="label-group"><span>Invoice No</span><span class="arabic">/ رقم الفاتورة</span>:</span>
@@ -730,12 +794,12 @@ export const Billing = () => {
                   </div>
                   <div class="info-row">
                       <span class="label-group"><span>Payment Mode</span><span class="arabic">/ طريقة الدفع</span>:</span>
-                      <span class="value">${bill.paymentMode || 'Cash'}</span>
+                      <span class="value">${displayPaymentMode}</span>
                   </div>
-                  ${bill.referenceNo ? `
+                  ${displayRefNo ? `
                   <div class="info-row">
                       <span class="label-group"><span>Ref No</span><span class="arabic">/ رقم المرجع</span>:</span>
-                      <span class="value">${bill.referenceNo}</span>
+                      <span class="value">${displayRefNo}</span>
                   </div>` : ''}
               </div>
           </div>
@@ -772,7 +836,7 @@ export const Billing = () => {
               </div>
               <div class="total-row grand-total">
                   <span class="label-group"><span>Amount Paid</span><span class="arabic">/ المبلغ المدفوع</span>:</span>
-                  <span>${formatCurrency(bill.paidAmount || bill.totalAmount)}</span>
+                  <span>${formatCurrency(displayPaidAmount)}</span>
               </div>
           </div>
           
@@ -849,6 +913,7 @@ export const Billing = () => {
                                 <option value="Partial">Partial</option>
                                 <option value="Paid">Paid</option>
                                 <option value="Cancelled">Cancelled</option>
+                                <option value="Receipt">Receipt</option>
                             </select>
                         </div>
 
@@ -875,36 +940,38 @@ export const Billing = () => {
                                             </td>
                                         </tr>
                                     ) : (
-                                        paginatedBills.map(bill => {
-                                            const patient = patients.find(p => p.id === bill.patientId);
+                                        paginatedBills.map(row => {
                                             return (
-                                                <tr key={bill.id} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="px-6 py-4 font-mono text-xs text-slate-500">{bill.invoiceNo || `#${bill.id.slice(-6)}`}</td>
-                                                    <td className="px-6 py-4">{new Date(bill.date).toLocaleDateString()}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">{bill.patientName || (patient ? `${patient.firstName} ${patient.lastName}` : 'Walk-in Patient')}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">{formatCurrency(bill.totalAmount)}</td>
-                                                    <td className="px-6 py-4 text-green-600">{formatCurrency(bill.paidAmount)}</td>
+                                                <tr key={row.keyId} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="px-6 py-4 font-mono text-xs text-slate-500">{row.invoiceNo}</td>
+                                                    <td className="px-6 py-4">{new Date(row.date).toLocaleDateString()}</td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900">{row.patientName}</td>
+                                                    <td className="px-6 py-4 font-medium text-slate-900">{formatCurrency(row.totalAmount)}</td>
+                                                    <td className="px-6 py-4 text-green-600">{row.isReceipt ? '' : formatCurrency(row.paidAmount)}</td>
                                                     <td className="px-6 py-4">
-                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${bill.status === 'Paid' ? 'bg-green-100 text-green-800' :
-                                                                bill.status === 'Partial' ? 'bg-orange-100 text-orange-800' :
-                                                                    bill.status === 'Cancelled' ? 'bg-slate-100 text-slate-500 line-through' :
-                                                                        'bg-red-100 text-red-800'
-                                                            }`}>
-                                                            {bill.status}
+                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                                            row.isReceipt ? 'bg-purple-100 text-purple-800 border-purple-200' :
+                                                            row.status === 'Paid' ? 'bg-green-100 text-green-800 border-green-200' :
+                                                            row.status === 'Partial' ? 'bg-orange-100 text-orange-800 border-orange-200' :
+                                                            row.status === 'Partial_Return' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                                                            row.status === 'Cancelled' ? 'bg-slate-100 text-slate-500 border-slate-200 line-through' :
+                                                            'bg-red-100 text-red-800 border-red-200'
+                                                        }`}>
+                                                            {row.status === 'Partial_Return' ? 'Partial Return' : row.status}
                                                         </span>
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
                                                         <div className="flex justify-end gap-2">
-                                                            {bill.status !== 'Cancelled' && (
+                                                            {!row.isReceipt && row.status !== 'Cancelled' && (
                                                                 <button
-                                                                    onClick={() => openPaymentModal(bill)}
-                                                                    className={`p-2 rounded-lg transition-colors ${bill.status === 'Paid'
+                                                                    onClick={() => openPaymentModal(row.parentBill)}
+                                                                    className={`p-2 rounded-lg transition-colors ${row.status === 'Paid'
                                                                             ? 'text-slate-500 hover:bg-slate-100'
                                                                             : 'text-blue-600 hover:bg-blue-50'
                                                                         }`}
-                                                                    title={bill.status === 'Paid' ? "View Payment History" : "Record Payment"}
+                                                                    title={row.status === 'Paid' ? "View Payment History" : "Record Payment"}
                                                                 >
-                                                                    {bill.status === 'Paid' ? (
+                                                                    {row.status === 'Paid' ? (
                                                                         <History className="w-4 h-4" />
                                                                     ) : (
                                                                         <span className="text-[10px] font-black leading-none min-w-[16px] h-4 flex items-center justify-center">
@@ -914,9 +981,9 @@ export const Billing = () => {
                                                                 </button>
                                                             )}
 
-                                                            {bill.status !== 'Cancelled' && (
+                                                            {!row.isReceipt && row.status !== 'Cancelled' && (
                                                                 <button
-                                                                    onClick={() => setBillToCancel(bill.id)}
+                                                                    onClick={() => setBillToCancel(row.parentBill.id)}
                                                                     className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                                                     title="Cancel Invoice"
                                                                 >
@@ -924,9 +991,9 @@ export const Billing = () => {
                                                                 </button>
                                                             )}
 
-                                                            {bill.status !== 'Cancelled' && (bill.status === 'Paid' || bill.status === 'Partial' || bill.invoiceNo?.startsWith('INV-D-')) && (
+                                                            {(row.isReceipt || (row.status !== 'Cancelled' && (row.status === 'Paid' || row.status === 'Partial' || row.status === 'Partial_Return' || row.invoiceNo?.startsWith('INV-D-')))) && (
                                                                 <button
-                                                                    onClick={() => handlePrintReceipt(bill)}
+                                                                    onClick={() => handlePrintReceipt(row.parentBill, row.payment)}
                                                                     className="p-2 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-55 rounded-lg transition-colors"
                                                                     title="Print Receipt"
                                                                 >
@@ -934,13 +1001,15 @@ export const Billing = () => {
                                                                 </button>
                                                             )}
 
-                                                            <button
-                                                                onClick={() => handlePrint(bill)}
-                                                                className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-                                                                title="Print Invoice"
-                                                            >
-                                                                <Printer className="w-4 h-4" />
-                                                            </button>
+                                                            {!row.isReceipt && (
+                                                                <button
+                                                                    onClick={() => handlePrint(row.parentBill)}
+                                                                    className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                                                                    title="Print Invoice"
+                                                                >
+                                                                    <Printer className="w-4 h-4" />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -1088,12 +1157,19 @@ export const Billing = () => {
                                                         onClick={() => {
                                                             setNewBillPatient(patient?.id || '');
                                                             setLinkedOrderIds([order.id]); // Link this specific order
+                                                            setNewBillAppointmentId(order.appointmentId || '');
                                                             setBillItems([{
                                                                 description: order.serviceName,
                                                                 quantity: order.quantity,
                                                                 unitPrice: order.unitPrice,
                                                                 total: order.totalPrice
                                                             }]);
+                                                            if (doctor?.id) {
+                                                                setSelectedDoctor(doctor.id);
+                                                            }
+                                                            if (dept?.id) {
+                                                                setSelectedDept(dept.id);
+                                                            }
                                                             setShowCreateModal(true);
                                                         }}
                                                     >

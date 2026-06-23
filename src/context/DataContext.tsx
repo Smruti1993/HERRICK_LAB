@@ -2,7 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { 
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency
+  DoctorSchedule, ScheduleTemplate, SlotType,
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund
 } from '../types';
 import { 
     getSupabase, 
@@ -50,6 +51,9 @@ interface DataContextType {
   availabilities: DoctorAvailability[];
   saveAvailability: (avail: DoctorAvailability) => void;
   deleteAvailability: (id: string) => void;
+  doctorSchedules: DoctorSchedule[];
+  scheduleTemplates: ScheduleTemplate[];
+  setRefreshTrigger: React.Dispatch<React.SetStateAction<number>>;
   
   appointments: Appointment[];
   bookAppointment: (apt: Appointment) => void;
@@ -95,7 +99,7 @@ interface DataContextType {
   fetchDashboardMetrics: (storeId: string) => Promise<DashboardMetrics | null>;
   repairPh000006: (storeId: string) => Promise<void>;
   dispensePrescription: (prescriptionId: string, storeId: string, allocatedBatches: Record<string, { batchNo: string, rate: number, batchDate?: string, expiryDate?: string, amount?: number }>, issueQty?: Record<string, number>, dispensingUom?: Record<string, string>, paymentMode?: string, referenceNo?: string, paidAmount?: number, paymentStatus?: string) => Promise<{ success: boolean; invoiceId?: string }>;
-  processPharmacyReturn: (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string, taxPercentage?: number }>) => Promise<{ success: boolean; invoiceId?: string }>;
+  processPharmacyReturn: (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string, taxPercentage?: number }>, reason?: string) => Promise<{ success: boolean; invoiceId?: string }>;
   fetchBillItems: (billId: string) => Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; taxPercentage: number; taxAmount: number; }>>;
   addVitalSignGroup: (group: VitalSignGroup) => void;
   saveVitalSignParameter: (parameter: VitalSignParameter) => void;
@@ -204,9 +208,12 @@ interface DataContextType {
   deleteCurrency: (id: string) => Promise<boolean>;
   formatCurrency: (amount: number | string) => string;
   completeDirectSalePayment: (sale: DirectSale, paymentId: string, orderId: string) => Promise<boolean>;
+  patientRefunds: PatientRefund[];
+  processPatientRefund: (patientId: string, itemsList: Array<{ type: 'Return' | 'ServiceInvoice', id: string, amount: number }>, totalAmount: number, remarks: string) => Promise<{ success: boolean; refundNo?: string }>;
 
   isLoading: boolean;
   isDbConnected: boolean;
+
   updateDbConnection: (url: string, key: string) => void;
   disconnectDb: () => void;
 }
@@ -265,6 +272,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [serviceDefinitions, setServiceDefinitions] = useState<ServiceDefinition[]>([]);
   const [serviceTariffs, setServiceTariffs] = useState<ServiceTariff[]>([]);
   const [availabilities, setAvailabilities] = useState<DoctorAvailability[]>([]);
+  const [doctorSchedules, setDoctorSchedules] = useState<DoctorSchedule[]>([]);
+  const [scheduleTemplates, setScheduleTemplates] = useState<ScheduleTemplate[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [taxMasters, setTaxMasters] = useState<TaxMaster[]>([]);
   const [itemTaxMappings, setItemTaxMappings] = useState<ItemTaxMapping[]>([]);
@@ -349,6 +358,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [gstr2bUploads, setGstr2bUploads] = useState<GSTR2BUpload[]>([]);
   const [gstr2bInvoices, setGstr2bInvoices] = useState<GSTR2BInvoice[]>([]);
+  const [patientRefunds, setPatientRefunds] = useState<PatientRefund[]>([]);
+
 
 
   const addVitalSignGroup = async (group: VitalSignGroup) => {
@@ -405,6 +416,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // --- Mappers ---
   const mapDeptFromDb = (d: any): Department => ({ id: d.id, name: d.name, code: d.code, status: d.status });
+  const mapServiceCentreFromDb = (d: any): ServiceCentre => ({ id: d.id, name: d.name, code: d.code, status: d.status, departmentId: d.department_id });
   const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status, vatRegNo: b.vat_reg_no });
   const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status, vat_reg_no: b.vatRegNo });
   
@@ -433,6 +445,29 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const mapAvailToDb = (a: any) => ({
     id: a.id, doctor_id: a.doctorId, day_of_week: a.dayOfWeek, start_time: a.startTime,
     end_time: a.endTime, slot_duration_minutes: a.slot_duration_minutes
+  });
+
+  const mapDoctorScheduleFromDb = (s: any): DoctorSchedule => ({
+    id: s.id,
+    doctorId: s.doctor_id,
+    dayOfWeek: s.day_of_week,
+    startTime: s.start_time.substring(0, 5),
+    endTime: s.end_time.substring(0, 5),
+    slotType: s.slot_type as SlotType,
+    slotDuration: s.slot_duration,
+    isActive: s.is_active,
+    createdBy: s.created_by,
+    createdAt: s.created_at,
+    updatedAt: s.updated_at
+  });
+
+  const mapScheduleTemplateFromDb = (t: any): ScheduleTemplate => ({
+    id: t.id,
+    doctorId: t.doctor_id,
+    templateName: t.template_name,
+    weekStart: t.week_start,
+    createdBy: t.created_by,
+    createdAt: t.created_at
   });
 
   const mapAptFromDb = (a: any): Appointment => ({
@@ -481,7 +516,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         taxPercentage: Number(i.tax_percentage || 0),
         itemType: i.item_type
     })),
-    payments: payments.map(p => ({ id: p.id, date: p.date, amount: Number(p.amount || 0), method: p.method, reference: p.reference }))
+    payments: payments.map(p => ({ id: p.id, date: p.date, amount: Number(p.amount || 0), method: p.method, reference: p.reference })),
+    refundStatus: b.refund_status || 'Pending',
+    refundId: b.refund_id || undefined,
+    cancelledAt: b.cancelled_at || undefined
   });
 
   const mapVitalFromDb = (v: any): VitalSign => ({
@@ -1393,7 +1431,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('finance_chart_of_accounts').select('*'),
           supabase.from('finance_journal_vouchers').select('*'),
           supabase.from('finance_journal_voucher_items').select('*'),
-          supabase.from('currency_master').select('*')
+          supabase.from('currency_master').select('*'),
+          supabase.from('patient_refunds').select('*'),
+          supabase.from('doctor_schedules').select('*'),
+          supabase.from('schedule_templates').select('*')
         ]);
 
         const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
@@ -1416,7 +1457,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'finance_chart_of_accounts',
             'finance_journal_vouchers',
             'finance_journal_voucher_items',
-            'currency_master'
+            'currency_master',
+            'patient_refunds',
+            'doctor_schedules',
+            'schedule_templates'
         ];
 
         const [
@@ -1425,8 +1469,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
             prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes,
             pvRes, pvtRes, poRes, poiRes, grnRes, grniRes, prnRes, prniRes,
-            prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes, curRes
+            prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes, curRes, refundRes,
+            dsRes, stRes3
         ] = results;
+
 
         console.log(`Sync: Fetched ${bRes.data?.length || 0} raw bills from DB.`);
         console.log(`Sync complete. Results: ${results.length} tables.`);
@@ -1480,7 +1526,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (eRes && eRes.data) setEmployees(eRes.data.map(mapEmpFromDb));
         if (dRes && dRes.data) setDepartments(dRes.data.map(mapDeptFromDb));
         if (uRes && uRes.data) setUnits(uRes.data.map(mapDeptFromDb)); 
-        if (sRes && sRes.data) setServiceCentres(sRes.data.map(mapDeptFromDb));
+        if (sRes && sRes.data) setServiceCentres(sRes.data.map(mapServiceCentreFromDb));
         if (avRes && avRes.data) setAvailabilities(avRes.data.map(mapAvailFromDb));
         if (apRes && apRes.data) setAppointments(apRes.data.map(mapAptFromDb));
         if (vRes && vRes.data) setVitals(vRes.data.map(mapVitalFromDb));
@@ -1554,6 +1600,27 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (dgRes && dgRes.data) setDrugGenerics(dgRes.data.map(mapDrugGenericFromDb));
         if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
 
+        if (refundRes && refundRes.data) {
+            setPatientRefunds(refundRes.data.map((r: any) => ({
+                id: r.id,
+                refundNo: r.refund_no,
+                patientId: r.patient_id,
+                refundDate: r.refund_date,
+                totalAmount: Number(r.total_amount || 0),
+                paymentMethod: r.payment_method,
+                remarks: r.remarks,
+                createdBy: r.created_by,
+                createdAt: r.created_at
+            })));
+        }
+
+        if (dsRes && dsRes.data) {
+            setDoctorSchedules(dsRes.data.map(mapDoctorScheduleFromDb));
+        }
+        if (stRes3 && stRes3.data) {
+            setScheduleTemplates(stRes3.data.map(mapScheduleTemplateFromDb));
+        }
+
         if (bRes && bRes.data) {
             const rawBills = bRes.data;
             const rawItems = biRes.data || [];
@@ -1594,6 +1661,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         paidAmount: -Number(r.total_amount || 0),
                         taxAmount: -Number(r.tax_amount || 0),
                         isPharmacy: true,
+                        refundStatus: r.refund_status || 'Pending',
+                        refundId: r.refund_id || undefined,
+                        cancelledAt: r.return_date || r.created_at,
                         items: myReturnItems.map((ri: any) => {
                             const origBill = structuredBills.find((b: Bill) => b.id === r.original_bill_id);
                             const origNo = origBill?.invoiceNo || 'Unknown';
@@ -1612,6 +1682,35 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         payments: []
                     };
                     structuredBills.push(returnBill);
+                });
+            }
+
+            // Merge Patient Refunds as "Bills" (Debit) for the ledger
+            if (refundRes && refundRes.data) {
+                refundRes.data.forEach((ref: any) => {
+                    const refundBill: Bill = {
+                        id: ref.id,
+                        invoiceNo: ref.refund_no,
+                        patientId: ref.patient_id,
+                        appointmentId: undefined,
+                        date: ref.refund_date || ref.created_at,
+                        status: 'Paid',
+                        totalAmount: Number(ref.total_amount || 0),
+                        paidAmount: 0,
+                        taxAmount: 0,
+                        isPharmacy: false,
+                        createdBy: ref.created_by,
+                        refundStatus: 'Refunded',
+                        items: [{
+                            id: ref.id,
+                            description: `REFUND: Cash Refund (Ref: ${ref.refund_no})`,
+                            quantity: 1,
+                            unitPrice: Number(ref.total_amount || 0),
+                            total: Number(ref.total_amount || 0)
+                        }],
+                        payments: []
+                    };
+                    structuredBills.push(refundBill);
                 });
             }
 
@@ -3608,6 +3707,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Clear data states
       setPatients([]); setEmployees([]); setDepartments([]); setAppointments([]); setAvailabilities([]); setBills([]); setVitals([]); setDiagnoses([]); setClinicalNotes([]); setAllergies([]); setNarrativeDiagnoses([]); setMasterDiagnoses([]); setServiceDefinitions([]); setServiceTariffs([]); setVitalSignGroups([]); setVitalSignParameters([]); setDentalICDs([]); setPrescriptions([]);
+      setDoctorSchedules([]); setScheduleTemplates([]);
   };
 
   const saveDentalICD = async (icd: DentalICD) => {
@@ -3701,9 +3801,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!requireDb()) return;
     const original = employees.find(e => e.id === id);
     setEmployees(prev => prev.map(emp => emp.id === id ? { ...emp, ...data } : emp));
-    const updatedEmp = employees.find(e => e.id === id);
-    if(updatedEmp) {
-        const fullNewData = { ...updatedEmp, ...data };
+    if(original) {
+        const fullNewData = { ...original, ...data };
         const { error } = await getSupabase().from('employees').update(mapEmpToDb(fullNewData)).eq('id', id);
         if (error) { showToast('error', `Update failed: ${error.message}`); if (original) setEmployees(prev => prev.map(emp => emp.id === id ? original : emp)); }
         else showToast('success', 'Employee updated.');
@@ -3713,7 +3812,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addDepartment = async (d: Department) => {
     if (!requireDb()) return;
     setDepartments(prev => [...prev, d]);
-    const { error } = await getSupabase().from('departments').insert(d);
+    const { id, name, code, status } = d;
+    const { error } = await getSupabase().from('departments').insert({ id, name, code, status });
     if(error) { showToast('error', error.message); setDepartments(prev => prev.filter(dept => dept.id !== d.id)); }
     else showToast('success', 'Department added.');
   };
@@ -3721,7 +3821,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addUnit = async (u: Unit) => {
     if (!requireDb()) return;
     setUnits(prev => [...prev, u]);
-    const { error } = await getSupabase().from('units').insert(u);
+    const { id, name, code, status } = u;
+    const { error } = await getSupabase().from('units').insert({ id, name, code, status });
     if(error) { showToast('error', error.message); setUnits(prev => prev.filter(unit => unit.id !== u.id)); }
     else showToast('success', 'Unit added.');
   };
@@ -3729,7 +3830,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addServiceCentre = async (s: ServiceCentre) => {
     if (!requireDb()) return;
     setServiceCentres(prev => [...prev, s]);
-    const { error } = await getSupabase().from('service_centres').insert(s);
+    const { id, name, code, status, departmentId } = s;
+    const { error } = await getSupabase().from('service_centres').insert({ id, name, code, status, department_id: departmentId });
     if(error) { showToast('error', error.message); setServiceCentres(prev => prev.filter(sc => sc.id !== s.id)); }
     else showToast('success', 'Service Centre added.');
   };
@@ -3922,7 +4024,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!requireDb()) return false;
       
       // Optimistic update
-      setBills(prev => [bill, ...prev]);
+      setBills(prev => [{ ...bill, refundStatus: bill.refundStatus || 'Pending' }, ...prev]);
 
       const { error: billError } = await getSupabase().from('bills').insert({
           id: bill.id, 
@@ -3944,7 +4046,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           notes: bill.notes || null,
           created_by: bill.createdBy || 'admin',
           is_pharmacy: bill.isPharmacy || false,
-          prescription_id: bill.prescriptionId || null
+          prescription_id: bill.prescriptionId || null,
+          cancelled_at: bill.cancelledAt || null
       });
 
       if (billError) { 
@@ -3976,6 +4079,23 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return false;
       } 
 
+      // NEW: Insert payments (receipts) if any
+      if (bill.payments && bill.payments.length > 0) {
+          const paymentsDb = bill.payments.map(p => ({
+              id: p.id,
+              bill_id: bill.id,
+              date: p.date,
+              amount: Number(p.amount),
+              method: p.method,
+              reference: p.reference || null
+          }));
+          const { error: payError } = await getSupabase().from('payments').insert(paymentsDb);
+          if (payError) {
+              console.error("Failed to insert payments", payError);
+              showToast('info', 'Bill created, but failed to record payment receipt.');
+          }
+      }
+
       // NEW: Update status of linked service orders
       if (linkedOrderIds && linkedOrderIds.length > 0) {
           const { error: orderError } = await getSupabase()
@@ -4004,10 +4124,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const original = bills.find(b => b.id === id);
       if (!original) return false;
 
-      // Optimistic update
-      setBills(prev => prev.map(b => b.id === id ? { ...b, status: 'Cancelled' } : b));
+      const cancelledAt = new Date().toISOString();
 
-      const { error } = await getSupabase().from('bills').update({ status: 'Cancelled' }).eq('id', id);
+      // Optimistic update
+      setBills(prev => prev.map(b => b.id === id ? { ...b, status: 'Cancelled', refundStatus: 'Pending', cancelledAt } : b));
+
+      const { error } = await getSupabase().from('bills').update({ status: 'Cancelled', refund_status: 'Pending', cancelled_at: cancelledAt }).eq('id', id);
       
       if (error) {
           showToast('error', 'Failed to cancel bill: ' + error.message);
@@ -4954,160 +5076,38 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return `${prefix}${paddedSequence}`;
   };
 
-  const processPharmacyReturn = async (originalBillId: string, storeId: string, returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string, taxPercentage?: number }>): Promise<{ success: boolean; invoiceId?: string }> => {
+  const processPharmacyReturn = async (
+      originalBillId: string, 
+      storeId: string, 
+      returns: Array<{ itemId: string, batchNo: string, qty: number, rate: number, description: string, taxPercentage?: number, itemType?: string }>,
+      reason?: string
+  ): Promise<{ success: boolean; invoiceId?: string }> => {
     if (!requireDb()) return { success: false };
     try {
-      console.log(`Starting return for Bill: ${originalBillId} in Store: ${storeId}`);
+      console.log(`Starting RPC return for Bill: ${originalBillId} in Store: ${storeId}`);
       const supabase = getSupabase();
-      const originalBill = bills.find(b => b.id === originalBillId);
-      if (!originalBill) throw new Error("Original invoice record not found in system.");
-
-      const returnInvoiceNo = await generateSequentialReturnNumber(storeId);
-      const returnBillId = crypto.randomUUID();
-      const returnDate = new Date().toISOString();
-
-      const totalReturnTax = returns.reduce((sum, r) => {
-          const taxPercent = r.taxPercentage || 0;
-          const taxAmount = Number((r.qty * r.rate * (taxPercent / 100)).toFixed(2));
-          return sum + taxAmount;
-      }, 0);
-
-      const totalReturnAmount = returns.reduce((sum, r) => {
-          const taxPercent = r.taxPercentage || 0;
-          const basePrice = r.qty * r.rate;
-          const taxAmount = Number((basePrice * (taxPercent / 100)).toFixed(2));
-          return sum + basePrice + taxAmount;
-      }, 0);
-
-      // 1. Create Return Header in new table
-      const { error: billError } = await supabase.from('pharmacy_returns').insert({
-          id: returnBillId,
-          return_no: returnInvoiceNo,
-          original_bill_id: originalBillId,
-          patient_id: originalBill.patientId,
-          store_id: storeId,
-          return_date: returnDate,
-          total_amount: totalReturnAmount,
-          tax_amount: totalReturnTax,
-          created_by: user?.username || user?.email || 'admin'
+      
+      const { data, error } = await supabase.rpc('process_pharmacy_return', {
+        p_original_bill_id: originalBillId,
+        p_return_items: returns.map(item => ({
+          item_id:        item.itemId,
+          quantity:       Number(item.qty),
+          unit_price:     Number(item.rate),
+          batch_no:       item.batchNo,
+          tax_percentage: Number(item.taxPercentage || 0),
+          description:    item.description || ''
+        })),
+        p_store_id:   storeId,
+        p_reason:     reason || 'Medication Return',
+        p_created_by: user?.username || user?.email || 'admin'
       });
 
-      if (billError) throw billError;
+      if (error) throw error;
 
-      // 2. Look up batch details for ALL items from the stock ledger FIRST
-      //    so we can use them in both pharmacy_return_items AND inventory_stock_ledger
-      const batchInfoMap: Record<string, { batchNo: string; batchDate: string | null; expiryDate: string | null; prevStock: number; prevRate: number }> = {};
+      // Force refresh of local context state
+      setRefreshTrigger(prev => prev + 1);
 
-      for (const r of returns) {
-          // Latest closing stock (any entry) — for balance
-          const { data: lastStockData } = await supabase
-            .from('inventory_stock_ledger')
-            .select('closing_stock, closing_stock_rate')
-            .eq('store_id', storeId)
-            .eq('item_id', r.itemId)
-            .order('ref_doc_date', { ascending: false })
-            .limit(1);
-
-          // Most recent PHARMACY DISPENSE — for batch details
-          const { data: dispenseData } = await supabase
-            .from('inventory_stock_ledger')
-            .select('batch_no, batch_date, expiry_date')
-            .eq('store_id', storeId)
-            .eq('item_id', r.itemId)
-            .eq('ref_type', 'PHARMACY DISPENSE')
-            .order('ref_doc_date', { ascending: false })
-            .limit(1);
-
-          const lastEntry = lastStockData?.[0];
-          const dispenseEntry = dispenseData?.[0];
-
-          batchInfoMap[r.itemId] = {
-              batchNo: r.batchNo || dispenseEntry?.batch_no || '',
-              batchDate: dispenseEntry?.batch_date || null,
-              expiryDate: dispenseEntry?.expiry_date || null,
-              prevStock: Number(lastEntry?.closing_stock || 0),
-              prevRate: Number(lastEntry?.closing_stock_rate || r.rate),
-          };
-      }
-
-      // 3. Create Return Items — now with correct batch info
-      const returnItems = returns.map(r => {
-          const batchInfo = batchInfoMap[r.itemId] || {};
-          const taxPercent = r.taxPercentage || 0;
-          const taxAmount = Number((r.qty * r.rate * (taxPercent / 100)).toFixed(2));
-          return {
-              id: crypto.randomUUID(),
-              return_id: returnBillId,
-              item_id: r.itemId,
-              batch_no: batchInfo.batchNo || '',
-              batch_date: batchInfo.batchDate || null,
-              expiry_date: batchInfo.expiryDate || null,
-              description: r.description,
-              quantity: r.qty,
-              unit_price: r.rate,
-              tax_percentage: taxPercent,
-              tax_amount: taxAmount,
-              total_amount: Number((r.qty * r.rate + taxAmount).toFixed(2))
-          };
-      });
-
-      const { error: itemsError } = await supabase.from('pharmacy_return_items').insert(returnItems);
-      if (itemsError) throw itemsError;
-
-      // 4. Update Stock Ledger (Stock In — one entry per returned item)
-      for (const r of returns) {
-          const batchInfo = batchInfoMap[r.itemId] || {};
-          const newStock = batchInfo.prevStock + Number(r.qty);
-
-          const { error: ledgerError } = await supabase.from('inventory_stock_ledger').insert({
-              id: crypto.randomUUID(),
-              store_id: storeId,
-              item_id: r.itemId,
-              batch_no: batchInfo.batchNo || '',
-              batch_date: batchInfo.batchDate || null,
-              expiry_date: batchInfo.expiryDate || null,
-              transaction_type: 'Return',
-              ref_type: 'PHARMACY RETURN',
-              ref_doc_no: returnInvoiceNo,
-              ref_doc_date: returnDate,
-              stock_in_quantity: r.qty,
-              stock_out_quantity: 0,
-              closing_stock: newStock,
-              closing_stock_rate: batchInfo.prevRate,
-              closing_stock_value: newStock * batchInfo.prevRate,
-              currency: 'SAR'
-          });
-          if (ledgerError) throw ledgerError;
-      }
-
-      // 4. Also create a matching "Bill" record for financial reporting consistency if desired
-      // Or just update local state to include a "virtual" bill for the report
-      const localReturnBill: Bill = {
-          id: returnBillId,
-          invoiceNo: returnInvoiceNo,
-          patientId: originalBill.patientId,
-          appointmentId: originalBill.appointmentId,
-          date: returnDate,
-          status: 'Paid',
-          totalAmount: -totalReturnAmount, // Keep negative for financial logic
-          paidAmount: -totalReturnAmount,
-          taxAmount: -totalReturnTax,
-          isPharmacy: true,
-          createdBy: user?.username || user?.email || 'admin',
-          items: returnItems.map(ri => ({
-              id: ri.id,
-              description: `RETURN: ${ri.description} (From ${originalBill.invoiceNo || 'Unknown'})`,
-              quantity: -ri.quantity,
-              unitPrice: ri.unit_price,
-              total: -ri.total_amount,
-              itemId: ri.item_id,
-              batchNo: ri.batch_no
-          })),
-          payments: []
-      };
-      setBills(prev => [localReturnBill, ...prev]);
-
-      return { success: true, invoiceId: returnBillId };
+      return { success: true, invoiceId: data.return_id };
     } catch (err: any) {
       console.error("Return processing failed:", err);
       showToast('error', `Return failed: ${err.message}`);
@@ -5115,7 +5115,41 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const fetchBillItems = async (billId: string): Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; taxPercentage: number; taxAmount: number; }>> => {
+  const processPatientRefund = async (
+      patientId: string,
+      itemsList: Array<{ type: 'Return' | 'ServiceInvoice'; id: string; amount: number }>,
+      totalAmount: number,
+      remarks: string
+  ): Promise<{ success: boolean; refundNo?: string }> => {
+      if (!requireDb()) return { success: false };
+      try {
+          const supabase = getSupabase();
+          const returnIds = itemsList.filter(item => item.type === 'Return').map(item => item.id);
+          const billIds = itemsList.filter(item => item.type === 'ServiceInvoice').map(item => item.id);
+
+          const { data, error } = await supabase.rpc('process_patient_refund', {
+              p_patient_id:    patientId,
+              p_return_ids:    returnIds,
+              p_bill_ids:      billIds,
+              p_refund_method: 'Cash',
+              p_remarks:       remarks || 'Cash Refund',
+              p_created_by:    user?.username || user?.email || 'admin'
+          });
+
+          if (error) throw error;
+
+          // Force refresh of local context state
+          setRefreshTrigger(prev => prev + 1);
+
+          return { success: true, refundNo: data.ref_no };
+      } catch (err: any) {
+          console.error("Refund processing failed:", err);
+          showToast('error', `Refund failed: ${err.message}`);
+          return { success: false };
+      }
+  };
+
+  const fetchBillItems = async (billId: string): Promise<Array<{ id: string; description: string; quantity: number; unitPrice: number; total: number; itemId?: string; batchNo?: string; returnedQty: number; taxPercentage: number; taxAmount: number; itemType?: string; }>> => {
     if (!requireDb()) return [];
     const supabase = getSupabase();
     try {
@@ -5157,7 +5191,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           batchNo: i.batch_no || '',
           returnedQty: returnedQtyByItemId[i.item_id] || 0,
           taxPercentage: Number(i.tax_percentage || 0),
-          taxAmount: Number(i.tax_amount || 0)
+          taxAmount: Number(i.tax_amount || 0),
+          itemType: i.item_type || 'EACH'
         }));
       }
 
@@ -5208,7 +5243,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           batchNo: '',
           returnedQty: returnedQtyByItemId[i.item_id] || 0,
           taxPercentage: 0, // Fallback doesn't have tax info easily accessible
-          taxAmount: 0
+          taxAmount: 0,
+          itemType: i.units || 'EACH'
         };
       });
     } catch (err: any) {
@@ -6194,6 +6230,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       serviceDefinitions, serviceTariffs, saveServiceDefinition, uploadServiceDefinitions,
       dentalICDs, saveDentalICD, uploadDentalICDs, deleteDentalICD,
       availabilities, saveAvailability, deleteAvailability,
+      doctorSchedules, scheduleTemplates, setRefreshTrigger,
       appointments, bookAppointment, updateAppointment, cancelAppointment,
       bills, createBill, cancelBill, addPayment,
       vitals, diagnoses, narrativeDiagnoses, clinicalNotes, allergies, patientDocuments,
@@ -6221,9 +6258,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       journalVouchers, saveJournalVoucher, deleteJournalVoucher, postAutoJournalVoucher,
       gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled,
       currencies, selectedCurrency, setSelectedCurrency, saveCurrency, deleteCurrency, formatCurrency, completeDirectSalePayment,
-      toasts, showToast, addToast, removeToast,
-      isLoading, isDbConnected, updateDbConnection, disconnectDb
-    }}>
+       toasts, showToast, addToast, removeToast,
+       isLoading, isDbConnected, updateDbConnection, disconnectDb,
+       patientRefunds, processPatientRefund
+     }}>
       {children}
     </DataContext.Provider>
   );

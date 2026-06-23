@@ -1042,12 +1042,37 @@ const DocumentsModal = ({
     );
 };
 
+const getNoteLabel = (noteType: string) => {
+  const mapping: Record<string, string> = {
+    'Visit History': 'Visit History',
+    'Chief Complaint': 'Chief Complaint',
+    'History of Present Illness': 'History of Present Illness',
+    'Past History': 'Past History',
+    'Family History': 'Family History',
+    'Medication History': 'Medication History',
+    'Allergies': 'Allergies & Intolerances',
+    'Review of Systems': 'Review of Systems',
+    'Physical Examination': 'Physical Examination',
+    'Significant Sign': 'Significant Signs',
+    'Diagnosis': 'Provisional Diagnosis',
+    'Treatment Plan': 'Treatment Plan',
+    'Treatment Desc': 'Prescription Notes',
+    'Remark': 'Doctor Remarks'
+  };
+  return mapping[noteType] || noteType;
+};
+
 export const Consultation = () => {
   const { appointmentId } = useParams<{ appointmentId: string }>();
   const navigate = useNavigate();
-  const { appointments, patients, vitals, updateAppointment, employees, departments, allergies, diagnoses } = useData();
+  const { 
+    appointments, patients, vitals, updateAppointment, employees, 
+    departments, allergies, diagnoses, clinicalNotes, saveClinicalNote 
+  } = useData();
   
   const [activeSection, setActiveSection] = useState('Chief Complaint');
+  const [editedNotes, setEditedNotes] = useState<Record<string, string>>({});
+  const [isNotesLoaded, setIsNotesLoaded] = useState(false);
   
   // Modal states
   const [showVitals, setShowVitals] = useState(false);
@@ -1083,6 +1108,47 @@ export const Consultation = () => {
       return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Load notes once from DB when component mounts or appointment changes
+  useEffect(() => {
+    if (appointmentId && clinicalNotes.length > 0 && !isNotesLoaded) {
+      const notesForApt = clinicalNotes.filter(n => n.appointmentId === appointmentId);
+      const notesMap: Record<string, string> = {};
+      notesForApt.forEach(n => {
+        notesMap[n.noteType] = n.description;
+      });
+      setEditedNotes(notesMap);
+      setIsNotesLoaded(true);
+    }
+  }, [appointmentId, clinicalNotes, isNotesLoaded]);
+
+  // Reset loaded status and state when appointment changes
+  useEffect(() => {
+    setIsNotesLoaded(false);
+    setEditedNotes({});
+  }, [appointmentId]);
+
+  const handleClearNotes = () => {
+    setEditedNotes(prev => ({
+      ...prev,
+      [activeSection]: ''
+    }));
+  };
+
+  const handleSaveNote = async () => {
+    const text = editedNotes[activeSection] || '';
+    const existing = clinicalNotes.find(
+      n => n.appointmentId === appointmentId && n.noteType === activeSection
+    );
+    const newNote = {
+      id: existing?.id || crypto.randomUUID(),
+      appointmentId: appointmentId || '',
+      noteType: activeSection,
+      description: text,
+      recordedAt: existing?.recordedAt || new Date().toISOString()
+    };
+    await saveClinicalNote(newNote);
+  };
+
   const handleComplete = () => {
       updateAppointment(appointment.id, { status: 'Completed', checkOutTime: new Date().toISOString() });
       navigate('/doctor-workbench');
@@ -1092,6 +1158,22 @@ export const Consultation = () => {
     return appointments
         .filter(a => a.patientId === patient.id && a.id !== appointment.id && a.status !== 'Cancelled')
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  };
+
+  const getPastNotesForSection = () => {
+    const history = getPatientHistory();
+    const historyIds = history.map(h => h.id);
+    return clinicalNotes
+        .filter(n => historyIds.includes(n.appointmentId) && n.noteType === activeSection && n.description.trim() !== '')
+        .map(n => {
+            const apt = history.find(h => h.id === n.appointmentId);
+            return {
+                date: apt ? new Date(apt.date).toLocaleDateString() : 'Unknown Date',
+                time: apt?.time || '',
+                doctorId: apt?.doctorId || '',
+                description: n.description
+            };
+        });
   };
 
   const renderVisitHistory = () => {
@@ -1105,6 +1187,7 @@ export const Consultation = () => {
                 const dept = departments.find(d => d.id === apt.departmentId);
                 const aptDiagnoses = diagnoses.filter(d => d.appointmentId === apt.id);
                 const aptVitals = vitals.find(v => v.appointmentId === apt.id);
+                const aptNotes = clinicalNotes.filter(n => n.appointmentId === apt.id && n.description.trim() !== '');
 
                 return (
                     <div key={apt.id} className="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 transition-colors bg-slate-50/50">
@@ -1150,6 +1233,21 @@ export const Consultation = () => {
                                     {aptVitals.bpSystolic && <div><span className="font-semibold text-slate-500">BP:</span> {aptVitals.bpSystolic}/{aptVitals.bpDiastolic}</div>}
                                     {aptVitals.temperature && <div><span className="font-semibold text-slate-500">Temp:</span> {aptVitals.temperature}°C</div>}
                                     {aptVitals.pulse && <div><span className="font-semibold text-slate-500">HR:</span> {aptVitals.pulse}</div>}
+                                </div>
+                            </div>
+                        )}
+                        {aptNotes.length > 0 && (
+                            <div className="ml-6 mb-1">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1">
+                                    <FileText className="w-3 h-3" /> Clinical Notes
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white border border-slate-100 rounded-xl p-3.5 shadow-inner">
+                                    {aptNotes.map(n => (
+                                        <div key={n.id} className="text-xs border-b border-slate-50 last:border-0 pb-2 last:pb-0">
+                                            <div className="font-bold text-blue-600 mb-0.5">{getNoteLabel(n.noteType)}</div>
+                                            <div className="text-slate-600 whitespace-pre-wrap leading-relaxed">{n.description}</div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}
@@ -1272,79 +1370,168 @@ export const Consultation = () => {
 
         {/* 4. Workspace (Sidebar + Content) */}
         <div className="flex-1 flex overflow-hidden">
-            <div className="w-64 bg-slate-900 text-slate-400 flex flex-col shrink-0 border-r border-slate-800">
-                <div className="flex-1 overflow-y-auto py-2">
-                    {SIDEBAR_ITEMS.map(item => (
-                        <button
-                            key={item.id}
-                            onClick={() => setActiveSection(item.id)}
-                            className={`w-full text-left px-5 py-3.5 text-sm font-medium transition-all relative group ${
-                                activeSection === item.id 
-                                ? 'bg-blue-600 text-white shadow-lg' 
-                                : 'hover:bg-slate-800 hover:text-slate-200'
-                            }`}
-                        >
-                            {activeSection === item.id && (
-                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-white"></div>
-                            )}
-                            {item.label}
-                        </button>
-                    ))}
+            {/* Sidebar */}
+            <div className="w-64 bg-white flex flex-col shrink-0 border-r border-slate-200 shadow-[4px_0_24px_rgba(0,0,0,0.01)]">
+                <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+                    {SIDEBAR_ITEMS.map(item => {
+                        const isSelected = activeSection === item.id;
+                        const isSaved = item.id !== 'Visit History' && clinicalNotes.some(
+                            n => n.appointmentId === appointmentId && n.noteType === item.id && n.description.trim() !== ''
+                        );
+                        return (
+                            <button
+                                key={item.id}
+                                onClick={() => setActiveSection(item.id)}
+                                className={`w-full text-left px-4 py-3.5 text-sm font-medium rounded-xl transition-all duration-200 relative flex items-center justify-between group ${
+                                    isSelected 
+                                    ? 'bg-blue-50 text-blue-700 font-bold shadow-sm' 
+                                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                }`}
+                            >
+                                <span className="truncate pr-6">{item.label}</span>
+                                {isSaved && (
+                                    <CheckCircle className={`w-4 h-4 shrink-0 transition-colors ${
+                                        isSelected ? 'text-blue-600' : 'text-emerald-500'
+                                    }`} />
+                                )}
+                            </button>
+                        );
+                    })}
                 </div>
-                <div className="p-4 border-t border-slate-800 bg-slate-900">
-                    <button onClick={() => navigate('/doctor-workbench')} className="flex items-center justify-center w-full py-2 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-white transition-colors border border-slate-700 rounded hover:border-slate-500">
-                        <ArrowLeft className="w-3 h-3 mr-2" /> Back to List
+                <div className="p-4 border-t border-slate-100 bg-white">
+                    <button 
+                        onClick={() => navigate('/doctor-workbench')} 
+                        className="flex items-center justify-center w-full py-2.5 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 transition-colors border border-slate-200 rounded-xl hover:border-slate-300 hover:bg-slate-50"
+                    >
+                        <ArrowLeft className="w-3.5 h-3.5 mr-2" /> Back to List
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 bg-slate-100">
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 min-h-full p-8 relative">
-                    <h3 className="text-xl font-bold text-slate-800 mb-6 border-b pb-4 flex items-center gap-3">
-                        <FileText className="w-6 h-6 text-blue-600" />
-                        {SIDEBAR_ITEMS.find(i => i.id === activeSection)?.label}
-                    </h3>
-                    
-                    {activeSection === 'Visit History' ? (
-                        <div className="animate-in fade-in duration-300">
-                            {renderVisitHistory()}
-                        </div>
-                    ) : (
-                        <div className="max-w-5xl mx-auto animate-in fade-in duration-300">
-                            <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg text-amber-800 text-sm mb-6 flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                                <div>
-                                    <p className="font-bold">Currently editing: {activeSection}</p>
-                                    <p className="text-xs mt-1 text-amber-700">Use the toolbar buttons (F3-F8) or sidebar to navigate through the clinical workflow. Changes are auto-saved locally until completed.</p>
-                                </div>
-                            </div>
+            {/* Content Area */}
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                {activeSection === 'Visit History' ? (
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 min-h-full animate-in fade-in duration-300">
+                        <h3 className="text-lg font-bold text-slate-800 mb-6 pb-4 border-b border-slate-100 flex items-center gap-3">
+                            <FileText className="w-6 h-6 text-blue-600" />
+                            Visit History
+                        </h3>
+                        {renderVisitHistory()}
+                    </div>
+                ) : (
+                    <div className="max-w-7xl mx-auto min-h-full flex flex-col gap-6 animate-in fade-in duration-300">
+                        {/* Split Editor + History */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch flex-1">
+                            {/* Editor card (2 cols) */}
+                            <div className="lg:col-span-2 flex flex-col">
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col flex-1">
+                                    <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
+                                                <FileText className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-base font-bold text-slate-800">
+                                                    {SIDEBAR_ITEMS.find(i => i.id === activeSection)?.label}
+                                                </h3>
+                                                <p className="text-xs text-slate-500 mt-0.5">Record clinical findings for the current visit</p>
+                                            </div>
+                                        </div>
+                                        {/* Saved/Unsaved Status Badge */}
+                                        {(() => {
+                                            const dbNote = clinicalNotes.find(
+                                                n => n.appointmentId === appointmentId && n.noteType === activeSection
+                                            );
+                                            const dbText = dbNote?.description || '';
+                                            const currentText = editedNotes[activeSection] || '';
+                                            const hasUnsaved = currentText !== dbText;
+                                            
+                                            if (dbText && !hasUnsaved) {
+                                                return (
+                                                    <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full text-xs font-bold border border-emerald-100">
+                                                        <CheckCircle className="w-3.5 h-3.5" /> Saved
+                                                    </span>
+                                                );
+                                            } else if (currentText) {
+                                                return (
+                                                    <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full text-xs font-bold border border-amber-100 animate-pulse">
+                                                        <Edit className="w-3.5 h-3.5" /> Unsaved Changes
+                                                    </span>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
+                                    </div>
 
-                            <div className="space-y-6">
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">Clinical Notes & Findings</label>
-                                    <div className="relative">
-                                        <textarea 
-                                            className="w-full h-80 p-5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none text-slate-700 leading-relaxed text-sm bg-white shadow-inner"
-                                            placeholder={`Enter clinical details for ${activeSection} here...`}
-                                        ></textarea>
-                                        <div className="absolute bottom-4 right-4 text-xs text-slate-400">
-                                            Markdown Supported
+                                    <div className="flex-1 flex flex-col gap-4">
+                                        <div className="relative flex-1 flex flex-col">
+                                            <textarea 
+                                                value={editedNotes[activeSection] || ''}
+                                                onChange={(e) => setEditedNotes(prev => ({ ...prev, [activeSection]: e.target.value }))}
+                                                className="w-full flex-1 min-h-[350px] p-5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none resize-none text-slate-700 leading-relaxed text-sm bg-slate-50/20 shadow-inner"
+                                                placeholder={`Enter clinical details for ${SIDEBAR_ITEMS.find(i => i.id === activeSection)?.label} here...`}
+                                            ></textarea>
+                                            <div className="absolute bottom-4 right-4 text-xs text-slate-400 bg-white/80 px-2 py-0.5 rounded backdrop-blur-sm">
+                                                Markdown Supported
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 shrink-0">
+                                            <button 
+                                                onClick={handleClearNotes}
+                                                className="px-5 py-2.5 border border-slate-200 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-50 transition-colors uppercase tracking-wider"
+                                            >
+                                                Clear Notes
+                                            </button>
+                                            <button 
+                                                onClick={handleSaveNote}
+                                                className="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-bold text-xs hover:bg-blue-700 transition-all shadow-md shadow-blue-200 flex items-center gap-2 uppercase tracking-wider hover:translate-y-[-1px] active:translate-y-0"
+                                            >
+                                                <Save className="w-4 h-4" /> Save {SIDEBAR_ITEMS.find(i => i.id === activeSection)?.label}
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
-                                
-                                <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                                    <button className="px-6 py-2.5 border border-slate-300 text-slate-600 rounded-lg font-bold text-sm hover:bg-slate-50 transition-colors">
-                                        Clear Notes
-                                    </button>
-                                    <button className="bg-blue-600 text-white px-8 py-2.5 rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors shadow-md shadow-blue-100 flex items-center gap-2">
-                                        <Save className="w-4 h-4" /> Save {activeSection}
-                                    </button>
+                            </div>
+
+                            {/* History context (1 col) */}
+                            <div className="lg:col-span-1 flex flex-col">
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col flex-1 max-h-[550px] lg:max-h-none">
+                                    <h4 className="text-sm font-bold text-slate-800 mb-4 pb-2 border-b border-slate-100 flex items-center gap-2">
+                                        <Clock className="w-4 h-4 text-slate-400" />
+                                        Previous Records
+                                    </h4>
+                                    
+                                    <div className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+                                        {getPastNotesForSection().length === 0 ? (
+                                            <div className="flex flex-col items-center justify-center text-center py-20 text-slate-400 flex-1 h-full">
+                                                <Clock className="w-8 h-8 opacity-25 mb-2" />
+                                                <p className="text-xs italic">No previous records found for this section.</p>
+                                            </div>
+                                        ) : (
+                                            getPastNotesForSection().map((pastNote, idx) => (
+                                                <div key={idx} className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                                                            <Calendar className="w-3 h-3 text-blue-500" />
+                                                            {pastNote.date} {pastNote.time}
+                                                        </span>
+                                                        <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-medium">
+                                                            {employees.find(e => e.id === pastNote.doctorId)?.lastName ? `Dr. ${employees.find(e => e.id === pastNote.doctorId)?.lastName}` : 'Doctor'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed border-t border-slate-100/50 pt-2">
+                                                        {pastNote.description}
+                                                    </p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
             </div>
         </div>
     </div>
