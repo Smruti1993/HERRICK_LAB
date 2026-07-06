@@ -286,6 +286,7 @@ export interface Bill {
   referenceNo?: string;
   notes?: string;
   departmentId?: string;
+  departmentName?: string;
   items: BillItem[];
   payments: Payment[];
   isPharmacy?: boolean;
