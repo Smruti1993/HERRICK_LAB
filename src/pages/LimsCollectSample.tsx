@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getSupabase, getAuthToken } from '../services/supabaseClient';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
 import { 
   ArrowLeft, 
   FlaskConical, 
@@ -502,7 +502,7 @@ export default function LimsCollectSample() {
           ]
         };
 
-        const response = await fetch('/api/lims/orders/collect', {
+        const response = await fetch(`${BACKEND_URL}/api/lims/orders/collect`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

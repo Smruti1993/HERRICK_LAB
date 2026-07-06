@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getSupabase, getAuthToken } from '../services/supabaseClient';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
 import { LimsLabOrder, LimsResult } from '../types';
 import { 
   History, 
@@ -109,7 +109,7 @@ export default function LimsAmendments() {
     const localUser = localStorage.getItem('medicore_user') ? JSON.parse(localStorage.getItem('medicore_user')!) : null;
     const currentUserId = localUser?.id || '9185e6a4-8ae8-4c60-b3c7-793d89b4700e';
     
-    const response = await fetch('/api/lims/results/amend', {
+    const response = await fetch(`${BACKEND_URL}/api/lims/results/amend`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

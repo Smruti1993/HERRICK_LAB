@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getSupabase, getAuthToken } from '../services/supabaseClient';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
 import { 
   ArrowLeft, 
   Bell, 
@@ -502,7 +502,7 @@ export default function LimsPerformTest() {
       setDetailsLoading(true);
       try {
         const token = await getAuthToken();
-        const response = await fetch(`/api/lims/orders/${selectedOrder.id}`, {
+        const response = await fetch(`${BACKEND_URL}/api/lims/orders/${selectedOrder.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
@@ -718,7 +718,7 @@ export default function LimsPerformTest() {
         maintenanceOk: true
       };
 
-      const response = await fetch('/api/lims/results/save', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/results/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -789,7 +789,7 @@ export default function LimsPerformTest() {
         analyzerChannel
       };
 
-      const response = await fetch('/api/lims/results/save', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/results/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -831,7 +831,7 @@ export default function LimsPerformTest() {
       const token = await getAuthToken();
       const currentUserId = getLoggedInUserId();
 
-      const response = await fetch('/api/lims/transition', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -875,7 +875,7 @@ export default function LimsPerformTest() {
       const token = await getAuthToken();
       const currentUserId = getLoggedInUserId();
 
-      const response = await fetch('/api/lims/transition', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -982,7 +982,7 @@ export default function LimsPerformTest() {
       const token = await getAuthToken();
 
       // Submit amendments for all changed values or simply unlock order status to In Process
-      const response = await fetch('/api/lims/transition', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getSupabase, getAuthToken } from '../services/supabaseClient';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
 import { 
   ArrowLeft, 
   Search, 
@@ -434,7 +434,7 @@ export default function LimsAcceptSample() {
           notifyPhysician: false,
           requestResample: false,
           samples: samplesPayload
-        };        const response = await fetch('/api/lims/orders/accept', {
+        };        const response = await fetch(`${BACKEND_URL}/api/lims/orders/accept`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -537,7 +537,7 @@ export default function LimsAcceptSample() {
           samples: samplesPayload
         };
 
-        const response = await fetch('/api/lims/orders/accept', {
+        const response = await fetch(`${BACKEND_URL}/api/lims/orders/accept`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getSupabase, getAuthToken } from '../services/supabaseClient';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
 import { LimsLabOrder, LimsSpecimen, LimsContainer, LimsServiceParameter } from '../types';
 import { 
   Activity, 
@@ -212,7 +212,7 @@ export default function LimsDashboard() {
         comments
       };
 
-      const response = await fetch('/api/lims/transition', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -330,7 +330,7 @@ export default function LimsDashboard() {
       const token = await getAuthToken();
       const localUser = localStorage.getItem('medicore_user') ? JSON.parse(localStorage.getItem('medicore_user')!) : null;
       const currentUserId = localUser?.id || '9185e6a4-8ae8-4c60-b3c7-793d89b4700e';
-      const response = await fetch('/api/lims/results/save', {
+      const response = await fetch(`${BACKEND_URL}/api/lims/results/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
