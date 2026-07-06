@@ -10,10 +10,9 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
 
-// FIXED: Using an explicitly named wildcard parameter route instead of '/*'
 router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // FIXED: Safely read the path target parameter or fall back to standard path strings
+    // Safely pull the database endpoint target path
     const subPath = req.params.targetPath || req.path.replace(/^\//, ''); 
     const queryStr = req.url.split('?')[1] || '';
     
@@ -29,10 +28,11 @@ router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => 
       headers['Range'] = req.headers['range'] as string;
     }
 
+    // FIXED: Corrected string verification to prevent runtime array crash errors
     if (req.headers.authorization && !req.headers.authorization.includes('demo-token')) {
-      const tokenVal = req.headers.authorization.split(' ')[1];
-      if (tokenVal && tokenVal.trim().length > 0 && tokenVal !== 'null' && tokenVal !== 'undefined') {
-        headers['Authorization'] = req.headers.authorization;
+      const authHeader = req.headers.authorization;
+      if (authHeader.trim().length > 0 && authHeader !== 'Bearer null' && authHeader !== 'Bearer undefined') {
+        headers['Authorization'] = authHeader;
       } else {
         headers['Authorization'] = `Bearer ${supabaseServiceKey}`;
       }
