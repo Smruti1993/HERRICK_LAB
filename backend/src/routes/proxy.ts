@@ -8,31 +8,27 @@ const router = Router();
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
-// Service role key bypasses RLS — required for server-side proxy queries.
-// Get it from: Supabase Dashboard > Settings > API > service_role
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
 
-router.all('/*', async (req: AuthenticatedRequest, res: Response) => {
+// FIXED: Using an explicitly named wildcard parameter route instead of '/*'
+router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const subPath = req.params[0]; // Wildcard route parameter
+    // FIXED: Safely read the path target parameter or fall back to standard path strings
+    const subPath = req.params.targetPath || req.path.replace(/^\//, ''); 
     const queryStr = req.url.split('?')[1] || '';
     
     const targetUrl = `${supabaseUrl}/rest/v1/${subPath}${queryStr ? '?' + queryStr : ''}`;
     
-    // Setup forwarding headers — use service role key to bypass RLS
     const headers: Record<string, string> = {
       'apikey': supabaseServiceKey,
       'Content-Type': 'application/json',
       'Prefer': req.headers['prefer'] as string || '',
     };
 
-    // Forward range header if present (used for pagination limits)
     if (req.headers['range']) {
       headers['Range'] = req.headers['range'] as string;
     }
 
-    // Forward authorization header if it exists, is not empty, and is a genuine Supabase JWT
-    // Otherwise, default to the anonymous key Bearer token so PostgREST allows the query
     if (req.headers.authorization && !req.headers.authorization.includes('demo-token')) {
       const tokenVal = req.headers.authorization.split(' ')[1];
       if (tokenVal && tokenVal.trim().length > 0 && tokenVal !== 'null' && tokenVal !== 'undefined') {
@@ -49,12 +45,10 @@ router.all('/*', async (req: AuthenticatedRequest, res: Response) => {
       headers,
     };
 
-    // Forward request body if method has one
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
       init.body = JSON.stringify(req.body);
     }
 
-    // Audit logs for compliance (HIPAA)
     console.log(`[DB Proxy Log] [User: ${req.user?.email || req.user?.id || 'System'}] [Method: ${req.method}] [Path: /rest/v1/${subPath}]`);
 
     const dbResponse = await fetch(targetUrl, init);
@@ -64,10 +58,8 @@ router.all('/*', async (req: AuthenticatedRequest, res: Response) => {
       console.log(`[DB Proxy Error] [Path: /rest/v1/${subPath}] [Status: ${dbResponse.status}] [Body: ${dbData}]`);
     }
 
-    // Set response status
     res.status(dbResponse.status);
 
-    // Forward PostgREST response headers
     const copyHeaders = ['preference-applied', 'content-range', 'location', 'content-type'];
     copyHeaders.forEach(h => {
       const val = dbResponse.headers.get(h);
