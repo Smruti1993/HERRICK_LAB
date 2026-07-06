@@ -14,13 +14,18 @@ import { authenticateJWT } from './middleware/auth';
 const app = express();
 const PORT = process.env.PORT || 5005;
 
-// Configured to allow all origins and standard REST methods including preflight OPTIONS
+// Enable CORS for all routes and explicitly include OPTIONS method
 app.use(cors({
-  origin: '*', 
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range'],
   credentials: true
 }));
+
+// intercept and answer preflight requests immediately
+app.options('*', (req, res) => {
+  res.sendStatus(200);
+});
 
 app.use(express.json());
 
@@ -35,13 +40,12 @@ app.use('/api/billing', authenticateJWT, billingRoutes);
 app.use('/api/lims', authenticateJWT, limsRoutes);
 app.use('/api/astm', authenticateJWT, astmRoutes);
 
-// JWT Protected proxy middleware lane
+// Protect everything passing through the database proxy lane
 app.use('/api/db/proxy', (req, res, next) => {
-  // Fixed: originalUrl tracks path suffixes safely on cloud hosting layers
   if (req.originalUrl.includes('/app_users') || req.path.startsWith('/app_users')) {
-    next(); // Safely bypass auth guard for login lookups
+    next(); // Bypass auth guard for login lookups
   } else {
-    authenticateJWT(req, res, next); // Strict JWT validation lock for all other database actions
+    authenticateJWT(req, res, next);
   }
 }, proxyRoutes);
 
