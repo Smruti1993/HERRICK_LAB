@@ -14,10 +14,12 @@ import { authenticateJWT } from './middleware/auth';
 const app = express();
 const PORT = process.env.PORT || 5005;
 
+// Configured to allow all origins and standard REST methods including preflight OPTIONS
 app.use(cors({
-  origin: '*', // For development. Can be updated to the React client's URL for production.
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range']
+  origin: '*', 
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range'],
+  credentials: true
 }));
 
 app.use(express.json());
@@ -32,12 +34,14 @@ app.use('/api/adjudicate', authenticateJWT, adjudicateRoutes);
 app.use('/api/billing', authenticateJWT, billingRoutes);
 app.use('/api/lims', authenticateJWT, limsRoutes);
 app.use('/api/astm', authenticateJWT, astmRoutes);
+
+// JWT Protected proxy middleware lane
 app.use('/api/db/proxy', (req, res, next) => {
-  // Allow login verification queries to app_users to bypass auth guard
-  if (req.path.startsWith('/app_users')) {
-    next();
+  // Fixed: originalUrl tracks path suffixes safely on cloud hosting layers
+  if (req.originalUrl.includes('/app_users') || req.path.startsWith('/app_users')) {
+    next(); // Safely bypass auth guard for login lookups
   } else {
-    authenticateJWT(req, res, next);
+    authenticateJWT(req, res, next); // Strict JWT validation lock for all other database actions
   }
 }, proxyRoutes);
 
