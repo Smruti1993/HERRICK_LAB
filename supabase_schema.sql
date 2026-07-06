@@ -243,7 +243,17 @@ create table if not exists service_definitions (
   billing_group_name text,
   financial_group text,
   cpt_description text,
-  special_instructions text
+  special_instructions text,
+  result_type text default 'Numeric',
+  clinical_significance text,
+  patient_instruction text,
+  phlebotomist_instruction text,
+  technician_instruction text,
+  gender_wise boolean default false,
+  age_range_wise boolean default false,
+  delta_check boolean default false,
+  is_result_mandatory boolean default true,
+  is_derived boolean default false
 );
 
 -- 17. Service Tariffs

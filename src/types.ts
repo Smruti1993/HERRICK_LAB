@@ -1228,3 +1228,176 @@ export interface GSTR2BInvoice {
   createdAt?: string;
 }
 
+// --- LIMS Types ---
+
+export interface LimsSpecimen {
+  id: string;
+  name: string;
+  code: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsContainer {
+  id: string;
+  name: string;
+  code: string;
+  capColor?: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsEquipment {
+  id: string;
+  name: string;
+  code: string;
+  model?: string;
+  manufacturer?: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsOrganism {
+  id: string;
+  name: string;
+  code: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsAntibiotic {
+  id: string;
+  name: string;
+  code: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsStain {
+  id: string;
+  name: string;
+  code: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsServiceParameter {
+  id: string;
+  serviceId: string;
+  name: string;
+  code: string;
+  resultType: 'Numeric' | 'Alphanumeric' | 'Template' | 'Form' | 'Parameter';
+  sortOrder: number;
+  status: 'Active' | 'Inactive';
+  // extra lab detail fields
+  genderWise?: boolean;
+  ageRangeWise?: boolean;
+  isResultMandatory?: boolean;
+  isDerived?: boolean;
+  deltaCheck?: boolean;
+  shortName?: string;
+}
+
+export interface LimsParameterOption {
+  id: string;
+  parameterId: string;
+  optionValue: string;
+  sortOrder: number;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsReferenceRange {
+  id: string;
+  parameterId: string;
+  gender: 'Male' | 'Female' | 'All';
+  ageMin: number;
+  ageMax: number;
+  refMin?: string;       // Lower Ref
+  refMax?: string;       // Upper Ref
+  borderlineLow?: string;
+  borderlineHigh?: string;
+  criticalMin?: string;  // Panic Low
+  criticalMax?: string;  // Panic High
+  unit?: string;
+  remarks?: string;
+  equipmentId?: string;
+  site?: string;
+  isDerived?: boolean;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsOutsourceLab {
+  id: string;
+  name: string;
+  code: string;
+  contactNo?: string;
+  email?: string;
+  status: 'Active' | 'Inactive';
+}
+
+export interface LimsLabOrder {
+  id: string;
+  serviceOrderId: string;
+  barcodeNo: string;
+  priority: 'Routine' | 'STAT';
+  status: 'Ordered' | 'Collected' | 'Accepted' | 'In Process' | 'Result' | 'Certified' | 'Cancelled';
+  orderedAt: string;
+  collectedAt?: string;
+  collectedBy?: string;
+  acceptedAt?: string;
+  acceptedBy?: string;
+  resultCapturedAt?: string;
+  resultCapturedBy?: string;
+  certifiedAt?: string;
+  certifiedBy?: string;
+  
+  // Virtual UI helpers
+  patientName?: string;
+  serviceName?: string;
+  patientAge?: string;
+  patientGender?: string;
+}
+
+export interface LimsSample {
+  id: string;
+  labOrderId: string;
+  specimenId?: string;
+  containerId?: string;
+  sampleNo: string;
+  status: 'Pending' | 'Collected' | 'Accepted' | 'Rejected';
+  rejectionReason?: string;
+  rejectedBy?: string;
+}
+
+export interface LimsResult {
+  id: string;
+  labOrderId: string;
+  parameterId: string;
+  value?: string;
+  flag: 'Normal' | 'High' | 'Low' | 'Critical';
+  isAmended: boolean;
+  amendedReason?: string;
+  capturedBy?: string;
+  capturedAt: string;
+}
+
+export interface LimsAuditTrail {
+  id: string;
+  labOrderId: string;
+  fromStatus?: string;
+  toStatus?: string;
+  actionTaken: string;
+  performedBy: string;
+  performedAt: string;
+  comments?: string;
+}
+
+export interface LimsReferenceRemark {
+  id: string;
+  serviceId: string;
+  site?: string;
+  equipmentId?: string;
+  parameterId?: string;
+  remarks?: string;
+  testMethod?: string;
+  footer?: string;
+  isActive: boolean;
+  status: 'Active' | 'Inactive';
+}
+
+
+

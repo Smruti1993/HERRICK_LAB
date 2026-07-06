@@ -40,6 +40,15 @@ import { JournalVouchers } from './pages/JournalVouchers';
 import { VendorCompliance } from './pages/VendorCompliance';
 import { Refund } from './pages/Refund';
 
+import LimsMasters from './pages/LimsMasters';
+import LimsDashboard from './pages/LimsDashboard';
+import LimsAmendments from './pages/LimsAmendments';
+import LimsAnalytics from './pages/LimsAnalytics';
+import LimsLayout from './components/LimsLayout';
+import LimsCollectSample from './pages/LimsCollectSample';
+import LimsAcceptSample from './pages/LimsAcceptSample';
+import LimsPerformTest from './pages/LimsPerformTest';
+
 import { FileText } from 'lucide-react';
 import { Login } from './pages/Login';
 
@@ -127,6 +136,21 @@ const AppRoutes = () => {
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+
+          {/* LIMS layout routes */}
+          <Route path="/lims" element={<PrivateRoute><LimsLayout /></PrivateRoute>}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<LimsDashboard />} />
+            <Route path="masters" element={<LimsMasters />} />
+            <Route path="amendments" element={<LimsAmendments />} />
+            <Route path="analytics" element={<LimsAnalytics />} />
+            <Route path="collect" element={<LimsCollectSample />} />
+            <Route path="collect/:orderId" element={<LimsCollectSample />} />
+            <Route path="accept" element={<LimsAcceptSample />} />
+            <Route path="accept/:orderId" element={<LimsAcceptSample />} />
+            <Route path="perform" element={<LimsPerformTest />} />
+            <Route path="perform/:orderId" element={<LimsPerformTest />} />
           </Route>
         </Routes>
     );

@@ -150,6 +150,14 @@ export const NAV_ITEMS: NavItem[] = [
     ]
   },
 
+  // LIMS Section
+  {
+    label: 'LIMS Lab',
+    path: '/lims/dashboard',
+    icon: Activity,
+    category: 'LIMS'
+  },
+
   { label: 'Connection', path: '/connection', icon: Database, category: 'System' },
 ];
 

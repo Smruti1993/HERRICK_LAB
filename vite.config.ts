@@ -16,5 +16,15 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       include: ['xlsx'],
     },
+    server: {
+      proxy: {
+        // Proxy all /api calls to the Express backend on port 5000
+        '/api': {
+          target: 'http://localhost:5005',
+          changeOrigin: true,
+          secure: false,
+        }
+      }
+    }
   }
-})
+})

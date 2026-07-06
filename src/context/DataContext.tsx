@@ -9,7 +9,9 @@ import {
     getSupabase, 
     checkConfigured, 
     saveCredentialsToStorage, 
-    clearCredentialsFromStorage 
+    clearCredentialsFromStorage,
+    BACKEND_URL,
+    getAuthToken
 } from '../services/supabaseClient';
 
 interface DataContextType {
@@ -1374,78 +1376,103 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       try {
-        // Create a timeout promise (15 seconds)
-        const timeoutPromise = new Promise((_, reject) => 
+        // ─────────────────────────────────────────────────────────────────────
+        // CORE SYNC — tables every module depends on (15 second timeout)
+        // If these fail due to network error the app shows a connection error.
+        // ─────────────────────────────────────────────────────────────────────
+        const coreTimeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Data sync timed out. Check your connection.')), 15000)
         );
 
-        const fetchPromise = Promise.all([
-          supabase.from('patients').select('*'),
-          supabase.from('employees').select('*'),
-          supabase.from('departments').select('*'),
-          supabase.from('units').select('*'),
-          supabase.from('service_centres').select('*'),
-          supabase.from('doctor_availability').select('*'),
-          supabase.from('appointments').select('*'),
-          supabase.from('bills').select('*').order('date', { ascending: false }).limit(5000),
-          supabase.from('bill_items').select('*').limit(10000),
-          supabase.from('payments').select('*').limit(5000),
-          supabase.from('clinical_vitals').select('*').limit(2000),
-          supabase.from('clinical_diagnoses').select('*').limit(2000),
-          supabase.from('clinical_notes').select('*').limit(2000),
-          supabase.from('clinical_allergies').select('*').limit(1000),
-          supabase.from('clinical_narrative_diagnoses').select('*').limit(1000),
-          supabase.from('master_diagnoses').select('*').limit(1000),
-          supabase.from('service_definitions').select('*').limit(2000),
-          supabase.from('service_tariffs').select('*').limit(5000),
-          supabase.from('service_orders').select('*').limit(5000),
-          supabase.from('vital_sign_groups').select('*'),
-          supabase.from('vital_sign_parameters').select('*'),
-          supabase.from('patient_documents').select('*'),
-          supabase.from('dental_icd_master').select('*'),
-          supabase.from('inventory_items').select('*, stock:inventory_item_stocks(*), pricing:inventory_item_pricing(*)'),
-          supabase.from('branches').select('*'),
-          supabase.from('stores').select('*, branches(name)'),
-          supabase.from('store_item_mappings').select('*'),
-          supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'),
-          supabase.from('prescriptions').select('*').order('order_date', { ascending: false }).limit(2000),
-          supabase.from('prescription_items').select('*').limit(10000),
-          supabase.from('pharmacy_drug_generics').select('*'),
-          supabase.from('pharmacy_drug_master').select('*'),
-          supabase.from('tax_masters').select('*'),
-          supabase.from('item_tax_mappings').select('*'),
-          supabase.from('pharmacy_returns').select('*').order('return_date', { ascending: false }).limit(2000),
-          supabase.from('pharmacy_return_items').select('*').limit(10000),
-          supabase.from('procurement_vendors').select('*'),
-          supabase.from('procurement_vendor_terms').select('*'),
-          supabase.from('procurement_purchase_orders').select('*'),
-          supabase.from('procurement_purchase_order_items').select('*'),
-          supabase.from('procurement_grns').select('*'),
-          supabase.from('procurement_grn_items').select('*'),
-          supabase.from('procurement_purchase_receipts').select('*'),
-          supabase.from('procurement_purchase_receipt_items').select('*'),
-          supabase.from('procurement_purchase_returns').select('*'),
-          supabase.from('procurement_purchase_return_items').select('*'),
-          supabase.from('procurement_expiry_returns').select('*'),
-          supabase.from('procurement_expiry_return_items').select('*'),
-          supabase.from('finance_chart_of_accounts').select('*'),
-          supabase.from('finance_journal_vouchers').select('*'),
-          supabase.from('finance_journal_voucher_items').select('*'),
-          supabase.from('currency_master').select('*'),
-          supabase.from('patient_refunds').select('*'),
-          supabase.from('doctor_schedules').select('*'),
-          supabase.from('schedule_templates').select('*')
+        const coreFetchPromise = Promise.all([
+          supabase.from('patients').select('*'),                                          // 0
+          supabase.from('employees').select('*'),                                         // 1
+          supabase.from('departments').select('*'),                                       // 2
+          supabase.from('units').select('*'),                                             // 3
+          supabase.from('service_centres').select('*'),                                   // 4
+          supabase.from('doctor_availability').select('*'),                               // 5
+          supabase.from('appointments').select('*'),                                      // 6
+          supabase.from('bills').select('*').order('date', { ascending: false }).limit(5000), // 7
+          supabase.from('bill_items').select('*').limit(10000),                           // 8
+          supabase.from('payments').select('*').limit(5000),                              // 9
+          supabase.from('clinical_vitals').select('*').limit(2000),                       // 10
+          supabase.from('clinical_diagnoses').select('*').limit(2000),                    // 11
+          supabase.from('clinical_notes').select('*').limit(2000),                        // 12
+          supabase.from('clinical_allergies').select('*').limit(1000),                    // 13
+          supabase.from('clinical_narrative_diagnoses').select('*').limit(1000),          // 14
+          supabase.from('master_diagnoses').select('*').limit(1000),                      // 15
+          supabase.from('service_definitions').select('*').limit(2000),                   // 16
+          supabase.from('service_tariffs').select('*').limit(5000),                       // 17
+          supabase.from('service_orders').select('*').limit(5000),                        // 18
+          supabase.from('inventory_items').select('*, stock:inventory_item_stocks(*), pricing:inventory_item_pricing(*)'), // 19
+          supabase.from('branches').select('*'),                                          // 20
+          supabase.from('stores').select('*, branches(name)'),                            // 21
+          supabase.from('store_item_mappings').select('*'),                               // 22
+          supabase.from('inventory_opening_stocks').select('*, items:inventory_opening_stock_items(*)'), // 23
+          supabase.from('prescriptions').select('*').order('order_date', { ascending: false }).limit(2000), // 24
+          supabase.from('prescription_items').select('*').limit(10000),                   // 25
+          supabase.from('pharmacy_drug_generics').select('*'),                            // 26
+          supabase.from('pharmacy_drug_master').select('*'),                              // 27
+          supabase.from('tax_masters').select('*'),                                       // 28
+          supabase.from('item_tax_mappings').select('*'),                                 // 29
+          supabase.from('pharmacy_returns').select('*').order('return_date', { ascending: false }).limit(2000), // 30
+          supabase.from('pharmacy_return_items').select('*').limit(10000),                // 31
+          supabase.from('procurement_vendors').select('*'),                               // 32
+          supabase.from('procurement_vendor_terms').select('*'),                          // 33
+          supabase.from('procurement_purchase_orders').select('*'),                       // 34
+          supabase.from('procurement_purchase_order_items').select('*'),                  // 35
+          supabase.from('procurement_grns').select('*'),                                  // 36
+          supabase.from('procurement_grn_items').select('*'),                             // 37
+          supabase.from('procurement_purchase_receipts').select('*'),                     // 38
+          supabase.from('procurement_purchase_receipt_items').select('*'),                // 39
+          supabase.from('procurement_purchase_returns').select('*'),                      // 40
+          supabase.from('procurement_purchase_return_items').select('*'),                 // 41
+          supabase.from('procurement_expiry_returns').select('*'),                        // 42
+          supabase.from('procurement_expiry_return_items').select('*'),                   // 43
+          supabase.from('finance_chart_of_accounts').select('*'),                         // 44
+          supabase.from('finance_journal_vouchers').select('*'),                          // 45
+          supabase.from('finance_journal_voucher_items').select('*'),                     // 46
+          supabase.from('currency_master').select('*'),                                   // 47
+          supabase.from('patient_refunds').select('*'),                                   // 48
+          supabase.from('doctor_schedules').select('*'),                                  // 49
+          supabase.from('schedule_templates').select('*'),                                // 50
         ]);
 
-        const results = await Promise.race([fetchPromise, timeoutPromise]) as any[];
-        
-        // Detailed error logging
+        const results = await Promise.race([coreFetchPromise, coreTimeoutPromise]) as any[];
+
+        // ─────────────────────────────────────────────────────────────────────
+        // OPTIONAL SYNC — module-specific tables that may not exist yet.
+        // Uses Promise.allSettled so failures are isolated and never block core.
+        // ─────────────────────────────────────────────────────────────────────
+        const optionalResults = await Promise.allSettled([
+          supabase.from('vital_sign_groups').select('*'),    // 0
+          supabase.from('vital_sign_parameters').select('*'), // 1
+          supabase.from('patient_documents').select('*'),    // 2
+          supabase.from('dental_icd_master').select('*'),    // 3
+        ]);
+
+        // Helper to safely extract data from optional results
+        const getOptional = (idx: number) => {
+          const r = optionalResults[idx];
+          if (r.status === 'fulfilled' && r.value && !r.value.error) return r.value;
+          if (r.status === 'fulfilled' && r.value?.error) {
+            console.warn(`[Optional Sync] Table skipped:`, r.value.error?.message || r.value.error);
+          }
+          return { data: null, error: null };
+        };
+
+        const vsgRes  = getOptional(0);
+        const vspRes  = getOptional(1);
+        const docRes  = getOptional(2);
+        const denRes  = getOptional(3);
+
+        // Core table name index (for error reporting)
         const tableNames = [
-            'patients', 'employees', 'departments', 'units', 'service_centres', 'doctor_availability', 'appointments', 
-            'bills', 'bill_items', 'payments', 'clinical_vitals', 'clinical_diagnoses', 'clinical_notes', 
-            'clinical_allergies', 'clinical_narrative_diagnoses', 'master_diagnoses', 'service_definitions', 
-            'service_tariffs', 'service_orders', 'vital_sign_groups', 'vital_sign_parameters', 'patient_documents', 
-            'dental_icd_master', 'inventory_items', 'branches', 'stores', 'store_item_mappings', 
+            'patients', 'employees', 'departments', 'units', 'service_centres', 'doctor_availability', 'appointments',
+            'bills', 'bill_items', 'payments', 'clinical_vitals', 'clinical_diagnoses', 'clinical_notes',
+            'clinical_allergies', 'clinical_narrative_diagnoses', 'master_diagnoses', 'service_definitions',
+            'service_tariffs', 'service_orders',
+            'inventory_items', 'branches', 'stores', 'store_item_mappings',
             'inventory_opening_stocks', 'prescriptions', 'prescription_items', 'pharmacy_drug_generics', 'pharmacy_drug_master',
             'tax_masters', 'item_tax_mappings', 'pharmacy_returns', 'pharmacy_return_items',
             'procurement_vendors', 'procurement_vendor_terms',
@@ -1454,19 +1481,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'procurement_purchase_receipts', 'procurement_purchase_receipt_items',
             'procurement_purchase_returns', 'procurement_purchase_return_items',
             'procurement_expiry_returns', 'procurement_expiry_return_items',
-            'finance_chart_of_accounts',
-            'finance_journal_vouchers',
-            'finance_journal_voucher_items',
-            'currency_master',
-            'patient_refunds',
-            'doctor_schedules',
-            'schedule_templates'
+            'finance_chart_of_accounts', 'finance_journal_vouchers', 'finance_journal_voucher_items',
+            'currency_master', 'patient_refunds', 'doctor_schedules', 'schedule_templates',
         ];
 
         const [
-            pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes, 
-            vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes, 
-            vsgRes, vspRes, docRes, denRes, invRes, brRes, stRes2, mRes, osRes, 
+            pRes, eRes, dRes, uRes, sRes, avRes, apRes, bRes, biRes, payRes,
+            vRes, diRes, notRes, alRes, narRes, mdRes, sdRes, stRes, ordRes,
+            invRes, brRes, stRes2, mRes, osRes,
             prRes, piRes, dgRes, dmRes, tmRes, itmRes, retRes, retiRes,
             pvRes, pvtRes, poRes, poiRes, grnRes, grniRes, prnRes, prniRes,
             prtnRes, prtniRes, exprRes, expriRes, coaRes, jvRes, jviRes, curRes, refundRes,
@@ -1475,48 +1497,70 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 
         console.log(`Sync: Fetched ${bRes.data?.length || 0} raw bills from DB.`);
-        console.log(`Sync complete. Results: ${results.length} tables.`);
-        let hasSyncErrors = false;
+        console.log(`Sync complete. Core tables: ${results.length}. Optional tables: ${optionalResults.length}.`);
+
+        // ─── Classify core table errors ────────────────────────────────────
         let failedToFetchCount = 0;
         const missingTables: string[] = [];
+        const permissionErrors: string[] = [];
         const otherErrors: string[] = [];
 
         results.forEach((r, idx) => {
             if (r && r.error) {
-                console.error(`Sync Failure on table [${tableNames[idx]}]:`, r.error);
-                const msg = r.error.message || '';
-                if (msg.includes('Failed to fetch') || msg.includes('TypeError') || msg.includes('network')) {
+                const msg = (r.error.message || '').toLowerCase();
+                const code = r.error.code || '';
+                console.error(`[Core Sync Failure] Table [${tableNames[idx]}] Code=${code} Msg=${r.error.message}`);
+
+                if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('typeerror')) {
+                    // True network/connection failure — backend unreachable
                     failedToFetchCount++;
-                } else if (msg.includes('does not exist') || r.error.code === 'PGRST301') {
+                } else if (
+                    msg.includes('does not exist') ||
+                    code === 'PGRST301' ||
+                    code === '42P01' // PostgreSQL: undefined_table
+                ) {
+                    // Table physically missing from database
                     missingTables.push(tableNames[idx]);
+                } else if (
+                    msg.includes('permission denied') ||
+                    code === '42501' || // PostgreSQL: insufficient_privilege
+                    code === 'PGRST116'
+                ) {
+                    // RLS / anon permissions block — log but don't alarm the user
+                    permissionErrors.push(tableNames[idx]);
                 } else {
-                    otherErrors.push(`[${tableNames[idx]}]: ${msg}`);
+                    otherErrors.push(`[${tableNames[idx]}]: ${r.error.message}`);
                 }
             }
         });
 
+        // Only a network failure is a true blocking error
         if (failedToFetchCount > 0) {
-            hasSyncErrors = true;
             showToast('error', 'Database connection failed. Please check your network or credentials on the Connection page.');
         }
 
+        // Missing tables: warn once (collapsed if many)
         if (missingTables.length > 0) {
-            hasSyncErrors = true;
+            console.warn(`[Sync] Missing tables (${missingTables.length}): ${missingTables.join(', ')}`);
             if (missingTables.length > 3) {
-                showToast('error', `Sync Error: ${missingTables.length} tables are missing (including ${missingTables.slice(0, 3).join(', ')}). Please run the SQL schema on the Connection page.`);
+                showToast('info', `${missingTables.length} database tables are missing. Some modules may be empty. Run the SQL schema to fix.`);
             } else {
-                missingTables.forEach(table => {
-                    showToast('error', `Sync Error: Table [${table}] does not exist. Please run the SQL schema.`);
-                });
+                missingTables.forEach(t => showToast('info', `Table [${t}] not found. Run the SQL schema to set it up.`));
             }
         }
 
+        // Permission errors: just log to console, never show toast
+        if (permissionErrors.length > 0) {
+            console.warn(`[Sync] Permission errors on tables (RLS may be enabled): ${permissionErrors.join(', ')}`);
+        }
+
+        // Other unexpected errors: show once consolidated
         if (otherErrors.length > 0) {
-            hasSyncErrors = true;
+            console.error(`[Sync] Other errors:`, otherErrors);
             if (otherErrors.length > 3) {
-                showToast('error', `Sync Error: Multiple tables failed to sync. Check console for details.`);
+                showToast('info', 'Some data could not be loaded. Check browser console for details.');
             } else {
-                otherErrors.forEach(err => showToast('error', err));
+                otherErrors.forEach(err => showToast('info', err));
             }
         }
         
@@ -2033,7 +2077,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setGstr2bUploads(uploadsData);
         setGstr2bInvoices(invoicesData);
         
-        if (!hasSyncErrors) {
+        if (failedToFetchCount === 0 && missingTables.length === 0 && otherErrors.length === 0) {
             showToast('success', 'Data synced with database.');
         }
 
@@ -4026,96 +4070,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Optimistic update
       setBills(prev => [{ ...bill, refundStatus: bill.refundStatus || 'Pending' }, ...prev]);
 
-      const { error: billError } = await getSupabase().from('bills').insert({
-          id: bill.id, 
-          patient_id: bill.patientId, 
-          appointment_id: bill.appointmentId || null, 
-          date: bill.date,
-          status: bill.status, 
-          total_amount: bill.totalAmount, 
-          paid_amount: bill.paidAmount,
-          invoice_no: bill.invoiceNo || null,
-          discount_amount: bill.discountAmount || 0,
-          tax_amount: bill.taxAmount || 0,
-          round_off: bill.roundOff || 0,
-          doctor_id: bill.doctorId || null,
-          department_id: bill.departmentId || null,
-          payment_mode: bill.paymentMode || null,
-          amount_received: bill.amountReceived || 0,
-          reference_no: bill.referenceNo || null,
-          notes: bill.notes || null,
-          created_by: bill.createdBy || 'admin',
-          is_pharmacy: bill.isPharmacy || false,
-          prescription_id: bill.prescriptionId || null,
-          cancelled_at: bill.cancelledAt || null
-      });
+      try {
+          const token = await getAuthToken();
+          const response = await fetch(`${BACKEND_URL}/api/billing/create`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ bill, linkedOrderIds })
+          });
 
-      if (billError) { 
-          showToast('error', 'Failed to create bill: ' + billError.message); 
-          setBills(prev => prev.filter(b => b.id !== bill.id)); 
-          return false; 
-      }
-
-      const itemsDb = bill.items.map(i => ({ 
-          id: i.id, 
-          bill_id: bill.id, 
-          item_id: i.itemId || null,
-          batch_no: i.batchNo || null,
-          description: i.description, 
-          quantity: Number(i.quantity), 
-          unit_price: Number(i.unitPrice), 
-          total: Number(i.total),
-          item_type: i.itemType || null,
-          discount_percentage: Number(i.discountPercentage || 0),
-          discount_amount: Number(i.discountAmount || 0),
-          tax_percentage: Number(i.taxPercentage || 0),
-          tax_amount: Number(i.taxAmount || 0)
-      }));
-      
-      const { error: itemsError } = await getSupabase().from('bill_items').insert(itemsDb);
-      
-      if (itemsError) { 
-          showToast('error', 'Failed to save bill items: ' + itemsError.message);
-          return false;
-      } 
-
-      // NEW: Insert payments (receipts) if any
-      if (bill.payments && bill.payments.length > 0) {
-          const paymentsDb = bill.payments.map(p => ({
-              id: p.id,
-              bill_id: bill.id,
-              date: p.date,
-              amount: Number(p.amount),
-              method: p.method,
-              reference: p.reference || null
-          }));
-          const { error: payError } = await getSupabase().from('payments').insert(paymentsDb);
-          if (payError) {
-              console.error("Failed to insert payments", payError);
-              showToast('info', 'Bill created, but failed to record payment receipt.');
+          if (!response.ok) {
+              const errData = await response.json();
+              throw new Error(errData.error || 'Failed to create bill');
           }
-      }
 
-      // NEW: Update status of linked service orders
-      if (linkedOrderIds && linkedOrderIds.length > 0) {
-          const { error: orderError } = await getSupabase()
-              .from('service_orders')
-              .update({ billing_status: 'Invoiced' })
-              .in('id', linkedOrderIds);
-          
-          if (orderError) {
-              console.error("Failed to update order status", orderError);
-              showToast('info', 'Bill created, but failed to update order status.');
-          } else {
-              // Update local state for immediate UI reflection
+          // Update local state for immediate UI reflection
+          if (linkedOrderIds && linkedOrderIds.length > 0) {
               setServiceOrders(prev => prev.map(o => 
                   linkedOrderIds.includes(o.id) ? { ...o, billingStatus: 'Invoiced' } : o
               ));
           }
+
+          showToast('success', 'Invoice generated successfully.');
+          return true;
+      } catch (error: any) {
+          showToast('error', 'Failed to create bill: ' + error.message);
+          setBills(prev => prev.filter(b => b.id !== bill.id));
+          return false;
       }
-      
-      showToast('success', 'Invoice generated successfully.');
-      return true;
   };
 
   const cancelBill = async (id: string): Promise<boolean> => {
@@ -4129,41 +4113,71 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Optimistic update
       setBills(prev => prev.map(b => b.id === id ? { ...b, status: 'Cancelled', refundStatus: 'Pending', cancelledAt } : b));
 
-      const { error } = await getSupabase().from('bills').update({ status: 'Cancelled', refund_status: 'Pending', cancelled_at: cancelledAt }).eq('id', id);
-      
-      if (error) {
+      try {
+          const token = await getAuthToken();
+          const response = await fetch(`${BACKEND_URL}/api/billing/cancel`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ id, cancelledAt })
+          });
+
+          if (!response.ok) {
+              const errData = await response.json();
+              throw new Error(errData.error || 'Failed to cancel bill');
+          }
+
+          showToast('success', 'Invoice cancelled.');
+          return true;
+      } catch (error: any) {
           showToast('error', 'Failed to cancel bill: ' + error.message);
           // Revert
           setBills(prev => prev.map(b => b.id === id ? original : b));
           return false;
       }
-      
-      showToast('success', 'Invoice cancelled.');
-      return true;
   };
 
   const addPayment = async (payment: Payment, billId: string) => {
       if (!requireDb()) return;
+
+      const bill = bills.find(b => b.id === billId);
+      if (!bill) return;
+
+      const originalBillsState = [...bills];
+      const newPaidAmount = Number(bill.paidAmount) + Number(payment.amount);
+      let newStatus: 'Unpaid' | 'Partial' | 'Paid' = 'Partial';
+      if (newPaidAmount >= bill.totalAmount) newStatus = 'Paid';
+
+      // Optimistic update
       setBills(prev => prev.map(b => {
           if (b.id !== billId) return b;
-          const newPaidAmount = Number(b.paidAmount) + Number(payment.amount);
-          let newStatus: 'Unpaid' | 'Partial' | 'Paid' = 'Partial';
-          if (newPaidAmount >= b.totalAmount) newStatus = 'Paid';
           return { ...b, paidAmount: newPaidAmount, status: newStatus, payments: [...b.payments, payment] };
       }));
-      const { error: payError } = await getSupabase().from('payments').insert({
-          id: payment.id, bill_id: billId, date: payment.date, amount: payment.amount, method: payment.method, reference: payment.reference
-      });
-      if (payError) { showToast('error', 'Failed to record payment.'); return; }
-      
-      const bill = bills.find(b => b.id === billId);
-      if (bill) {
-          const newTotalPaid = Number(bill.paidAmount) + Number(payment.amount);
-          let newStatus = 'Partial';
-          if (newTotalPaid >= bill.totalAmount) newStatus = 'Paid';
-          await getSupabase().from('bills').update({ paid_amount: newTotalPaid, status: newStatus }).eq('id', billId);
+
+      try {
+          const token = await getAuthToken();
+          const response = await fetch(`${BACKEND_URL}/api/billing/add-payment`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ payment, billId, newPaidAmount, newStatus })
+          });
+
+          if (!response.ok) {
+              const errData = await response.json();
+              throw new Error(errData.error || 'Failed to record payment');
+          }
+
+          showToast('success', 'Payment recorded.');
+      } catch (error: any) {
+          showToast('error', 'Failed to record payment: ' + error.message);
+          // Revert
+          setBills(originalBillsState);
       }
-      showToast('success', 'Payment recorded.');
   };
 
   const saveVitalSign = async (vital: VitalSign) => {

@@ -36,12 +36,76 @@ export const checkConfigured = () => {
 // Singleton instance
 let client: SupabaseClient | null = null;
 
+// Use a relative URL so requests go through the Vite dev proxy (same origin).
+// In production, set VITE_BACKEND_URL to the absolute backend URL.
+export const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || '';
+
+export const getAuthToken = async (): Promise<string> => {
+    try {
+        // Fallback: If no Supabase auth session, look at the custom user local storage
+        const localUser = localStorage.getItem('medicore_user');
+        if (localUser) {
+            const parsed = JSON.parse(localUser);
+            return `demo-token:${parsed.username || 'admin'}:${parsed.role || 'Admin'}`;
+        }
+        return '';
+    } catch (error) {
+        console.error('Error fetching auth token:', error);
+        return '';
+    }
+};
+
+const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr = input.toString();
+    // Intercept database REST API queries (PostgREST)
+    if (urlStr.includes('/rest/v1/')) {
+        const restPath = urlStr.split('/rest/v1/')[1];
+        const token = await getAuthToken();
+        const proxyUrl = `${BACKEND_URL}/api/db/proxy/${restPath}`;
+        
+        const headersObj: Record<string, string> = {};
+        if (init?.headers) {
+            if (init.headers instanceof Headers) {
+                init.headers.forEach((value, key) => {
+                    headersObj[key] = value;
+                });
+            } else if (Array.isArray(init.headers)) {
+                init.headers.forEach(([key, value]) => {
+                    headersObj[key] = value;
+                });
+            } else {
+                Object.assign(headersObj, init.headers);
+            }
+        }
+        
+        // Remove case-insensitive duplicate authorization headers to prevent browser from sending both
+        Object.keys(headersObj).forEach(k => {
+            if (k.toLowerCase() === 'authorization') {
+                delete headersObj[k];
+            }
+        });
+        
+        headersObj['Authorization'] = `Bearer ${token}`;
+        
+        const newInit: RequestInit = {
+            ...init,
+            headers: headersObj
+        };
+        return fetch(proxyUrl, newInit);
+    }
+    return fetch(input, init);
+};
+
 export const getSupabase = () => {
     if (client) return client;
     
     const { url, key } = getStoredCredentials();
     if (checkConfigured()) {
-        client = createClient(url, key);
+        client = createClient(url, key, {
+            global: {
+                fetch: customFetch
+            }
+        });
     } else {
         // Fallback client that allows the app to load but will fail requests
         // This prevents the app from crashing immediately on load

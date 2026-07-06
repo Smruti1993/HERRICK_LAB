@@ -420,3 +420,99 @@ This walkthrough details the restoration of the Appointments Day View scheduler 
 ## 2. Verification Details
 
 - **Production Build Check**: Ran `npm run build` which successfully outputted the production bundle with **no compile errors**, confirming full TypeScript/ESLint compliance.
+
+---
+
+# Walkthrough: LIMS Module Dedicated Screens & Dataflow
+
+This walkthrough details the development and successful integration of the three dedicated screens for the laboratory information management system (LIMS): **Collect Sample**, **Accept Sample**, and **Perform Test & Capture Result**.
+
+## 1. System Summary & Components Modified
+
+Here is an overview of the data flow across the LIMS module layers:
+
+```mermaid
+flowchart TD
+    subgraph UI [1. Dedicated Frontend Pages]
+        Collect[LimsCollectSample.tsx] -- "Post /orders/collect" --> Backend
+        Accept[LimsAcceptSample.tsx] -- "Post /orders/accept" --> Backend
+        Perform[LimsPerformTest.tsx] -- "Post /results/save" --> Backend
+    end
+
+    subgraph Backend [2. Express Backend API]
+        Backend -- "GET /orders/:orderId" --> Fetch[Fetch Context]
+        Backend -- "Update / Insert" --> DB[(Supabase DB)]
+    end
+
+    subgraph DB [3. Database Layer]
+        DB -- "Header Metadata" --> Orders[(lims_lab_orders)]
+        DB -- "Sample Metadata" --> Samples[(lims_samples)]
+        DB -- "Observed Values & Flags" --> Results[(lims_results)]
+    end
+```
+
+### Components Enhanced:
+1. **[lims_schema_alignment.sql](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/migrations/lims_schema_alignment.sql)**: Created the `lims_results` table to align with the codebase's existing structures, and added metadata columns to `lims_lab_orders` (run ID, rack, QC flags, methods, receiving technician details) and `lims_samples` (volume, site, temperature, condition, lab section).
+2. **[lims.ts](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/backend/src/routes/lims.ts)**:
+   - Added `GET /orders/:orderId` to fetch lab order, patient summary, and parameter configs.
+   - Added `POST /orders/collect` to save tube/specimen details.
+   - Added `POST /orders/accept` to save QC checklists and sample acceptance/rejections.
+   - Enhanced `POST /results/save` to capture analyzer metadata and QC logs on `lims_lab_orders`.
+3. **[App.tsx](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/src/App.tsx)**: Added routing configurations for the three new pages.
+4. **[LimsDashboard.tsx](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/src/pages/LimsDashboard.tsx)**: Connected action card buttons to route users directly to the new dedicated pages.
+5. **[LimsCollectSample.tsx](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/src/pages/LimsCollectSample.tsx) [NEW]**: Realized phlebotomy workbench with patient information panels, dynamic specimen collections, and a barcode label preview.
+6. **[LimsAcceptSample.tsx](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/src/pages/LimsAcceptSample.tsx) [NEW]**: Implemented accession desk with scan-to-receive barcode checks, condition verification checklist, and rejection reason forms.
+7. **[LimsPerformTest.tsx](file:///D:/New%2520folder/GIT%2520HUB/HIS-WEB5/src/pages/LimsPerformTest.tsx) [NEW]**: Implemented technician workbench with dual-panel screen (left: analyzer & QC run details; right: live-updating result parameter table that auto-flags high, low, or critical values and displays physician panic alerts in real-time).
+
+---
+
+## 2. Real-Time Range Auto-Flagging Engine
+
+The **Perform Test** screen computes result flags dynamically on the client side during text input:
+* **Formulas & Ranges**:
+  - If $\text{Value} \le \text{critical\_min}$ or $\text{Value} \ge \text{critical\_max} \rightarrow$ flag is `Critical` (heavy red layout).
+  - If $\text{Value} < \text{ref\_min} \rightarrow$ flag is `Low` (blue border).
+  - If $\text{Value} > \text{ref\_max} \rightarrow$ flag is `High` (red border).
+  - Otherwise $\rightarrow$ flag is `Normal` (green border).
+* **Panic Banner**: If any parameter has a `Critical` flag, a bold banner warning displays dynamically to advise the technician to notify the physician immediately.
+
+* **Card Clicks Navigation & Search Workbenches**:
+  - Re-routed card clicks for **Collect Sample**, **Accept Sample**, and **Perform Test** cards on the LIMS Dashboard to navigate directly to their respective dedicated pages.
+  - Registered non-parameterized routes (e.g. `/lims/collect`, `/lims/accept`, `/lims/perform`) inside `src/App.tsx`.
+  - Built comprehensive "empty/search" states for each workbench. Technicians can now search or scan Order IDs or tube barcodes directly on the empty page to resolve the order details dynamically and populate the page context.
+
+---
+
+# Walkthrough: LIMS Always-Visible Queue, Checkbox Selection, & Enabled Patient/MRN Searching
+
+This walkthrough details the enhancement of the LIMS **Collect Sample** page to support continuous queue visibility, checkbox multi-selection, and active Patient Name / MRN searches.
+
+## 1. Summary of Changes
+
+### A. Non-Disappearing Pending Collection Queue
+* Updated the layout in [LimsCollectSample.tsx](file:///D:/New%20folder/GIT%20HUB/HIS-WEB5/src/pages/LimsCollectSample.tsx) so the `Pending Collection Queue` is always visible in a compact, scrollable card (`max-h-64`) at the top of the page.
+* Selecting or checking rows in the queue now instantly loads details in the collection workbench below without hiding the queue itself.
+
+### B. Interactive Checkbox & Row Selection Integration
+* Checking checkboxes or clicking rows dynamically updates `selectedOrderIds`.
+* A reactive `useEffect` hook captures `selectedOrderIds` changes to:
+  - Automatically load patient name, MRN, and DOB fields.
+  - Aggregates and displays the selected order barcodes in a read-only **Selected Barcode(s)** field.
+  - Automatically pre-populates the phlebotomist **Collected By** field with the logged-in user name.
+  - Combines specimen parameters from all selected orders into the specimens collection table.
+  - Hides the workbench or clears values if no orders are selected.
+
+### C. Active Patient Name & MRN Search Triggers
+* Designed dedicated search input layouts with separate **"Search"** buttons for **Patient Name** and **MRN / Patient ID**. Both fields are fully enabled and styled as active white search inputs.
+* Upgraded the `resolveAndFetchOrder` search resolver:
+  - Smart multi-word parser: Splits patient name inputs (e.g. "John Doe") by spaces and queries the database for `first_name` and `last_name` combinations.
+  - Automatically falls back to single-term matches and MRN queries.
+  - Finds the associated pending LIMS orders and sets them as selected in the queue.
+
+---
+
+## 2. Verification Details
+
+* **Production Build Check**: Ran `npm run build` which successfully outputted the production bundle with **no compile errors**, confirming full TypeScript/ESLint compliance.
+
+

@@ -301,20 +301,30 @@ export const Billing = () => {
         setIsSaving(true);
 
         try {
-            const processedItems = billItems.map((item) => ({
-                id: crypto.randomUUID(),
-                description: item.description || 'Service Charges',
-                quantity: Number(item.quantity || 1),
-                unitPrice: Number(item.unitPrice || 0),
-                discountPercentage: Number(item.discountPercentage || 0),
-                discountAmount: Number(item.discountAmount || 0),
-                taxPercentage: Number(item.taxPercentage || 0),
-                taxAmount: Number(item.taxAmount || 0),
-                total: Number(item.total || 0),
-                itemType: item.itemType || 'Service',
-                itemId: item.itemId,
-                batchNo: item.batchNo
-            }));
+            const processedItems = billItems.map((item) => {
+                // Resolve itemId for lab test items by matching service definitions
+                let resolvedItemId = item.itemId;
+                if (!resolvedItemId && (item.itemType === 'Lab Test' || item.itemType === 'Laboratory')) {
+                    const matchedService = serviceDefinitions.find(
+                        s => s.name.toLowerCase() === (item.description || '').toLowerCase()
+                    );
+                    if (matchedService) resolvedItemId = matchedService.id;
+                }
+                return {
+                    id: crypto.randomUUID(),
+                    description: item.description || 'Service Charges',
+                    quantity: Number(item.quantity || 1),
+                    unitPrice: Number(item.unitPrice || 0),
+                    discountPercentage: Number(item.discountPercentage || 0),
+                    discountAmount: Number(item.discountAmount || 0),
+                    taxPercentage: Number(item.taxPercentage || 0),
+                    taxAmount: Number(item.taxAmount || 0),
+                    total: Number(item.total || 0),
+                    itemType: item.itemType || 'Service',
+                    itemId: resolvedItemId,
+                    batchNo: item.batchNo
+                };
+            });
 
             const finalBill: Bill = {
                 id: crypto.randomUUID(),
@@ -333,6 +343,7 @@ export const Billing = () => {
                 referenceNo: paymentMode === 'Credit' ? '' : referenceNo,
                 notes: notes,
                 departmentId: selectedDept || undefined,
+                departmentName: selectedDept ? (departments.find(d => d.id === selectedDept)?.name || undefined) : undefined,
                 doctorId: selectedDoctor || undefined,
                 items: processedItems,
                 payments: (paymentMode === 'Credit' || saveAsPending) ? [] : [{

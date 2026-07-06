@@ -1,4 +1,4 @@
-import { getSupabase } from './supabaseClient';
+import { getSupabase, BACKEND_URL, getAuthToken } from './supabaseClient';
 import { PolicyRule, PolicyRuleContext, AdjudicationResult } from '../types';
 
 /**
@@ -53,15 +53,44 @@ export const fetchRulesForPolicy = async (policyId: string): Promise<PolicyRule[
 };
 
 /**
- * The core evaluation engine that scores rules by specificity weighting and returns the winner.
- * 
- * Precedence Scoring logic based on user requirements:
- * - Specific Item Code Match: +100 points
- * - Item Class/Group Match:   +50 points
- * - Category Match (DRUGS):  +10 points
- * - Global Match ('ALL'):     +5 points
+ * Server-side evaluation caller. Sends the policy and item details to the Node.js API.
  */
-export const evaluatePolicyRule = (
+export const evaluatePolicyRule = async (
+  rules: PolicyRule[],
+  context: PolicyRuleContext
+): Promise<AdjudicationResult> => {
+  try {
+    const token = await getAuthToken();
+    const response = await fetch(`${BACKEND_URL}/api/adjudicate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        policyId: context.policyId || (rules.length > 0 ? rules[0].policyId : ''),
+        visitType: context.visitType,
+        gender: context.gender,
+        item: context.item
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned error: ${response.status} - ${errorText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Failed to evaluate policy rule on backend, falling back to local calculation:', error);
+    return evaluatePolicyRuleLocal(rules, context);
+  }
+};
+
+/**
+ * The core local evaluation engine (Fallback).
+ */
+export const evaluatePolicyRuleLocal = (
   rules: PolicyRule[],
   context: PolicyRuleContext
 ): AdjudicationResult => {
