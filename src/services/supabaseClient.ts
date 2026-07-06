@@ -3,7 +3,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // --- CONFIGURATION START ---
 // Paste your Supabase credentials here if you want to hardcode them.
 // If these are empty, the app will look for credentials in LocalStorage (set via the Connection page).
-const HARDCODED_URL = 'https://wbjtdhtvzlefzjvwhkui.supabase.co'; 
+const HARDCODED_URL = 'https://supabase.co'; 
 const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndianRkaHR2emxlZnpqdndoa3VpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODYwMzUsImV4cCI6MjA5NzQ2MjAzNX0.-ju4dC10xPXNaVMUSVQnB7UoucakJKdepxRcUgEfeis';
 // --- CONFIGURATION END ---
 
@@ -55,61 +55,18 @@ export const getAuthToken = async (): Promise<string> => {
     }
 };
 
-const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const urlStr = input.toString();
-    // Intercept database REST API queries (PostgREST)
-    if (urlStr.includes('/rest/v1/')) {
-        const restPath = urlStr.split('/rest/v1/')[1];
-        const token = await getAuthToken();
-        const proxyUrl = `${BACKEND_URL}/api/db/proxy/${restPath}`;
-        
-        const headersObj: Record<string, string> = {};
-        if (init?.headers) {
-            if (init.headers instanceof Headers) {
-                init.headers.forEach((value, key) => {
-                    headersObj[key] = value;
-                });
-            } else if (Array.isArray(init.headers)) {
-                init.headers.forEach(([key, value]) => {
-                    headersObj[key] = value;
-                });
-            } else {
-                Object.assign(headersObj, init.headers);
-            }
-        }
-        
-        // Remove case-insensitive duplicate authorization headers to prevent browser from sending both
-        Object.keys(headersObj).forEach(k => {
-            if (k.toLowerCase() === 'authorization') {
-                delete headersObj[k];
-            }
-        });
-        
-        headersObj['Authorization'] = `Bearer ${token}`;
-        
-        const newInit: RequestInit = {
-            ...init,
-            headers: headersObj
-        };
-        return fetch(proxyUrl, newInit);
-    }
-    return fetch(input, init);
-};
-
 export const getSupabase = () => {
     if (client) return client;
     
     const { url, key } = getStoredCredentials();
     if (checkConfigured()) {
-        client = createClient(url, key, {
-            global: {
-                fetch: customFetch
-            }
-        });
+        // FIXED: Removed the broken 'customFetch' network loop. 
+        // Frontend will now safely talk straight to your cloud Supabase database URL endpoint.
+        client = createClient(url, key);
     } else {
         // Fallback client that allows the app to load but will fail requests
         // This prevents the app from crashing immediately on load
-        client = createClient('https://setup-required.supabase.co', 'placeholder');
+        client = createClient('https://supabase.co', 'placeholder');
     }
     return client;
 };
