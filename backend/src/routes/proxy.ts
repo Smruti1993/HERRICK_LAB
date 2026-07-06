@@ -10,13 +10,11 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
 
-router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => {
+router.all('*', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // Safely pull the database endpoint target path
-    const subPath = req.params.targetPath || req.path.replace(/^\//, ''); 
-    const queryStr = req.url.split('?')[1] || '';
-    
-    const targetUrl = `${supabaseUrl}/rest/v1/${subPath}${queryStr ? '?' + queryStr : ''}`;
+    // Reconstruct the exact URL path sent from the frontend
+    const cleanPath = req.url.replace(/^\//, '');
+    const targetUrl = `${supabaseUrl}/rest/v1/${cleanPath}`;
     
     const headers: Record<string, string> = {
       'apikey': supabaseServiceKey,
@@ -28,14 +26,8 @@ router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => 
       headers['Range'] = req.headers['range'] as string;
     }
 
-    // FIXED: Corrected string verification to prevent runtime array crash errors
     if (req.headers.authorization && !req.headers.authorization.includes('demo-token')) {
-      const authHeader = req.headers.authorization;
-      if (authHeader.trim().length > 0 && authHeader !== 'Bearer null' && authHeader !== 'Bearer undefined') {
-        headers['Authorization'] = authHeader;
-      } else {
-        headers['Authorization'] = `Bearer ${supabaseServiceKey}`;
-      }
+      headers['Authorization'] = req.headers.authorization;
     } else {
       headers['Authorization'] = `Bearer ${supabaseServiceKey}`;
     }
@@ -49,14 +41,10 @@ router.all('/:targetPath*', async (req: AuthenticatedRequest, res: Response) => 
       init.body = JSON.stringify(req.body);
     }
 
-    console.log(`[DB Proxy Log] [User: ${req.user?.email || req.user?.id || 'System'}] [Method: ${req.method}] [Path: /rest/v1/${subPath}]`);
+    console.log(`[DB Proxy Log] Forwarding to: ${targetUrl}`);
 
     const dbResponse = await fetch(targetUrl, init);
     const dbData = await dbResponse.text();
-
-    if (dbResponse.status >= 400) {
-      console.log(`[DB Proxy Error] [Path: /rest/v1/${subPath}] [Status: ${dbResponse.status}] [Body: ${dbData}]`);
-    }
 
     res.status(dbResponse.status);
 
