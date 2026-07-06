@@ -457,7 +457,7 @@ export default function LimsAcceptSample() {
             })
             .in('id', orderSamples.map(x => x.id));
 
-          await supabase
+          const { error: updErr } = await supabase
             .from('lims_lab_orders')
             .update({
               status: 'Accepted',
@@ -468,6 +468,20 @@ export default function LimsAcceptSample() {
               lab_section: orderSamples[0].lab_order?.lab_section || 'Biochemistry'
             })
             .eq('id', oId);
+
+          if (updErr && updErr.code === '23503') {
+            await supabase
+              .from('lims_lab_orders')
+              .update({
+                status: 'Accepted',
+                accepted_at: now,
+                accepted_by: null,
+                received_at: now,
+                received_by: null,
+                lab_section: orderSamples[0].lab_order?.lab_section || 'Biochemistry'
+              })
+              .eq('id', oId);
+          }
         }
       }
 

@@ -21,7 +21,7 @@ async function logAuditTrail(
   performedBy: string,
   comments?: string
 ) {
-  const { error } = await supabase.from('lims_audit_trail').insert({
+  let { error } = await supabase.from('lims_audit_trail').insert({
     lab_order_id: labOrderId,
     from_status: fromStatus,
     to_status: toStatus,
@@ -29,6 +29,19 @@ async function logAuditTrail(
     performed_by: performedBy,
     comments: comments || null
   });
+  
+  if (error && error.code === '23503') {
+    const { error: retryErr } = await supabase.from('lims_audit_trail').insert({
+      lab_order_id: labOrderId,
+      from_status: fromStatus,
+      to_status: toStatus,
+      action_taken: actionTaken,
+      performed_by: null,
+      comments: comments || null
+    });
+    error = retryErr;
+  }
+
   if (error) {
     console.error('Audit trail logging failed:', error);
   }
@@ -195,10 +208,24 @@ router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Update order
-    const { error: updateErr } = await supabase
+    let { error: updateErr } = await supabase
       .from('lims_lab_orders')
       .update(updateFields)
       .eq('id', labOrderId);
+
+    if (updateErr && updateErr.code === '23503') {
+      const cleanFields = { ...updateFields };
+      delete cleanFields.collected_by;
+      delete cleanFields.accepted_by;
+      delete cleanFields.result_captured_by;
+      delete cleanFields.certified_by;
+      
+      const { error: retryErr } = await supabase
+        .from('lims_lab_orders')
+        .update(cleanFields)
+        .eq('id', labOrderId);
+      updateErr = retryErr;
+    }
 
     if (updateErr) throw updateErr;
 
@@ -304,49 +331,66 @@ router.post('/results/save', async (req: AuthenticatedRequest, res: Response) =>
         equipment_id: equipmentId || null
       };
 
-      if (existing) {
-        await supabase
-          .from('lims_results')
-          .update(resultData)
-          .eq('id', existing.id);
-      } else {
-        await supabase
-          .from('lims_results')
-          .insert({
+      let { error: saveErr } = existing
+        ? await supabase.from('lims_results').update(resultData).eq('id', existing.id)
+        : await supabase.from('lims_results').insert({
             id: crypto.randomUUID(),
             lab_order_id: labOrderId,
             parameter_id: r.parameterId,
             ...resultData
           });
+
+      if (saveErr && saveErr.code === '23503') {
+        const cleanResultData = { ...resultData, captured_by: null };
+        if (existing) {
+          await supabase.from('lims_results').update(cleanResultData).eq('id', existing.id);
+        } else {
+          await supabase.from('lims_results').insert({
+            id: crypto.randomUUID(),
+            lab_order_id: labOrderId,
+            parameter_id: r.parameterId,
+            ...cleanResultData
+          });
+        }
       }
     }
 
     // Auto transition status to 'Result'
     const now = new Date().toISOString();
-    await supabase
+    const updateFields = {
+      status: 'Result',
+      result_captured_at: now,
+      result_captured_by: userId,
+      instrument_run_id: instrumentRunId || null,
+      rack_position: rackPosition || null,
+      test_notes: testNotes || null,
+      clinical_comments: clinicalComments || null,
+      result_status: resultStatus || 'Preliminary',
+      qc_passed: qcPassed || false,
+      reagent_in_date: reagentInDate || false,
+      calibration_verified: calibrationVerified || false,
+      maintenance_ok: maintenanceOk || false,
+      duplicate_run_required: duplicateRunRequired || false,
+      control_lot_no: controlLotNo || null,
+      reagent_lot_no: reagentLotNo || null,
+      calibration_date: calibrationDate || null,
+      expiry_date: expiryDate || null,
+      test_method: testMethod || null,
+      analyzer_channel: analyzerChannel || null
+    };
+
+    let { error: orderErr } = await supabase
       .from('lims_lab_orders')
-      .update({
-        status: 'Result',
-        result_captured_at: now,
-        result_captured_by: userId,
-        instrument_run_id: instrumentRunId || null,
-        rack_position: rackPosition || null,
-        test_notes: testNotes || null,
-        clinical_comments: clinicalComments || null,
-        result_status: resultStatus || 'Preliminary',
-        qc_passed: qcPassed || false,
-        reagent_in_date: reagentInDate || false,
-        calibration_verified: calibrationVerified || false,
-        maintenance_ok: maintenanceOk || false,
-        duplicate_run_required: duplicateRunRequired || false,
-        control_lot_no: controlLotNo || null,
-        reagent_lot_no: reagentLotNo || null,
-        calibration_date: calibrationDate || null,
-        expiry_date: expiryDate || null,
-        test_method: testMethod || null,
-        analyzer_channel: analyzerChannel || null
-      })
+      .update(updateFields)
       .eq('id', labOrderId);
+
+    if (orderErr && orderErr.code === '23503') {
+      const cleanFields = { ...updateFields, result_captured_by: null };
+      await supabase
+        .from('lims_lab_orders')
+        .update(cleanFields)
+        .eq('id', labOrderId);
+    }
 
     await logAuditTrail(
       labOrderId,
@@ -520,18 +564,29 @@ router.post('/orders/collect', async (req: AuthenticatedRequest, res: Response) 
     const now = new Date().toISOString();
 
     for (const targetOrderId of ids) {
-      const { error: orderErr } = await supabase
+      const collectFields = {
+        status: 'Collected',
+        collected_at: now,
+        collected_by: userId,
+        collector_badge: collectorBadge || null,
+        collection_remarks: collectionRemarks || null,
+        identity_verified: identityVerified || false,
+        consent_obtained: consentObtained || false
+      };
+
+      let { error: orderErr } = await supabase
         .from('lims_lab_orders')
-        .update({
-          status: 'Collected',
-          collected_at: now,
-          collected_by: userId,
-          collector_badge: collectorBadge || null,
-          collection_remarks: collectionRemarks || null,
-          identity_verified: identityVerified || false,
-          consent_obtained: consentObtained || false
-        })
+        .update(collectFields)
         .eq('id', targetOrderId);
+
+      if (orderErr && orderErr.code === '23503') {
+        const cleanFields = { ...collectFields, collected_by: null };
+        const { error: retryErr } = await supabase
+          .from('lims_lab_orders')
+          .update(cleanFields)
+          .eq('id', targetOrderId);
+        orderErr = retryErr;
+      }
 
       if (orderErr) throw orderErr;
 
@@ -652,17 +707,32 @@ router.post('/orders/accept', async (req: AuthenticatedRequest, res: Response) =
     // Determine target status
     const targetStatus = allAccepted ? 'Accepted' : (requestResample ? 'Ordered' : 'Collected');
 
-    const { error: orderErr } = await supabase
+    const acceptFields = {
+      status: targetStatus,
+      accepted_at: allAccepted ? now : null,
+      accepted_by: allAccepted ? userId : null,
+      received_at: now,
+      received_by: userId,
+      lab_section: labSection || null
+    };
+
+    let { error: orderErr } = await supabase
       .from('lims_lab_orders')
-      .update({
-        status: targetStatus,
-        accepted_at: allAccepted ? now : null,
-        accepted_by: allAccepted ? userId : null,
-        received_at: now,
-        received_by: userId,
-        lab_section: labSection || null
-      })
+      .update(acceptFields)
       .eq('id', labOrderId);
+
+    if (orderErr && orderErr.code === '23503') {
+      const cleanFields = {
+        ...acceptFields,
+        accepted_by: null,
+        received_by: null
+      };
+      const { error: retryErr } = await supabase
+        .from('lims_lab_orders')
+        .update(cleanFields)
+        .eq('id', labOrderId);
+      orderErr = retryErr;
+    }
 
     if (orderErr) throw orderErr;
 

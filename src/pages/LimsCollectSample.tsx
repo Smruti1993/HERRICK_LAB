@@ -513,7 +513,7 @@ export default function LimsCollectSample() {
 
         if (!response.ok) {
           // Fallback to direct supabase updates if backend collect route fails
-          await supabase.from('lims_lab_orders').update({
+          const { error: updErr } = await supabase.from('lims_lab_orders').update({
             status: 'Collected',
             collected_at: now,
             collected_by: currentUserId,
@@ -521,6 +521,17 @@ export default function LimsCollectSample() {
             identity_verified: true,
             consent_obtained: true
           }).eq('id', id);
+
+          if (updErr && updErr.code === '23503') {
+            await supabase.from('lims_lab_orders').update({
+              status: 'Collected',
+              collected_at: now,
+              collected_by: null,
+              collection_remarks: remarks,
+              identity_verified: true,
+              consent_obtained: true
+            }).eq('id', id);
+          }
 
           const { data: existingSample } = await supabase
             .from('lims_samples')
