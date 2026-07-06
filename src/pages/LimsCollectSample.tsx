@@ -502,16 +502,30 @@ export default function LimsCollectSample() {
           ]
         };
 
-        const response = await fetch(`${BACKEND_URL}/api/lims/orders/collect`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(payload)
-        });
+        let apiSuccess = false;
+        if (BACKEND_URL) {
+          try {
+            const response = await fetch(`${BACKEND_URL}/api/lims/orders/collect`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(payload)
+            });
 
-        if (!response.ok) {
+            if (response.ok) {
+              const contentType = response.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                apiSuccess = true;
+              }
+            }
+          } catch (fetchErr) {
+            console.error("Collect API connection failed, executing fallback:", fetchErr);
+          }
+        }
+
+        if (!apiSuccess) {
           // Fallback to direct supabase updates if backend collect route fails
           const { error: updErr } = await supabase.from('lims_lab_orders').update({
             status: 'Collected',
