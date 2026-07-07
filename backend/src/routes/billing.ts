@@ -182,22 +182,8 @@ router.post('/create', async (req: AuthenticatedRequest, res: Response) => {
           priority: 'Routine',
           order_date: new Date().toISOString(),
           ordering_doctor_id: bill.doctorId || null,
-          service_center: bill.departmentName || bill.departmentId || null
+          service_center: bill.departmentId || null
         });
-
-        // Create the lims_lab_orders row directly
-        const { error: limsErr } = await supabase.from('lims_lab_orders').insert({
-          id: crypto.randomUUID(),
-          service_order_id: serviceOrderId,
-          barcode_no: `BAR-${Date.now().toString().slice(-6)}`,
-          priority: 'Routine',
-          status: 'Ordered',
-          ordered_at: new Date().toISOString()
-        });
-
-        if (limsErr) {
-          console.error('Failed to create lims_lab_order for direct billing item:', limsErr);
-        }
       }
     }
 

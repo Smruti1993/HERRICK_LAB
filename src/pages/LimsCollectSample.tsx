@@ -50,6 +50,7 @@ export default function LimsCollectSample() {
   const [specimens, setSpecimens] = useState<any[]>([]);
   const [containers, setContainers] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
+  const [serviceCentres, setServiceCentres] = useState<any[]>([]);
   const [locations, setLocations] = useState<string[]>(['ICU-01', 'ICU-02', 'Ward-A', 'Ward-B', 'OPD Clinic', 'Emergency', 'Dental']);
   const [labs, setLabs] = useState<string[]>(['Dental', 'Biochemistry', 'Haematology', 'Microbiology', 'Immunology', 'Clinical Pathology']);
 
@@ -107,9 +108,11 @@ export default function LimsCollectSample() {
         const { data: specData } = await supabase.from('lims_specimens').select('*').eq('status', 'Active');
         const { data: contData } = await supabase.from('lims_containers').select('*').eq('status', 'Active');
         const { data: deptData } = await supabase.from('departments').select('id, name').eq('status', 'Active');
+        const { data: scData } = await supabase.from('service_centres').select('id, name').eq('status', 'Active');
         if (specData) setSpecimens(specData);
         if (contData) setContainers(contData);
         if (deptData) setDepartments(deptData);
+        if (scData) setServiceCentres(scData);
       } catch (err) {
         console.error('Error loading Master Data:', err);
       }
@@ -1286,11 +1289,13 @@ export default function LimsCollectSample() {
                       <td className="py-4 px-4 text-slate-700 font-semibold">
                          {(() => {
                            const raw = item.lab_section || item.service_order?.service_center || '';
-                           // If raw looks like a UUID, resolve to department name
+                           // If raw looks like a UUID, resolve to service centre or department name
                            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
                            if (isUuid) {
+                             const sc = serviceCentres.find(s => s.id === raw);
+                             if (sc) return sc.name;
                              const dept = departments.find(d => d.id === raw);
-                             return dept ? dept.name : raw;
+                             if (dept) return dept.name;
                            }
                            return raw || '—';
                          })()}

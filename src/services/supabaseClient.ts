@@ -31,8 +31,11 @@ export const checkConfigured = () => {
 
 let client: SupabaseClient | null = null;
 
-// FIXED: Hardcoded absolute backend URL ensures requests hit the live Express server directly
-export const BACKEND_URL = 'https://onrender.com';
+// Resolve backend URL dynamically from environment variables or fall back to localhost:5005
+export const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || '').trim() || 
+    (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? 'http://localhost:5005'
+        : 'https://onrender.com');
 
 export const getAuthToken = async (): Promise<string> => {
     try {

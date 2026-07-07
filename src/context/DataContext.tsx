@@ -4096,9 +4096,183 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           showToast('success', 'Invoice generated successfully.');
           return true;
       } catch (error: any) {
-          showToast('error', 'Failed to create bill: ' + error.message);
-          setBills(prev => prev.filter(b => b.id !== bill.id));
-          return false;
+          console.warn("Backend billing create failed, trying client-side direct fallback...", error);
+          
+          try {
+              const supabase = getSupabase();
+              // 1. Insert bill header
+              const { error: billError } = await supabase.from('bills').insert({
+                  id: bill.id,
+                  patient_id: bill.patientId,
+                  appointment_id: bill.appointmentId || null,
+                  date: bill.date,
+                  status: bill.status,
+                  total_amount: bill.totalAmount,
+                  paid_amount: bill.paidAmount,
+                  invoice_no: bill.invoiceNo || null,
+                  discount_amount: bill.discountAmount || 0,
+                  tax_amount: bill.taxAmount || 0,
+                  round_off: bill.roundOff || 0,
+                  doctor_id: bill.doctorId || null,
+                  department_id: bill.departmentId || null,
+                  payment_mode: bill.paymentMode || null,
+                  amount_received: bill.amountReceived || 0,
+                  reference_no: bill.referenceNo || null,
+                  notes: bill.notes || null,
+                  created_by: bill.createdBy || 'admin',
+                  is_pharmacy: bill.isPharmacy || false,
+                  prescription_id: bill.prescriptionId || null,
+                  cancelled_at: bill.cancelledAt || null
+              });
+
+              if (billError) {
+                  throw new Error('Direct bill header save failed: ' + billError.message);
+              }
+
+              // 2. Insert bill items
+              const itemsDb = bill.items.map((i: any) => ({
+                  id: i.id,
+                  bill_id: bill.id,
+                  item_id: i.itemId || null,
+                  batch_no: i.batchNo || null,
+                  description: i.description,
+                  quantity: Number(i.quantity),
+                  unit_price: Number(i.unitPrice),
+                  total: Number(i.total),
+                  item_type: i.itemType || null,
+                  discount_percentage: Number(i.discountPercentage || 0),
+                  discount_amount: Number(i.discountAmount || 0),
+                  tax_percentage: Number(i.taxPercentage || 0),
+                  tax_amount: Number(i.taxAmount || 0)
+              }));
+
+              const { error: itemsError } = await supabase.from('bill_items').insert(itemsDb);
+              if (itemsError) {
+                  // clean up bill
+                  await supabase.from('bills').delete().eq('id', bill.id);
+                  throw new Error('Direct bill items save failed: ' + itemsError.message);
+              }
+
+              // 3. Insert payments
+              if (bill.payments && bill.payments.length > 0) {
+                  const paymentsDb = bill.payments.map((p: any) => ({
+                      id: p.id,
+                      bill_id: bill.id,
+                      date: p.date,
+                      amount: Number(p.amount),
+                      method: p.method,
+                      reference: p.reference || null
+                  }));
+                  const { error: payError } = await supabase.from('payments').insert(paymentsDb);
+                  if (payError) {
+                      console.error('Direct fallback: Failed to insert payments:', payError);
+                  }
+              }
+
+              // 4. Update status of linked service orders
+              if (linkedOrderIds && linkedOrderIds.length > 0) {
+                  await supabase
+                      .from('service_orders')
+                      .update({ billing_status: 'Billed', status: 'Billed' })
+                      .in('id', linkedOrderIds);
+
+                  setServiceOrders(prev => prev.map(o => 
+                      linkedOrderIds.includes(o.id) ? { ...o, billingStatus: 'Invoiced' } : o
+                  ));
+              }
+
+              // 5. Direct Billing Path for Lab Tests
+              const labItems = bill.items?.filter((i: any) => 
+                  i.itemType === 'Lab Test' || i.itemType === 'Laboratory' || i.itemType === 'lab_test'
+              ) || [];
+
+              if (labItems.length > 0 && (!linkedOrderIds || linkedOrderIds.length === 0)) {
+                  let appointmentId = bill.appointmentId || null;
+                  if (!appointmentId && bill.patientId) {
+                      try {
+                          const todayStr = new Date().toISOString().split('T')[0];
+                          const { data: existingApp } = await supabase
+                              .from('appointments')
+                              .select('id')
+                              .eq('patient_id', bill.patientId)
+                              .eq('date', todayStr)
+                              .limit(1);
+
+                          if (existingApp && existingApp.length > 0) {
+                              appointmentId = existingApp[0].id;
+                          } else {
+                              const newAppId = crypto.randomUUID();
+                              const { error: appErr } = await supabase.from('appointments').insert({
+                                  id: newAppId,
+                                  patient_id: bill.patientId,
+                                  date: todayStr,
+                                  time: new Date().toTimeString().slice(0, 5),
+                                  status: 'Completed',
+                                  visit_type: 'Direct Billing',
+                                  doctor_id: bill.doctorId || null,
+                                  department_id: bill.departmentId || null
+                              });
+                              if (!appErr) {
+                                  appointmentId = newAppId;
+                              }
+                          }
+                      } catch (appQueryErr) {
+                          console.error('Direct fallback: Failed to resolve/create stub appointment:', appQueryErr);
+                      }
+                  }
+
+                  for (const labItem of labItems) {
+                      let resolvedServiceId = labItem.itemId || null;
+                      let resolvedCptCode: string | null = null;
+                      
+                      const matchedSvc = serviceDefinitions.find(s => 
+                          (resolvedServiceId && s.id === resolvedServiceId) || 
+                          s.name.toLowerCase() === (labItem.description || '').toLowerCase()
+                      );
+                      
+                      if (matchedSvc) {
+                          resolvedServiceId = matchedSvc.id;
+                          resolvedCptCode = matchedSvc.cptCode || null;
+                      } else if (!resolvedServiceId && labItem.description) {
+                          const { data: svcMatch } = await supabase
+                              .from('service_definitions')
+                              .select('id, cpt_code')
+                              .ilike('name', labItem.description)
+                              .limit(1);
+                          if (svcMatch && svcMatch.length > 0) {
+                              resolvedServiceId = svcMatch[0].id;
+                              resolvedCptCode = svcMatch[0].cpt_code || null;
+                          }
+                      }
+
+                      const serviceOrderId = crypto.randomUUID();
+                      await supabase.from('service_orders').insert({
+                          id: serviceOrderId,
+                          appointment_id: appointmentId,
+                          service_id: resolvedServiceId,
+                          service_name: labItem.description,
+                          cpt_code: resolvedCptCode,
+                          quantity: labItem.quantity || 1,
+                          unit_price: labItem.unitPrice || 0,
+                          total_price: labItem.total || 0,
+                          status: 'Billed',
+                          billing_status: 'Billed',
+                          priority: 'Routine',
+                          order_date: new Date().toISOString(),
+                          ordering_doctor_id: bill.doctorId || null,
+                          service_center: bill.departmentId || null
+                      });
+                  }
+              }
+
+              showToast('success', 'Invoice generated successfully (via direct database fallback).');
+              return true;
+          } catch (fallbackError: any) {
+              console.error("Direct fallback failed:", fallbackError);
+              showToast('error', 'Failed to create bill: ' + fallbackError.message);
+              setBills(prev => prev.filter(b => b.id !== bill.id));
+              return false;
+          }
       }
   };
 
@@ -4132,10 +4306,28 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           showToast('success', 'Invoice cancelled.');
           return true;
       } catch (error: any) {
-          showToast('error', 'Failed to cancel bill: ' + error.message);
-          // Revert
-          setBills(prev => prev.map(b => b.id === id ? original : b));
-          return false;
+          console.warn("Backend billing cancel failed, trying client-side direct fallback...", error);
+          
+          try {
+              const supabase = getSupabase();
+              const { error: cancelError } = await supabase
+                  .from('bills')
+                  .update({ status: 'Cancelled', refund_status: 'Pending', cancelled_at: cancelledAt })
+                  .eq('id', id);
+
+              if (cancelError) {
+                  throw new Error('Direct cancel failed: ' + cancelError.message);
+              }
+
+              showToast('success', 'Invoice cancelled successfully (via direct database fallback).');
+              return true;
+          } catch (fallbackError: any) {
+              console.error("Direct fallback failed for cancelBill:", fallbackError);
+              showToast('error', 'Failed to cancel bill: ' + fallbackError.message);
+              // Revert
+              setBills(prev => prev.map(b => b.id === id ? original : b));
+              return false;
+          }
       }
   };
 
@@ -4174,9 +4366,39 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           showToast('success', 'Payment recorded.');
       } catch (error: any) {
-          showToast('error', 'Failed to record payment: ' + error.message);
-          // Revert
-          setBills(originalBillsState);
+          console.warn("Backend billing add-payment failed, trying client-side direct fallback...", error);
+          
+          try {
+              const supabase = getSupabase();
+              const { error: payError } = await supabase.from('payments').insert({
+                  id: payment.id,
+                  bill_id: billId,
+                  date: payment.date,
+                  amount: payment.amount,
+                  method: payment.method,
+                  reference: payment.reference || null
+              });
+
+              if (payError) {
+                  throw new Error('Direct payment insert failed: ' + payError.message);
+              }
+
+              const { error: billError } = await supabase
+                  .from('bills')
+                  .update({ paid_amount: newPaidAmount, status: newStatus })
+                  .eq('id', billId);
+
+              if (billError) {
+                  throw new Error('Direct bill status update failed: ' + billError.message);
+              }
+
+              showToast('success', 'Payment recorded successfully (via direct database fallback).');
+          } catch (fallbackError: any) {
+              console.error("Direct fallback failed for addPayment:", fallbackError);
+              showToast('error', 'Failed to record payment: ' + fallbackError.message);
+              // Revert
+              setBills(originalBillsState);
+          }
       }
   };
 

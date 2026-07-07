@@ -76,6 +76,8 @@ export default function LimsAcceptSample() {
   // Master lists
   const [specimens, setSpecimens] = useState<any[]>([]);
   const [containers, setContainers] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [serviceCentres, setServiceCentres] = useState<any[]>([]);
 
   // Search Filter States
   const [filtersExpanded, setFiltersExpanded] = useState(true);
@@ -129,8 +131,12 @@ export default function LimsAcceptSample() {
       try {
         const { data: specData } = await supabase.from('lims_specimens').select('*').eq('status', 'Active');
         const { data: contData } = await supabase.from('lims_containers').select('*').eq('status', 'Active');
+        const { data: deptData } = await supabase.from('departments').select('id, name').eq('status', 'Active');
+        const { data: scData } = await supabase.from('service_centres').select('id, name').eq('status', 'Active');
         if (specData) setSpecimens(specData);
         if (contData) setContainers(contData);
+        if (deptData) setDepartments(deptData);
+        if (scData) setServiceCentres(scData);
       } catch (err) {
         console.error('Error loading Master Data:', err);
       }
@@ -1108,7 +1114,17 @@ export default function LimsAcceptSample() {
                       {/* LabSection */}
                       <td className="py-4 px-4 font-semibold text-slate-700">
                         <span className="bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 rounded text-[10px]">
-                          {item.section || item.lab_order?.lab_section || 'Dental'}
+                          {(() => {
+                            const raw = item.section || item.lab_order?.lab_section || 'Dental';
+                            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw);
+                            if (isUuid) {
+                              const sc = serviceCentres.find(s => s.id === raw);
+                              if (sc) return sc.name;
+                              const dept = departments.find(d => d.id === raw);
+                              if (dept) return dept.name;
+                            }
+                            return raw;
+                          })()}
                         </span>
                       </td>
                     </tr>

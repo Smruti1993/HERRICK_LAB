@@ -1110,11 +1110,18 @@ export default function LimsPerformTest() {
 
   // Certify (F4) handler
   const handleCertifyAction = async () => {
-    if (!selectedOrder) {
-      alert('Please select an order from the worklist first.');
+    const targetIds = selectedOrderIds.length > 0 
+      ? selectedOrderIds 
+      : (selectedOrder ? [selectedOrder.id] : []);
+
+    if (targetIds.length === 0) {
+      alert('Please select at least one order from the worklist (by checking the checkbox or clicking a row) first.');
       return;
     }
-    if (selectedOrder.status !== 'Result') {
+
+    // Filter to only include orders that are in 'Result' status
+    const resultOrders = orders.filter(o => targetIds.includes(o.id) && o.status === 'Result');
+    if (resultOrders.length === 0) {
       alert('Only orders with "Result Entered" status can be certified.');
       return;
     }
@@ -1123,66 +1130,72 @@ export default function LimsPerformTest() {
     try {
       const token = await getAuthToken();
       const currentUserId = getLoggedInUserId();
+      let certifiedCount = 0;
 
-      let success = false;
-      if (BACKEND_URL) {
-        try {
-          const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              labOrderId: selectedOrder.id,
-              targetStatus: 'Certified',
-              userId: currentUserId,
-              comments: 'Certified by Pathologist via workbench'
-            })
-          });
+      for (const order of resultOrders) {
+        let success = false;
+        if (BACKEND_URL) {
+          try {
+            const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                labOrderId: order.id,
+                targetStatus: 'Certified',
+                userId: currentUserId,
+                comments: 'Certified by Pathologist via workbench'
+              })
+            });
 
-          if (response.ok) {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              success = true;
+            if (response.ok) {
+              const contentType = response.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                success = true;
+              }
             }
+          } catch (fetchErr) {
+            console.error("Certify API failed, executing fallback:", fetchErr);
           }
-        } catch (fetchErr) {
-          console.error("Certify API failed, executing fallback:", fetchErr);
         }
-      }
 
-      if (!success) {
-        const now = new Date().toISOString();
-        let { error } = await supabase
-          .from('lims_lab_orders')
-          .update({
-            status: 'Certified',
-            certified_at: now,
-            certified_by: currentUserId
-          })
-          .eq('id', selectedOrder.id);
-
-        if (error && error.code === '23503') {
-          await supabase
+        if (!success) {
+          const now = new Date().toISOString();
+          let { error } = await supabase
             .from('lims_lab_orders')
             .update({
               status: 'Certified',
               certified_at: now,
-              certified_by: null
+              certified_by: currentUserId
             })
-            .eq('id', selectedOrder.id);
+            .eq('id', order.id);
+
+          if (error && error.code === '23503') {
+            await supabase
+              .from('lims_lab_orders')
+              .update({
+                status: 'Certified',
+                certified_at: now,
+                certified_by: null
+              })
+              .eq('id', order.id);
+          }
+          success = true;
         }
-        success = true;
+
+        if (success) {
+          certifiedCount++;
+        }
       }
 
-      if (success) {
-        alert('Results certified successfully.');
-        fetchWorklist();
-        fetchStats();
+      alert(`${certifiedCount} order(s) certified successfully.`);
+      setSelectedOrderIds([]);
+      fetchWorklist();
+      fetchStats();
+      if (selectedOrder && targetIds.includes(selectedOrder.id)) {
         setSelectedOrder(prev => prev ? { ...prev, status: 'Certified' } : null);
-      } else {
-        alert('Certification failed.');
       }
     } catch (err) {
       console.error(err);
@@ -1194,66 +1207,60 @@ export default function LimsPerformTest() {
 
   // Retest (F8) handler
   const handleRetestAction = async () => {
-    if (!selectedOrder) {
-      alert('Please select an order first.');
+    const targetIds = selectedOrderIds.length > 0 
+      ? selectedOrderIds 
+      : (selectedOrder ? [selectedOrder.id] : []);
+
+    if (targetIds.length === 0) {
+      alert('Please select at least one order to re-test.');
       return;
     }
 
-    const confirmRetest = window.confirm('Are you sure you want to trigger a ReTest for this order?');
+    const confirmRetest = window.confirm(`Are you sure you want to trigger a ReTest for the selected ${targetIds.length} order(s)?`);
     if (!confirmRetest) return;
 
     setSaving(true);
     try {
       const token = await getAuthToken();
       const currentUserId = getLoggedInUserId();
+      let successCount = 0;
 
-      let success = false;
-      if (BACKEND_URL) {
-        try {
-          const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              labOrderId: selectedOrder.id,
-              targetStatus: 'Accepted',
-              userId: currentUserId,
-              comments: 'Certified report ordered for re-testing'
-            })
-          });
+      for (const orderId of targetIds) {
+        let success = false;
+        if (BACKEND_URL) {
+          try {
+            const response = await fetch(`${BACKEND_URL}/api/lims/transition`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                labOrderId: orderId,
+                targetStatus: 'Accepted',
+                userId: currentUserId,
+                comments: 'Certified report ordered for re-testing'
+              })
+            });
 
-          if (response.ok) {
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              success = true;
+            if (response.ok) {
+              const contentType = response.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                success = true;
+              }
             }
+          } catch (fetchErr) {
+            console.error("Retest API failed, executing fallback:", fetchErr);
           }
-        } catch (fetchErr) {
-          console.error("Retest API failed, executing fallback:", fetchErr);
         }
-      }
 
-      if (!success) {
-        await supabase
-          .from('lims_results')
-          .delete()
-          .eq('lab_order_id', selectedOrder.id);
-
-        let { error } = await supabase
-          .from('lims_lab_orders')
-          .update({
-            status: 'Accepted',
-            result_captured_at: null,
-            result_captured_by: null,
-            certified_at: null,
-            certified_by: null
-          })
-          .eq('id', selectedOrder.id);
-
-        if (error && error.code === '23503') {
+        if (!success) {
           await supabase
+            .from('lims_results')
+            .delete()
+            .eq('lab_order_id', orderId);
+
+          let { error } = await supabase
             .from('lims_lab_orders')
             .update({
               status: 'Accepted',
@@ -1262,18 +1269,33 @@ export default function LimsPerformTest() {
               certified_at: null,
               certified_by: null
             })
-            .eq('id', selectedOrder.id);
+            .eq('id', orderId);
+
+          if (error && error.code === '23503') {
+            await supabase
+              .from('lims_lab_orders')
+              .update({
+                status: 'Accepted',
+                result_captured_at: null,
+                result_captured_by: null,
+                certified_at: null,
+                certified_by: null
+              })
+              .eq('id', orderId);
+          }
+          success = true;
         }
-        success = true;
+        if (success) {
+          successCount++;
+        }
       }
 
-      if (success) {
-        alert('ReTest triggered. Order moved back to Pending.');
-        fetchWorklist();
-        fetchStats();
+      alert(`ReTest triggered for ${successCount} order(s). Selected order(s) moved back to Pending.`);
+      setSelectedOrderIds([]);
+      fetchWorklist();
+      fetchStats();
+      if (selectedOrder && targetIds.includes(selectedOrder.id)) {
         setSelectedOrder(prev => prev ? { ...prev, status: 'Accepted' } : null);
-      } else {
-        alert('Failed to trigger ReTest.');
       }
     } catch (err) {
       console.error(err);

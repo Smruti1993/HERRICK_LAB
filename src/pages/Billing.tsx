@@ -358,10 +358,13 @@ export const Billing = () => {
             const success = await createBill(finalBill, linkedOrderIds);
             if (success) {
                 handleCloseModal();
+                return finalBill;
             }
+            return null;
         } catch (err: any) {
             console.error("Invoice creation error:", err);
             showToast('error', 'Error creating invoice: ' + err.message);
+            return null;
         } finally {
             setIsSaving(false);
         }
@@ -1806,7 +1809,10 @@ export const Billing = () => {
                             <button
                                 onClick={async () => {
                                     // Perform standard create and then trigger printing!
-                                    const originalSuccess = await handleCreateBill();
+                                    const createdBill = await handleCreateBill();
+                                    if (createdBill) {
+                                        handlePrint(createdBill);
+                                    }
                                 }}
                                 disabled={isSaving || !newBillPatient}
                                 className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-md shadow-blue-100 flex items-center justify-center gap-1.5 disabled:cursor-not-allowed"
