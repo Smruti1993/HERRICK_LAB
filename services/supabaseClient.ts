@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // --- CONFIGURATION START ---
 // FIXED: Hardcoded directly to your explicit, live production Supabase instance
-const HARDCODED_URL = 'https://supabase.co'; 
+const HARDCODED_URL = 'https://wbjtdhtvzlefzjvwhkui.supabase.co'; 
 const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndianRkaHR2emxlZnpqdndoa3VpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODYwMzUsImV4cCI6MjA5NzQ2MjAzNX0.-ju4dC10xPXNaVMUSVQnB7UoucakJKdepxRcUgEfeis';
 // --- CONFIGURATION END ---
 
@@ -37,7 +37,7 @@ export const BACKEND_URL = resolvedEnvUrl
     ? (resolvedEnvUrl.startsWith('http') ? resolvedEnvUrl : `https://${resolvedEnvUrl}`)
     : (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
         ? 'http://localhost:5005'
-        : 'https://onrender.com'); // ✅ FIXED: Points directly to your specific Render service web url
+        : 'https://his-web5-backend.onrender.com'); // ✅ FIXED: Points directly to your specific Render service web url
 
 export const getAuthToken = async (): Promise<string> => {
     try {
@@ -60,7 +60,7 @@ export const getSupabase = () => {
     if (checkConfigured()) {
         client = createClient(url, key);
     } else {
-        client = createClient('https://supabase.co', HARDCODED_KEY);
+        client = createClient('https://wbjtdhtvzlefzjvwhkui.supabase.co', HARDCODED_KEY);
     }
     return client;
 };
