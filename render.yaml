@@ -36,4 +36,4 @@ services:
         fromService:
           type: web
           name: medicore-backend
-          property: host
+          property: url
