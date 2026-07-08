@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 5005;
 
 // Enable CORS for all routes and explicitly include OPTIONS method
 app.use(cors({
-  origin: '*',
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range'],
   credentials: true
