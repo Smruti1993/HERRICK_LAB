@@ -10,6 +10,7 @@ import { parseGS1 } from '../../utils/gs1Parser';
 import { DirectSaleInvoiceReport } from './DirectSaleInvoiceReport';
 import { getSupabase } from '../../services/supabaseClient';
 import { playSuccessBeep, playErrorBeep } from '../../utils/audio';
+import { sendInvoicePdf } from '../../services/whatsappService';
 
 const INITIAL_PATIENT = {
   firstName: '',
@@ -29,7 +30,7 @@ const INITIAL_PATIENT = {
 };
 
 export const DirectSale: React.FC = () => {
-  const { stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails, itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem } = useData();
+  const { stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails, itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem, showToast } = useData();
 
   const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
@@ -64,6 +65,7 @@ export const DirectSale: React.FC = () => {
   const [scannerFocused, setScannerFocused] = useState(false);
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
+  const sentInvoicesRef = useRef<Set<string>>(new Set());
 
   // Unrecognized Barcode Mapping Dialog state
   const [unrecognizedScan, setUnrecognizedScan] = useState<{ gtin: string; batch?: string; expiry?: string } | null>(null);
@@ -221,6 +223,46 @@ export const DirectSale: React.FC = () => {
       supabase.removeChannel(channel);
     };
   }, [pendingSale, inventoryItems]);
+
+  // Trigger automatic WhatsApp sending when sale is completed (Direct Sale)
+  useEffect(() => {
+    if (!lastDispensedSale) return;
+
+    const invoiceNo = lastDispensedSale.invoiceNo || lastDispensedSale.saleNo;
+    if (sentInvoicesRef.current.has(invoiceNo)) return;
+    sentInvoicesRef.current.add(invoiceNo);
+
+    const autoSendWhatsApp = async () => {
+      // Small timeout to ensure invoice-print-container is mounted and rendered in the DOM
+      setTimeout(async () => {
+        const printElement = document.getElementById('direct-sale-invoice-content');
+        if (!printElement) {
+          console.error("Direct Sale Print container not found in DOM");
+          // Remove from set to allow retry if container wasn't ready
+          sentInvoicesRef.current.delete(invoiceNo);
+          return;
+        }
+
+        const phone = lastDispensedSale.phoneNo;
+
+        if (!phone) {
+          console.warn("Patient has no phone number registered, skipping WhatsApp sending.");
+          showToast('info', 'Patient does not have a registered mobile number. Skipping WhatsApp invoice.');
+          return;
+        }
+
+        showToast('info', 'Generating bill PDF and sending via WhatsApp...');
+        const sendResult = await sendInvoicePdf(printElement, phone, invoiceNo);
+        if (sendResult.success) {
+          showToast('success', sendResult.message);
+        } else {
+          showToast('error', sendResult.message);
+        }
+      }, 1000); // 1000ms is safe for rendering to settle
+    };
+
+    autoSendWhatsApp();
+  }, [lastDispensedSale, showToast]);
 
   const addItemRow = () => {
     const newItem: DirectSaleItem = {

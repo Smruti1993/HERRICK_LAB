@@ -53,7 +53,7 @@ export const PharmacyInvoiceReport: React.FC<PharmacyInvoiceReportProps> = ({
       </div>
 
       {/* Report Container */}
-      <div className="max-w-[800px] mx-auto bg-white p-6 print:p-4 text-slate-800 font-sans border border-slate-100 shadow-xl print:shadow-none print:border-none">
+      <div id="pharmacy-invoice-print" className="max-w-[800px] mx-auto bg-white p-6 print:p-4 text-slate-800 font-sans border border-slate-100 shadow-xl print:shadow-none print:border-none">
         
         {/* Header */}
         <div className="text-center mb-6 border-b-2 border-slate-900 pb-4">

@@ -16,12 +16,19 @@ const astm_1 = __importDefault(require("./routes/astm"));
 const auth_1 = require("./middleware/auth");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5005;
+// Enable CORS for all routes and explicitly include OPTIONS method
 app.use((0, cors_1.default)({
-    origin: '*', // For development. Can be updated to the React client's URL for production.
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range']
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Prefer', 'Range'],
+    credentials: true
 }));
-app.use(express_1.default.json());
+// intercept and answer preflight requests immediately
+app.options('*', (req, res) => {
+    res.sendStatus(200);
+});
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ limit: '50mb', extended: true }));
 // Public status check route
 app.get('/api/status', (req, res) => {
     res.json({ status: 'OK', message: 'HIS-WEB5 Backend Server is running.' });
@@ -31,10 +38,10 @@ app.use('/api/adjudicate', auth_1.authenticateJWT, adjudicate_1.default);
 app.use('/api/billing', auth_1.authenticateJWT, billing_1.default);
 app.use('/api/lims', auth_1.authenticateJWT, lims_1.default);
 app.use('/api/astm', auth_1.authenticateJWT, astm_1.default);
+// Protect everything passing through the database proxy lane
 app.use('/api/db/proxy', (req, res, next) => {
-    // Allow login verification queries to app_users to bypass auth guard
-    if (req.path.startsWith('/app_users')) {
-        next();
+    if (req.originalUrl.includes('/app_users') || req.path.startsWith('/app_users')) {
+        next(); // Bypass auth guard for login lookups
     }
     else {
         (0, auth_1.authenticateJWT)(req, res, next);

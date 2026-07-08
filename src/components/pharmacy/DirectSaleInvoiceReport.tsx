@@ -117,7 +117,7 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
         </div>
 
         {/* Print-ready Invoice Document */}
-        <div className="flex-1 p-8 space-y-6 bg-white overflow-y-auto text-slate-800 text-xs leading-relaxed font-sans print:p-0 print:overflow-visible">
+        <div id="direct-sale-invoice-content" className="flex-1 p-8 space-y-6 bg-white overflow-y-auto text-slate-800 text-xs leading-relaxed font-sans print:p-0 print:overflow-visible">
           
           {/* Header */}
           <div className="text-center space-y-1">

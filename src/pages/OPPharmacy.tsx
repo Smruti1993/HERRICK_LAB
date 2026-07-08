@@ -10,6 +10,7 @@ import { PharmacyInvoiceReport } from '../components/pharmacy/PharmacyInvoiceRep
 import { parseGS1 } from '../utils/gs1Parser';
 import { playSuccessBeep, playErrorBeep } from '../utils/audio';
 import { InventoryItem } from '../types';
+import { sendInvoicePdf } from '../services/whatsappService';
 
 export const OPPharmacy: React.FC = () => {
     const { 
@@ -72,6 +73,7 @@ export const OPPharmacy: React.FC = () => {
     const [scannerFocused, setScannerFocused] = useState(false);
     const scannerInputRef = React.useRef<HTMLInputElement>(null);
     const [lastGS1Scan, setLastGS1Scan] = useState<{ gtin?: string; batch?: string; expiry?: string } | null>(null);
+    const sentInvoicesRef = React.useRef<Set<string>>(new Set());
 
     // Unrecognized Barcode Mapping Dialog state
     const [unrecognizedScan, setUnrecognizedScan] = useState<{ gtin: string; batch?: string; expiry?: string } | null>(null);
@@ -192,6 +194,49 @@ export const OPPharmacy: React.FC = () => {
             isMounted = false;
         };
     }, [selectedPrescription, selectedStoreId, fetchBatchDetails]);
+
+    // Trigger automatic WhatsApp sending when invoice is generated (OP Pharmacy)
+    useEffect(() => {
+        if (!generatedInvoiceId || !selectedPrescription) return;
+
+        const bill = bills.find(b => b.id === generatedInvoiceId);
+        const invoiceNo = bill?.invoiceNo || generatedInvoiceId;
+
+        if (sentInvoicesRef.current.has(invoiceNo)) return;
+        sentInvoicesRef.current.add(invoiceNo);
+
+        const autoSendWhatsApp = async () => {
+            // Small timeout to ensure pharmacy-invoice-print is mounted and rendered in the DOM
+            setTimeout(async () => {
+                const printElement = document.getElementById('pharmacy-invoice-print');
+                if (!printElement) {
+                    console.error("Pharmacy print container not found in DOM");
+                    // Remove from set to allow retry if container wasn't ready
+                    sentInvoicesRef.current.delete(invoiceNo);
+                    return;
+                }
+
+                const pat = patients.find(p => p.id === selectedPrescription.patientId);
+                const phone = pat?.phone;
+
+                if (!phone) {
+                    console.warn("Patient has no phone number registered, skipping WhatsApp sending.");
+                    showToast('info', 'Patient does not have a registered mobile number. Skipping WhatsApp invoice.');
+                    return;
+                }
+
+                showToast('info', 'Generating bill PDF and sending via WhatsApp...');
+                const sendResult = await sendInvoicePdf(printElement, phone, invoiceNo);
+                if (sendResult.success) {
+                    showToast('success', sendResult.message);
+                } else {
+                    showToast('error', sendResult.message);
+                }
+            }, 1000); // 1000ms is safe for rendering to settle
+        };
+
+        autoSendWhatsApp();
+    }, [generatedInvoiceId, selectedPrescription, patients, bills, showToast]);
 
     const patient = useMemo(() =>  
         selectedPrescription ? patients.find(pat => pat.id === selectedPrescription.patientId) : null,

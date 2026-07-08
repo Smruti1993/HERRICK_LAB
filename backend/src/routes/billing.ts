@@ -11,6 +11,9 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
 // 1. Create Bill
 router.post('/create', async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -269,4 +272,107 @@ router.post('/add-payment', async (req: AuthenticatedRequest, res: Response) => 
   }
 });
 
+// 4. Send WhatsApp Invoice PDF via Twilio
+router.post('/send-whatsapp', async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { phoneNo, invoiceNo, pdfBase64 } = req.body;
+
+    if (!phoneNo || !invoiceNo || !pdfBase64) {
+      res.status(400).json({ error: 'Missing phoneNo, invoiceNo, or pdfBase64' });
+      return;
+    }
+
+    const accountSid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+    const authToken = (process.env.TWILIO_AUTH_TOKEN || '').trim();
+    const fromWhatsApp = (process.env.TWILIO_WHATSAPP_FROM || '').trim();
+
+    if (!accountSid || !authToken || !fromWhatsApp) {
+      console.warn('Twilio credentials not configured in environment variables');
+      res.status(500).json({ error: 'Twilio configurations are missing on the server.' });
+      return;
+    }
+
+    // 1. Upload base64 PDF to Supabase Storage using admin client (bypassing client RLS policies)
+    const fileName = `${invoiceNo}-${Date.now()}.pdf`;
+    const buffer = Buffer.from(pdfBase64, 'base64');
+
+    console.log(`Uploading PDF to storage bucket "invoices" via admin client: ${fileName} (${buffer.length} bytes)`);
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('invoices')
+      .upload(fileName, buffer, {
+        contentType: 'application/pdf',
+        upsert: true
+      });
+
+    if (uploadError) {
+      console.error('Supabase admin storage upload failed:', uploadError);
+      res.status(502).json({ error: `Storage upload failed: ${uploadError.message}` });
+      return;
+    }
+
+    // 2. Get the public URL of the uploaded file
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('invoices')
+      .getPublicUrl(fileName);
+
+    if (!publicUrl) {
+      res.status(500).json({ error: 'Failed to generate public URL for the invoice PDF' });
+      return;
+    }
+
+    // Clean phone number: keep only digits
+    let cleanedPhone = phoneNo.replace(/\D/g, '');
+
+    // Format phone number to E.164 (Twilio expects whatsapp:+[country_code][number])
+    let finalPhone = '';
+    if (phoneNo.startsWith('+')) {
+      finalPhone = `whatsapp:${phoneNo}`;
+    } else if (phoneNo.startsWith('00')) {
+      finalPhone = `whatsapp:+${phoneNo.slice(2)}`;
+    } else if (cleanedPhone.length === 10) {
+      finalPhone = `whatsapp:+91${cleanedPhone}`;
+    } else if (cleanedPhone.startsWith('91') && cleanedPhone.length === 12) {
+      finalPhone = `whatsapp:+${cleanedPhone}`;
+    } else {
+      finalPhone = `whatsapp:+${cleanedPhone}`;
+    }
+
+    console.log(`Sending WhatsApp bill to ${finalPhone} for invoice ${invoiceNo} (PDF: ${publicUrl})`);
+
+    const authHeader = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+
+    const bodyParams = new URLSearchParams({
+      From: fromWhatsApp,
+      To: finalPhone,
+      Body: `Hello! Here is your bill/invoice ${invoiceNo} for the dispensed medicines.`,
+      MediaUrl: publicUrl
+    });
+
+    const response = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': authHeader
+      },
+      body: bodyParams.toString()
+    });
+
+    const data: any = await response.json();
+
+    if (!response.ok) {
+      console.error('Twilio API returned error:', data);
+      res.status(502).json({ error: data.message || 'Twilio failed to send WhatsApp message' });
+      return;
+    }
+
+    console.log(`WhatsApp message sent successfully: ${data.sid}`);
+    res.json({ success: true, message: 'WhatsApp message sent successfully', messageSid: data.sid });
+  } catch (err: any) {
+    console.error('Send WhatsApp error:', err);
+    res.status(500).json({ error: 'Internal server error while sending WhatsApp message' });
+  }
+});
+
 export default router;
+
