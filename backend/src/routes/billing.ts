@@ -11,8 +11,17 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+let supabaseAdmin: any = null;
+if (supabaseUrl && supabaseServiceKey) {
+  try {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  } catch (err: any) {
+    console.error('Failed to initialize supabaseAdmin:', err.message);
+  }
+} else {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_URL is missing. WhatsApp service will fail during execution.');
+}
 
 // 1. Create Bill
 router.post('/create', async (req: AuthenticatedRequest, res: Response) => {
@@ -289,6 +298,12 @@ router.post('/send-whatsapp', async (req: AuthenticatedRequest, res: Response) =
     if (!accountSid || !authToken || !fromWhatsApp) {
       console.warn('Twilio credentials not configured in environment variables');
       res.status(500).json({ error: 'Twilio configurations are missing on the server.' });
+      return;
+    }
+
+    if (!supabaseAdmin) {
+      console.warn('supabaseAdmin is not initialized due to missing SUPABASE_SERVICE_ROLE_KEY');
+      res.status(500).json({ error: 'Database admin client is not configured on the server. Please check SUPABASE_SERVICE_ROLE_KEY environment variable.' });
       return;
     }
 
