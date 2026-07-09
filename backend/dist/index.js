@@ -13,6 +13,7 @@ const billing_1 = __importDefault(require("./routes/billing"));
 const proxy_1 = __importDefault(require("./routes/proxy"));
 const lims_1 = __importDefault(require("./routes/lims"));
 const astm_1 = __importDefault(require("./routes/astm"));
+const abdm_1 = __importDefault(require("./routes/abdm"));
 const auth_1 = require("./middleware/auth");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5005;
@@ -38,6 +39,7 @@ app.use('/api/adjudicate', auth_1.authenticateJWT, adjudicate_1.default);
 app.use('/api/billing', auth_1.authenticateJWT, billing_1.default);
 app.use('/api/lims', auth_1.authenticateJWT, lims_1.default);
 app.use('/api/astm', auth_1.authenticateJWT, astm_1.default);
+app.use('/api/abdm', auth_1.authenticateJWT, abdm_1.default);
 // Protect everything passing through the database proxy lane
 app.use('/api/db/proxy', (req, res, next) => {
     if (req.originalUrl.includes('/app_users') || req.path.startsWith('/app_users')) {

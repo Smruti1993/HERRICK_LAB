@@ -9,6 +9,7 @@ import billingRoutes from './routes/billing';
 import proxyRoutes from './routes/proxy';
 import limsRoutes from './routes/lims';
 import astmRoutes from './routes/astm';
+import abdmRoutes from './routes/abdm';
 import { authenticateJWT } from './middleware/auth';
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/api/adjudicate', authenticateJWT, adjudicateRoutes);
 app.use('/api/billing', authenticateJWT, billingRoutes);
 app.use('/api/lims', authenticateJWT, limsRoutes);
 app.use('/api/astm', authenticateJWT, astmRoutes);
+app.use('/api/abdm', authenticateJWT, abdmRoutes);
 
 // Protect everything passing through the database proxy lane
 app.use('/api/db/proxy', (req, res, next) => {

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useData } from '../context/DataContext';
-import { Search, Pencil, X, UserPlus, Filter } from 'lucide-react';
+import { Search, Pencil, X, UserPlus, Filter, Network } from 'lucide-react';
 import { Pagination } from '../components/Pagination';
 import { Patient } from '../types';
+import { AbdmVerificationModal } from '../components/patient/AbdmVerificationModal';
 
 export const Patients = () => {
   const { patients, addPatient, updatePatient, organizations } = useData();
@@ -11,6 +12,8 @@ export const Patients = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const [showAbdmModal, setShowAbdmModal] = useState(false);
+  const [selectedAbdmPatient, setSelectedAbdmPatient] = useState<Patient | undefined>(undefined);
 
   const initialFormState = {
     firstName: '',
@@ -90,13 +93,22 @@ export const Patients = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-slate-800">Patients</h2>
-        <button 
-          onClick={toggleForm}
-          className={`${showForm ? 'bg-slate-500 hover:bg-slate-600' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2`}
-        >
-          {showForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-          {showForm ? 'Cancel' : 'New Patient Registration'}
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={() => { setSelectedAbdmPatient(undefined); setShowAbdmModal(true); }}
+            className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-5 py-2 rounded-lg font-medium shadow-sm transition-all flex items-center gap-2"
+          >
+            <Network className="w-4 h-4 text-blue-600" />
+            <span>ABDM</span>
+          </button>
+          <button 
+            onClick={toggleForm}
+            className={`${showForm ? 'bg-slate-500 hover:bg-slate-600' : 'bg-teal-600 hover:bg-teal-700'} text-white px-5 py-2 rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2`}
+          >
+            {showForm ? <X className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            {showForm ? 'Cancel' : 'New Patient Registration'}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -236,7 +248,14 @@ export const Patients = () => {
                                     <td className="px-6 py-4 text-slate-600">{age} Y / {p.gender}</td>
                                     <td className="px-6 py-4 text-slate-600">{p.phone}</td>
                                     <td className="px-6 py-4 text-slate-500">{new Date(p.registrationDate).toLocaleDateString()}</td>
-                                    <td className="px-6 py-4 text-right">
+                                    <td className="px-6 py-4 text-right flex items-center justify-end gap-1">
+                                        <button 
+                                            onClick={() => { setSelectedAbdmPatient(p); setShowAbdmModal(true); }}
+                                            className="text-blue-600 hover:text-blue-800 font-semibold text-xs py-1.5 px-3 rounded-lg hover:bg-blue-50 transition-colors"
+                                            title="Verify Identity / Link ABHA"
+                                        >
+                                            ABDM
+                                        </button>
                                         <button 
                                             onClick={() => handleEdit(p)}
                                             className="text-slate-400 hover:text-blue-600 transition-colors p-2 rounded-full hover:bg-blue-50 opacity-0 group-hover:opacity-100 focus:opacity-100"
@@ -261,6 +280,30 @@ export const Patients = () => {
             colorTheme="teal"
         />
       </div>
+
+      <AbdmVerificationModal 
+        isOpen={showAbdmModal}
+        onClose={() => { setShowAbdmModal(false); setSelectedAbdmPatient(undefined); }}
+        onSave={(verifiedData) => {
+          if (selectedAbdmPatient) {
+            // Update existing patient
+            updatePatient(selectedAbdmPatient.id, {
+              ...selectedAbdmPatient,
+              ...verifiedData
+            } as any);
+          } else {
+            // Create new patient
+            addPatient({
+              id: Date.now().toString(),
+              registrationDate: new Date().toISOString(),
+              ...verifiedData
+            } as any);
+          }
+          setShowAbdmModal(false);
+          setSelectedAbdmPatient(undefined);
+        }}
+        initialPatient={selectedAbdmPatient}
+      />
     </div>
   );
 };
