@@ -1073,6 +1073,12 @@ export const Consultation = () => {
   const [activeSection, setActiveSection] = useState('Chief Complaint');
   const [editedNotes, setEditedNotes] = useState<Record<string, string>>({});
   const [isNotesLoaded, setIsNotesLoaded] = useState(false);
+  // Allow context time to load demographics before hard-failing
+  const [dataReady, setDataReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setDataReady(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
   
   // Modal states
   const [showVitals, setShowVitals] = useState(false);
@@ -1091,7 +1097,25 @@ export const Consultation = () => {
 
   // If not found, handle gracefully (redirect or show error)
   if (!appointment || !patient) {
-      return <div className="p-10 text-center">Loading or Appointment not found...</div>;
+      if (!dataReady) {
+          return (
+              <div className="flex flex-col items-center justify-center h-[60vh] gap-4 text-slate-500">
+                  <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                  <p className="text-sm font-medium">Loading patient data...</p>
+              </div>
+          );
+      }
+      return (
+          <div className="p-10 text-center">
+              <p className="text-slate-500 font-medium">Appointment or patient not found.</p>
+              <button
+                  onClick={() => navigate('/doctor-workbench')}
+                  className="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-colors"
+              >
+                  Back to Workbench
+              </button>
+          </div>
+      );
   }
 
   const age = new Date().getFullYear() - new Date(patient.dob).getFullYear();

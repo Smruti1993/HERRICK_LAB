@@ -1449,6 +1449,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('vital_sign_parameters').select('*'), // 1
           supabase.from('patient_documents').select('*'),    // 2
           supabase.from('dental_icd_master').select('*'),    // 3
+          supabase.from('patient_demographics').select('*'), // 4
         ]);
 
         // Helper to safely extract data from optional results
@@ -1465,6 +1466,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const vspRes  = getOptional(1);
         const docRes  = getOptional(2);
         const denRes  = getOptional(3);
+        const demoRes = getOptional(4);
 
         // Core table name index (for error reporting)
         const tableNames = [
@@ -1566,7 +1568,32 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         
         if (retRes && retRes.data) console.log(`Fetched ${retRes.data.length} pharmacy returns.`);
 
-        if (pRes && pRes.data) setPatients(pRes.data.map(mapPatientFromDb));
+        {
+          const dbPatientsList = (pRes && pRes.data) ? pRes.data.map(mapPatientFromDb) : [];
+          const demoPatients = (demoRes && demoRes.data && demoRes.data.length > 0)
+            ? demoRes.data.map((row: any) => ({
+                id: String(row.id),
+                firstName: row.first_name || '',
+                lastName: row.last_name || '',
+                dob: row.year_of_birth
+                  ? `${row.year_of_birth}-${String(row.month_of_birth || 1).padStart(2, '0')}-${String(row.day_of_birth || 1).padStart(2, '0')}`
+                  : '',
+                gender: (row.gender === 'M' || row.gender === 'Male') ? 'Male'
+                       : (row.gender === 'F' || row.gender === 'Female') ? 'Female' : 'Other',
+                phone: row.mobile || '',
+                email: '',
+                address: row.address || '',
+                nationalId: row.abha_number || '',
+                arabicName: '',
+                sponsorName: 'CASH',
+                policyNo: '',
+                cardNo: '',
+                registrationDate: row.created_at || new Date().toISOString(),
+                _isAbdmDemographic: true,
+              }))
+            : [];
+          setPatients([...dbPatientsList, ...demoPatients]);
+        }
         if (eRes && eRes.data) setEmployees(eRes.data.map(mapEmpFromDb));
         if (dRes && dRes.data) setDepartments(dRes.data.map(mapDeptFromDb));
         if (uRes && uRes.data) setUnits(uRes.data.map(mapDeptFromDb)); 

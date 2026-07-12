@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Appointments } from './pages/Appointments';
 import { Patients } from './pages/Patients';
+import { AbdmProfiles } from './pages/AbdmProfiles';
 import { Employees } from './pages/Employees';
 import { Availability } from './pages/Availability';
 import { Masters } from './pages/Masters';
@@ -78,6 +79,7 @@ const AppRoutes = () => {
             <Route index element={<Dashboard />} />
             <Route path="appointments" element={<Appointments />} />
             <Route path="patients" element={<Patients />} />
+            <Route path="abdm-profiles" element={<AbdmProfiles />} />
             <Route path="doctor-workbench" element={<DoctorWorkbench />} />
             <Route path="consultation/:appointmentId" element={<Consultation />} />
             <Route path="reports" element={<Reports />} />

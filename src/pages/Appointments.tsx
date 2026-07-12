@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useData } from '../context/DataContext';
 import { analyzeSymptoms } from '../services/geminiService';
 import { Sparkles, Loader2, Calendar as CalendarIcon, Clock, Filter, RefreshCw, XCircle, AlertTriangle, ChevronLeft, ChevronRight, User, Search, X, Plus } from 'lucide-react';
@@ -95,11 +96,13 @@ const MiniCalendar = ({ selectedDate, onDateSelect }: { selectedDate: Date, onDa
 const BookingModal = ({ 
     isOpen, 
     onClose, 
-    initialData 
+    initialData,
+    prefillProfile,
 }: { 
     isOpen: boolean, 
     onClose: () => void, 
-    initialData: { date: string, time: string, doctorId: string, departmentId: string } 
+    initialData: { date: string, time: string, doctorId: string, departmentId: string },
+    prefillProfile?: any,
 }) => {
     const { patients, departments, employees, appointments, bookAppointment, showToast } = useData();
     const [searchTerm, setSearchTerm] = useState('');
@@ -132,6 +135,23 @@ const BookingModal = ({
             setFormData(prev => ({...prev, toTime: toStr, doctorId: initialData.doctorId, departmentId: initialData.departmentId, date: initialData.date, fromTime: initialData.time }));
         }
     }, [initialData]);
+
+    // Auto-select ABDM demographic patient when prefillProfile is provided
+    useEffect(() => {
+        if (isOpen && prefillProfile) {
+            const demographicId = String(prefillProfile.id);
+            const match = patients.find(p => p.id === demographicId);
+            if (match) {
+                setSelectedPatient(match.id);
+                setSearchTerm(`${match.firstName} ${match.lastName}`);
+                setShowPatientDropdown(false);
+            } else {
+                // Fallback: use name directly even if not in synced list yet
+                setSearchTerm(prefillProfile.fullName || `${prefillProfile.firstName || ''} ${prefillProfile.lastName || ''}`.trim());
+                setSelectedPatient(demographicId);
+            }
+        }
+    }, [isOpen, prefillProfile, patients]);
 
     if (!isOpen) return null;
 
@@ -421,12 +441,24 @@ export const Appointments = () => {
   // --- Modal Booking State ---
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [bookingSlotDetails, setBookingSlotDetails] = useState({ date: '', time: '', doctorId: '', departmentId: '' });
+  const [pendingPrefillProfile, setPendingPrefillProfile] = useState<any>(null);
 
   // --- Filter State ---
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
   const [filterDoctorId, setFilterDoctorId] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
+
+  // Read location state — from ABDM Profiles page: store profile, wait for user to pick a slot
+  const location = useLocation();
+  useEffect(() => {
+    const profile = (location.state as any)?.prefillProfile;
+    if (profile) {
+      setPendingPrefillProfile(profile);
+      // Clear the state so a refresh doesn't re-apply
+      window.history.replaceState({}, '');
+    }
+  }, []);
 
   // --- Modal State ---
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
@@ -605,6 +637,34 @@ export const Appointments = () => {
         
         {/* Left Col: AI Triage & Configuration (3 Columns) */}
         <div className="xl:col-span-3 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+          
+          {/* ABDM Patient Banner — shown when coming from ABDM Profiles page */}
+          {pendingPrefillProfile && (
+            <div className="bg-gradient-to-r from-cyan-600 to-blue-600 rounded-xl p-4 text-white shadow-lg shrink-0 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0 text-sm font-bold">
+                    {(pendingPrefillProfile.fullName || '?')[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">ABHA Patient</p>
+                    <p className="font-bold text-sm truncate">{pendingPrefillProfile.fullName}</p>
+                    <p className="text-[10px] text-cyan-200 font-mono truncate">{pendingPrefillProfile.abhaNumber}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPendingPrefillProfile(null)}
+                  className="text-white/60 hover:text-white shrink-0 mt-0.5"
+                  title="Clear prefill"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-[10px] text-cyan-100 mt-2.5 leading-relaxed">
+                ↓ Select a doctor below, then click a <span className="font-bold text-yellow-300">yellow slot</span> on the calendar to book.
+              </p>
+            </div>
+          )}
           
           {/* AI Symptom Checker */}
           <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-xl p-5 text-white shadow-lg shrink-0">
@@ -992,8 +1052,9 @@ export const Appointments = () => {
       {/* Booking Modal */}
       <BookingModal 
         isOpen={isBookingModalOpen} 
-        onClose={() => setIsBookingModalOpen(false)} 
+        onClose={() => { setIsBookingModalOpen(false); setPendingPrefillProfile(null); }} 
         initialData={bookingSlotDetails}
+        prefillProfile={pendingPrefillProfile}
       />
 
       {/* Cancel Confirmation Modal */}

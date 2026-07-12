@@ -26,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   
   // Patient Care Section
   { label: 'Doctor Workbench', path: '/doctor-workbench', icon: Stethoscope, category: 'Patient Care' },
+  { label: 'ABDM Profiles', path: '/abdm-profiles', icon: Users, category: 'Patient Care' },
 
   { label: 'Reports', path: '/reports', icon: FileBarChart, category: 'Administration' },
   { label: 'Doctors & Staff', path: '/employees', icon: Activity, category: 'Administration' },

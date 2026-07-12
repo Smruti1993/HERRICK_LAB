@@ -6,7 +6,7 @@ import { Patient } from '../types';
 import { AbdmVerificationModal } from '../components/patient/AbdmVerificationModal';
 
 export const Patients = () => {
-  const { patients, addPatient, updatePatient, organizations } = useData();
+  const { patients, addPatient, updatePatient, organizations, showToast } = useData();
   const [showForm, setShowForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -284,21 +284,8 @@ export const Patients = () => {
       <AbdmVerificationModal 
         isOpen={showAbdmModal}
         onClose={() => { setShowAbdmModal(false); setSelectedAbdmPatient(undefined); }}
-        onSave={(verifiedData) => {
-          if (selectedAbdmPatient) {
-            // Update existing patient
-            updatePatient(selectedAbdmPatient.id, {
-              ...selectedAbdmPatient,
-              ...verifiedData
-            } as any);
-          } else {
-            // Create new patient
-            addPatient({
-              id: Date.now().toString(),
-              registrationDate: new Date().toISOString(),
-              ...verifiedData
-            } as any);
-          }
+        onSave={(savedPatient) => {
+          showToast('success', 'ABDM demographics saved successfully!');
           setShowAbdmModal(false);
           setSelectedAbdmPatient(undefined);
         }}

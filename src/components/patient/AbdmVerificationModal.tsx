@@ -1,23 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Dna, Network, User, Shield, Check, Video, RefreshCw, AlertCircle, Fingerprint } from 'lucide-react';
-import { initAbdmAuth, confirmAbdmAuth, AbdmProfile } from '../../services/abdmService';
+import { X, Dna, Network, User, Shield, Check, Video, RefreshCw, AlertCircle, Fingerprint, LogIn, ChevronRight } from 'lucide-react';
+import { 
+  initAbdmAuth, 
+  verifyAbdmOtp, 
+  fetchAbdmPhrProfile, 
+  saveAbdmDemographics, 
+  AbdmProfile 
+} from '../../services/abdmService';
 
 interface AbdmVerificationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (patientData: {
-    firstName: string;
-    lastName: string;
-    dob: string;
-    gender: string;
-    phone: string;
-    email: string;
-    address: string;
-    nationalId: string;
-    sponsorName: string;
-    policyNo: string;
-  }) => void;
+  onSave: (patient: any) => void;
   initialPatient?: {
+    id?: string;
     firstName?: string;
     lastName?: string;
     dob?: string;
@@ -37,20 +33,27 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
   onSave,
   initialPatient
 }) => {
-  const [idInput, setIdInput] = useState(initialPatient?.phone || '');
+  const [idInput, setIdInput] = useState(initialPatient?.nationalId || '');
   const [otpInput, setOtpInput] = useState<string[]>(Array(6).fill(''));
   const [txnId, setTxnId] = useState<string | null>(null);
+  const [mobileInput, setMobileInput] = useState(initialPatient?.phone || '');
   
-  // Timer States
-  const [timer, setTimer] = useState(30);
+  // Timer States - ABDM OTPs are valid for 10 minutes
+  const [timer, setTimer] = useState(600);
   const [isTimerActive, setIsTimerActive] = useState(false);
 
   // Status States
   const [isOtpSent, setIsOtpSent] = useState(false);
+  const [isOtpVerified, setIsOtpVerified] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // PHR selection list
+  const [phrAddressesList, setPhrAddressesList] = useState<string[]>([]);
+  const [selectedPhrAddress, setSelectedPhrAddress] = useState<string>('');
+  const [manualPhrAddress, setManualPhrAddress] = useState('');
 
   // Profile fields (locked once verified)
   const [profile, setProfile] = useState<AbdmProfile | null>(null);
@@ -93,10 +96,10 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle Sprout OTP trigger
+  // Handle Sprout OTP trigger (Aadhaar registration init)
   const handleSproutOtp = async () => {
-    if (!idInput.trim()) {
-      setErrorMsg('Please enter an ABHA Address or Mobile number.');
+    if (!idInput.trim() || idInput.trim().length < 12) {
+      setErrorMsg('Please enter a valid 12-digit Aadhaar number.');
       return;
     }
 
@@ -104,16 +107,17 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const result = await initAbdmAuth(idInput);
+    const result = await initAbdmAuth(idInput.trim());
     setLoading(false);
 
     if (result.success && result.txnId) {
       setTxnId(result.txnId);
       setIsOtpSent(true);
-      setTimer(30);
+      setTimer(600); // 10 minutes - real ABDM OTP validity
       setIsTimerActive(true);
-      setSuccessMsg(result.message || 'OTP has been sprouted successfully!');
-      // Pre-fill mock OTP for easy test drive
+      setSuccessMsg(result.message || 'Aadhaar registration OTP sprouted successfully!');
+      
+      // Pre-fill mock OTP for easy test drive in Demo Mode
       if (result.txnId.startsWith('txn_demo_')) {
         setOtpInput(['4', '8', '2', '0', '1', '2']);
       }
@@ -142,7 +146,7 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
     }
   };
 
-  // Handle OTP verification
+  // Handle Aadhaar OTP verification
   const handleVerifyOtp = async () => {
     const enteredOtp = otpInput.join('');
     if (enteredOtp.length !== 6) {
@@ -159,21 +163,58 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const result = await confirmAbdmAuth(txnId, enteredOtp);
+    const result = await verifyAbdmOtp(txnId, enteredOtp, mobileInput.trim());
     setLoading(false);
 
-    if (result.success && result.profile) {
-      setProfile(result.profile);
-      setIsVerified(true);
-      setIsTimerActive(false);
-      setSuccessMsg('Identity successfully rooted and fetched from ABHA!');
-      
-      // Auto fill manually editable fields if empty
-      setManualAddress(result.profile.address);
-      setManualEmail(result.profile.email);
-      setManualAadhaar(result.profile.nationalId || 'XXXX-XXXX-9012');
+    if (result.success && result.txnId) {
+      setTxnId(result.txnId);
+      setIsOtpVerified(true);
+      setSuccessMsg('Aadhaar verified successfully! Please select or enter your ABHA address.');
+
+      // Load linked PHR list
+      const list = result.phrAddresses || [];
+      setPhrAddressesList(list);
+      if (list.length > 0) {
+        setSelectedPhrAddress(list[0]);
+      } else {
+        // Pre-fill a suggestion based on their initial inputs
+        setManualPhrAddress('');
+      }
     } else {
-      setErrorMsg(result.error || 'OTP verification failed');
+      // Show Eka Care's full error detail if available
+      const detail = (result as any).ekaBody;
+      const detailStr = detail ? ` (Eka: ${JSON.stringify(detail)})` : '';
+      setErrorMsg((result.error || 'OTP verification failed') + detailStr);
+    }
+  };
+
+  // Handle PHR Login/Auto-Login
+  const handlePhrLogin = async () => {
+    const activePhr = phrAddressesList.length > 0 ? selectedPhrAddress : manualPhrAddress.trim();
+    if (!activePhr) {
+      setErrorMsg('Please select or input an ABHA Address (PHR address).');
+      return;
+    }
+
+    if (!txnId) {
+      setErrorMsg('Aadhaar verification transaction expired. Please retry.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const result = await fetchAbdmPhrProfile(activePhr, txnId, initialPatient?.id);
+    setLoading(false);
+
+    if (result.success && (result as any).patient) {
+      setSuccessMsg('Patient profile successfully fetched and saved!');
+      onSave((result as any).patient);
+    } else {
+      const detail = (result as any).ekaBody;
+      const detailStr = detail ? ` (Eka: ${JSON.stringify(detail)})` : '';
+      setErrorMsg((result.error || 'Failed to retrieve and save profile demographics') + detailStr);
     }
   };
 
@@ -206,30 +247,37 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
   }
 
   // Save the record to the parent database state
-  const handleSaveRecord = () => {
+  const handleSaveRecord = async () => {
     if (!isVerified || !profile) {
       setErrorMsg('You must verify a patient identity via ABHA before saving.');
       return;
     }
 
-    onSave({
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      dob: profile.dob,
-      gender: profile.gender,
-      phone: profile.phone,
-      email: manualEmail,
-      address: manualAddress,
-      nationalId: manualAadhaar,
-      sponsorName: manualSponsor || 'CASH',
-      policyNo: manualPolicy
-    });
-    onClose();
+    setLoading(true);
+    setErrorMsg(null);
+    
+    const result = await saveAbdmDemographics(
+      profile, 
+      initialPatient?.id, 
+      {
+        email: manualEmail,
+        nationalId: manualAadhaar,
+        sponsorName: manualSponsor || 'CASH',
+        policyNo: manualPolicy
+      }
+    );
+    setLoading(false);
+
+    if (result.success && result.patient) {
+      onSave(result.patient);
+      onClose();
+    } else {
+      setErrorMsg(result.error || 'Failed to save patient records to database.');
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-start overflow-y-auto p-4 md:p-6">
-      {/* Premium Metallic Gradient Card with soft green illustrations */}
       <div 
         className="bg-gradient-to-br from-slate-100 via-emerald-50/20 to-blue-50/30 w-full max-w-xl rounded-3xl shadow-2xl border border-white/60 overflow-hidden relative animate-in fade-in zoom-in-95 duration-200"
         style={{
@@ -277,26 +325,27 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
             </div>
           )}
 
-          {/* Section 1: ABHA Entry */}
+          {/* Section 1: Aadhaar entry */}
           <div className="bg-white/70 backdrop-blur-sm p-5 rounded-2xl border border-slate-200/60 shadow-sm space-y-4">
             <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-800 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
               <User className="w-3.5 h-3.5" />
-              <span>Fetch via ABHA 👤🍌</span>
+              <span>Aadhaar Verification 👤🍌</span>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500">ABHA path or nano number, or mobile number</label>
+              <label className="text-xs font-bold text-slate-500">12-digit Aadhaar number</label>
               <div className="flex gap-2">
                 <input 
-                  disabled={isVerified}
+                  disabled={isOtpSent}
                   type="text" 
+                  maxLength={12}
                   className="flex-1 px-4 py-2.5 border border-cyan-200 focus:border-cyan-500 bg-white rounded-xl text-sm focus:ring-2 focus:ring-cyan-100 outline-none transition-all"
-                  placeholder="rahul123@abdm or 98765 43210"
+                  placeholder="Enter 12-digit Aadhaar number"
                   value={idInput}
-                  onChange={(e) => setIdInput(e.target.value)}
+                  onChange={(e) => setIdInput(e.target.value.replace(/\D/g, ''))}
                 />
                 <button 
-                  disabled={loading || isVerified}
+                  disabled={loading || isOtpSent}
                   onClick={handleSproutOtp}
                   className="bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-5 rounded-xl text-sm font-semibold shadow-md shadow-blue-200/50 hover:shadow-lg transition-all flex items-center gap-1.5 disabled:opacity-50"
                 >
@@ -305,23 +354,11 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-between items-center text-xs">
-              <a 
-                href="https://healthid.ndhm.gov.in/register" 
-                target="_blank" 
-                rel="noreferrer" 
-                className="text-cyan-600 hover:text-cyan-700 font-bold flex items-center gap-1"
-              >
-                New to ABHA? Create one via Aadhaar ➔
-              </a>
-            </div>
-
             {/* QR Scanner Part */}
             <div className="pt-4 border-t border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
               <span className="text-xs font-bold text-slate-500">Scan ABHA QR</span>
               
               <div className="flex items-center gap-4 w-full md:w-auto">
-                {/* QR Box / Camera Live Feed Container */}
                 <div className="w-20 h-20 border-2 border-slate-300 rounded-xl overflow-hidden flex items-center justify-center bg-slate-100 relative shrink-0">
                   {isScanning ? (
                     <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -348,15 +385,15 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: OTP Verification */}
-          {isOtpSent && !isVerified && (
-            <div className="bg-white/70 backdrop-blur-sm p-5 rounded-2xl border border-slate-200/60 shadow-sm space-y-4">
+          {/* Section 2: Aadhaar OTP Verification */}
+          {isOtpSent && !isOtpVerified && (
+            <div className="bg-white/70 backdrop-blur-sm p-5 rounded-2xl border border-slate-200/60 shadow-sm space-y-4 animate-in slide-in-from-bottom-3 duration-250">
               <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-800 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
                 <span>Harvest OTP 🍌</span>
               </div>
 
+              {/* OTP digits + Timer row */}
               <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                {/* OTP split input boxes */}
                 <div className="flex gap-2">
                   {otpInput.map((digit, idx) => (
                     <input 
@@ -373,27 +410,92 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 w-full md:w-auto">
-                  {/* LCD Countdown display */}
                   <div className="bg-slate-900 border-2 border-slate-700 text-cyan-400 font-mono text-lg px-4 py-1.5 rounded-xl shadow-inner tracking-widest flex items-center justify-center select-none min-w-[70px]">
-                    00:{timer < 10 ? `0${timer}` : timer}
+                    {String(Math.floor(timer / 60)).padStart(2, '0')}:{String(timer % 60).padStart(2, '0')}
                   </div>
+                </div>
+              </div>
 
-                  <button 
+              {/* Mobile number field - required by Eka Care verify endpoint */}
+              <div className="pt-2 border-t border-slate-100 space-y-1">
+                <label className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                  📱 Mobile number to link with ABHA <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="tel"
+                  maxLength={10}
+                  className="w-full px-4 py-2.5 border border-cyan-200 focus:border-cyan-500 bg-white rounded-xl text-sm focus:ring-2 focus:ring-cyan-100 outline-none transition-all"
+                  placeholder="10-digit mobile number (e.g. 9876543210)"
+                  value={mobileInput}
+                  onChange={(e) => setMobileInput(e.target.value.replace(/\D/g, ''))}
+                />
+                <p className="text-[10px] text-slate-400">This mobile number will be linked to your ABHA account.</p>
+              </div>
+
+              {/* Verify button */}
+              <button 
+                disabled={loading || mobileInput.trim().length < 10}
+                onClick={handleVerifyOtp}
+                className="w-full bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-blue-200/50 hover:shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Verify OTP <Check className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+
+          {/* Section 3: ABHA Address Selection (Auto-Login Phase) */}
+          {isOtpVerified && !isVerified && (
+            <div className="bg-white/70 backdrop-blur-sm p-5 rounded-2xl border border-slate-200/60 shadow-sm space-y-4 animate-in slide-in-from-bottom-3 duration-250">
+              <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-800 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider">
+                <LogIn className="w-3.5 h-3.5" />
+                <span>ABHA Address Login 🍌</span>
+              </div>
+
+              <div className="space-y-3">
+                {phrAddressesList.length > 0 ? (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">Select linked ABHA address (PHR address)</label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-cyan-200 bg-white rounded-xl text-sm focus:ring-2 focus:ring-cyan-100 outline-none"
+                      value={selectedPhrAddress}
+                      onChange={(e) => setSelectedPhrAddress(e.target.value)}
+                    >
+                      {phrAddressesList.map((addr) => (
+                        <option key={addr} value={addr}>{addr}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-500">No linked ABHA addresses. Create/Input manually:</label>
+                    <input 
+                      type="text"
+                      className="w-full px-4 py-2.5 border border-cyan-200 bg-white rounded-xl text-sm focus:ring-2 focus:ring-cyan-100 outline-none"
+                      placeholder="e.g. yourname@abdm"
+                      value={manualPhrAddress}
+                      onChange={(e) => setManualPhrAddress(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
                     disabled={loading}
-                    onClick={handleVerifyOtp}
-                    className="flex-1 md:flex-none bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-blue-200/50 hover:shadow-lg transition-all flex items-center justify-center gap-1.5"
+                    onClick={handlePhrLogin}
+                    className="bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-md shadow-blue-200/50 hover:shadow-lg transition-all flex items-center gap-1.5"
                   >
-                    Verify <Check className="w-4 h-4" />
+                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Login / Fetch Profile'}
+                    <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Section 3: Sourced Fields (Locked) */}
+          {/* Section 4: Demographic profile fetched */}
           {isVerified && profile && (
-            <div className="bg-emerald-950 p-6 rounded-3xl text-emerald-100 border border-emerald-900/60 shadow-xl space-y-5 relative overflow-hidden">
-              {/* Decorative Banana Accent */}
+            <div className="bg-emerald-950 p-6 rounded-3xl text-emerald-100 border border-emerald-900/60 shadow-xl space-y-5 relative overflow-hidden animate-in zoom-in-95 duration-250">
               <div className="absolute top-2 right-2 opacity-25 select-none pointer-events-none text-2xl">
                 🍌
               </div>
@@ -425,7 +527,7 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
                 <div className="space-y-1">
                   <span className="text-emerald-400 font-bold text-[10px] uppercase">Date of birth</span>
                   <div className="bg-emerald-900/80 border border-emerald-800 text-emerald-300 px-3 py-2 rounded-xl font-medium select-all">
-                    {new Date(profile.dob).toLocaleDateString('en-GB')}
+                    {profile.dayOfBirth}/{profile.monthOfBirth}/{profile.yearOfBirth}
                   </div>
                 </div>
                 <div className="space-y-1">
@@ -434,16 +536,10 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
                     {profile.gender}
                   </div>
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 col-span-2">
                   <span className="text-emerald-400 font-bold text-[10px] uppercase">ABHA address</span>
                   <div className="bg-emerald-900/80 border border-emerald-800 text-emerald-300 px-3 py-2 rounded-xl font-medium select-all">
                     {profile.abhaAddress}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-emerald-400 font-bold text-[10px] uppercase">Phone number</span>
-                  <div className="bg-emerald-900/80 border border-emerald-800 text-emerald-300 px-3 py-2 rounded-xl font-medium select-all">
-                    {profile.phone}
                   </div>
                 </div>
               </div>
@@ -494,7 +590,7 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
                 </div>
               </div>
 
-              {/* Sponsor Information */}
+              {/* Sponsor Details */}
               <div className="pt-4 border-t border-emerald-800/80 space-y-4">
                 <span className="text-emerald-400 font-bold text-[10px] uppercase block">
                   Insurance / sponsor details
@@ -540,11 +636,11 @@ export const AbdmVerificationModal: React.FC<AbdmVerificationModalProps> = ({
           
           <button 
             type="button" 
-            disabled={!isVerified}
+            disabled={!isVerified || loading}
             onClick={handleSaveRecord}
             className="flex-1 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-3 rounded-full text-sm font-bold shadow-md shadow-blue-200/50 hover:shadow-lg transition-all flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Save path-record
+            {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Save path-record'}
           </button>
         </div>
       </div>
