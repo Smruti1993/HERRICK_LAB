@@ -1,4 +1,4 @@
-import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill, ShoppingCart } from 'lucide-react';
+import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill, ShoppingCart, Award } from 'lucide-react';
 
 export const APP_NAME = "MediCore HMS";
 
@@ -73,7 +73,10 @@ export const NAV_ITEMS: NavItem[] = [
         path: '/pharmacy/masters',
         subItems: [
           { label: 'Drug Generic Master', path: '/pharmacy/masters/drug-generic' },
-          { label: 'Drug Master', path: '/pharmacy/masters/drug-master' }
+          { label: 'Drug Master',         path: '/pharmacy/masters/drug-master' },
+          { label: 'Zone Master',         path: '/pharmacy/masters/zones' },
+          { label: 'Rack Master',         path: '/pharmacy/masters/racks' },
+          { label: 'Batch Locations',     path: '/pharmacy/masters/batch-locations' },
         ]
       },
       {
@@ -95,6 +98,11 @@ export const NAV_ITEMS: NavItem[] = [
         label: 'Drug Return',
         path: '/pharmacy/drug-return',
         icon: 'Undo'
+      },
+      {
+        label: 'Loyalty Portal',
+        path: '/pharmacy/loyalty',
+        icon: Award
       }
     ]
   },

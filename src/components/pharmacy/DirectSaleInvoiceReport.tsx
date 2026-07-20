@@ -44,19 +44,20 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
   const vatRegNo = branch?.vatRegNo || '310358458600003';
 
   // Calculations
+  const discountFactor = 1 - (sale.discountPercentage || 0) / 100;
   const calculatedItems = sale.items.map(item => {
     const taxPercentage = item.taxPercentage || 0;
-    const netAmount = item.totalPrice;
+    // Apply header discount factor proportionally to each item's total price
+    const netAmount = item.totalPrice * discountFactor;
     
-    // Reverse engineer base amount and tax
-    // netAmount = baseAmount * (1 + taxPercentage / 100)
-    // baseAmount = netAmount / (1 + taxPercentage / 100)
+    // Reverse engineer base amount and tax from net (discounted, tax-inclusive) amount
     const baseAmount = netAmount / (1 + taxPercentage / 100);
     const taxAmount = netAmount - baseAmount;
     const rateBeforeTax = item.unitPrice / (1 + taxPercentage / 100);
 
     return {
       ...item,
+      netAmount: Number(netAmount.toFixed(decimals)),
       rateBeforeTax: Number(rateBeforeTax.toFixed(4)),
       baseAmount: Number(baseAmount.toFixed(decimals)),
       taxAmount: Number(taxAmount.toFixed(decimals)),
@@ -66,7 +67,7 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
 
   const subtotalBeforeTax = calculatedItems.reduce((sum, item) => sum + item.baseAmount, 0);
   const totalTax = calculatedItems.reduce((sum, item) => sum + item.taxAmount, 0);
-  const totalDiscount = 0; // Direct sales do not have discounts currently
+  const totalDiscount = sale.discountAmount || 0;
   const roundOff = 0.00;
   const grandTotal = sale.totalAmount;
 
@@ -210,9 +211,9 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                     <td className="py-2.5 px-1 text-right font-mono">{item.totalPrice.toFixed(decimals)}</td>
                     <td className="py-2.5 px-1 text-right font-mono">{(0).toFixed(decimals)}</td>
                     <td className="py-2.5 px-1 text-right font-mono">{item.baseAmount.toFixed(decimals)}</td>
-                    <td className="py-2.5 px-1 text-right font-mono">{(0).toFixed(decimals)}</td>
+                    <td className="py-2.5 px-1 text-right font-mono text-rose-600">{totalDiscount > 0 ? (item.totalPrice * (sale.discountPercentage || 0) / 100).toFixed(decimals) : (0).toFixed(decimals)}</td>
                     <td className="py-2.5 px-1 text-right font-semibold text-slate-600">{item.taxPercentage}%</td>
-                    <td className="py-2.5 px-1 text-right font-bold font-mono">{item.totalPrice.toFixed(decimals)}</td>
+                    <td className="py-2.5 px-1 text-right font-bold font-mono">{(item.netAmount ?? item.totalPrice).toFixed(decimals)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -256,6 +257,12 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
 
             {/* Subtotal details (Right) */}
             <div className="flex flex-col justify-end items-end space-y-1.5">
+              {totalDiscount > 0 && (
+                <div className="flex justify-between w-64 text-slate-400 font-medium">
+                  <span>Gross Total:</span>
+                  <span className="font-mono line-through">{(grandTotal + totalDiscount).toFixed(decimals)}</span>
+                </div>
+              )}
               <div className="flex justify-between w-64 text-slate-500 font-medium">
                 <span>Total Before Round Off:</span>
                 <span className="font-mono">{subtotalBeforeTax.toFixed(decimals)}</span>
@@ -264,8 +271,8 @@ export const DirectSaleInvoiceReport: React.FC<DirectSaleInvoiceReportProps> = (
                 <span>Add: Total Taxes (VAT):</span>
                 <span className="font-mono">{totalTax.toFixed(decimals)}</span>
               </div>
-              <div className="flex justify-between w-64 text-slate-500 font-medium">
-                <span>Less: Total Discount:</span>
+              <div className={`flex justify-between w-64 font-medium ${totalDiscount > 0 ? 'text-rose-600 font-bold' : 'text-slate-500'}`}>
+                <span>Less: Total Discount{totalDiscount > 0 && sale.discountPercentage ? ` (${sale.discountPercentage}%)` : ''}:</span>
                 <span className="font-mono">-{totalDiscount.toFixed(decimals)}</span>
               </div>
               <div className="flex justify-between w-64 text-slate-500 font-medium border-b border-slate-100 pb-1.5">

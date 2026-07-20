@@ -22,10 +22,14 @@ import { StockLedgerReport } from './components/inventory/reports/StockLedger';
 import { InventoryDashboard } from './components/inventory/InventoryDashboard';
 import { DrugGenericMaster } from './components/pharmacy/masters/DrugGenericMaster';
 import { DrugMaster } from './components/pharmacy/masters/DrugMaster';
+import ZoneMaster from './components/pharmacy/masters/ZoneMaster';
+import RackMaster from './components/pharmacy/masters/RackMaster';
+import BatchLocations from './components/pharmacy/masters/BatchLocations';
 import { DirectSale } from './components/pharmacy/DirectSale';
 import { OPPharmacy } from './pages/OPPharmacy';
 import { DrugReturn } from './pages/DrugReturn';
 import { DirectSaleHistory } from './components/pharmacy/DirectSaleHistory';
+import { Loyalty } from './pages/Loyalty';
 import { OrganizationMaster } from './pages/OrganizationMaster';
 import { PlanDefinition } from './pages/PlanDefinition';
 import { SponsorTariff } from './pages/SponsorTariff';
@@ -110,10 +114,14 @@ const AppRoutes = () => {
               <Route path="masters" element={<Navigate to="/pharmacy/masters/drug-generic" replace />} />
               <Route path="masters/drug-generic" element={<DrugGenericMaster />} />
               <Route path="masters/drug-master" element={<DrugMaster />} />
+              <Route path="masters/zones" element={<ZoneMaster />} />
+              <Route path="masters/racks" element={<RackMaster />} />
+              <Route path="masters/batch-locations" element={<BatchLocations />} />
               <Route path="direct-sale" element={<DirectSale />} />
               <Route path="direct-sale-history" element={<DirectSaleHistory />} />
               <Route path="op-pharmacy" element={<OPPharmacy />} />
               <Route path="drug-return" element={<DrugReturn />} />
+              <Route path="loyalty" element={<Loyalty />} />
             </Route>
             <Route path="procurement">
               <Route index element={<Navigate to="vendor-master" replace />} />

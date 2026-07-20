@@ -613,6 +613,8 @@ export interface DirectSale {
   
   totalAmount: number;
   taxAmount?: number;
+  discountPercentage?: number;
+  discountAmount?: number;
   items: DirectSaleItem[];
   paymentMode?: string;
   referenceNo?: string;
@@ -1400,5 +1402,185 @@ export interface LimsReferenceRemark {
   status: 'Active' | 'Inactive';
 }
 
+// ─── LOYALTY SYSTEM TYPES ─────────────────────────────────
+
+export type LoyaltyTierName = 'Silver' | 'Gold' | 'Platinum';
+export type LoyaltyTxnType =
+  | 'EARN' | 'REDEEM' | 'ADJUST_ADD' | 'ADJUST_SUB'
+  | 'EXPIRE' | 'REVERSE' | 'WELCOME' | 'BIRTHDAY'
+  | 'REFERRAL' | 'MILESTONE' | 'FESTIVAL';
+export type LoyaltyAccountStatus = 'Active' | 'Suspended' | 'Closed';
+
+export interface LoyaltyProgramConfig {
+  id:                   string;
+  programName:          string;
+  programStatus:        'Active' | 'Inactive';
+  effectiveFrom:        string;
+  pointValue:           number;   // 1 point = ₹X
+  earnRate:             number;   // points per ₹100
+  minBillToEarn:        number;
+  pointsRounding:       'FLOOR' | 'ROUND' | 'CEIL';
+  expiryDays:           number;
+  expiryType:           'ROLLING' | 'FIXED';
+  expiryWarningDays:    number;
+  smsEnabled:           boolean;
+  smsOnEarn:            boolean;
+  smsOnRedeem:          boolean;
+  smsOnExpiryWarning:   boolean;
+  autoEnroll:           boolean;
+}
+
+export interface LoyaltyTier {
+  id:                   string;
+  tierName:             LoyaltyTierName;
+  minLifetimePoints:    number;
+  earnMultiplier:       number;
+  downgradeDays:        number | null;
+  birthdayBonusPoints:  number;
+  welcomeBonusPoints:   number;
+  isActive:             boolean;
+}
+
+export interface LoyaltyRedemptionRules {
+  id?:                  string;
+  minPointsToRedeem:    number;
+  maxRedemptionPct:     number;   // 10 = 10%
+  maxPointsPerBill:     number;
+  partialRedemption:    boolean;
+  blockOnDiscountedBill: boolean;
+  excludeGstFromRedeem: boolean;
+}
+
+export interface LoyaltyBonusRule {
+  id:               string;
+  bonusType:        string;
+  pointsAwarded:    number | null;
+  earnMultiplier:   number;
+  triggerCondition: string;
+  validFrom:        string | null;
+  validTo:          string | null;
+  isActive:         boolean;
+}
+
+export interface LoyaltyAccount {
+  id:                   string;
+  accountNo:            string;
+  mobile:               string;
+  patientName:          string;
+  dateOfBirth:          string | null;
+  gender:               string | null;
+  email:                string | null;
+  patientId:            string | null;   // MR number link
+  enrolmentDate:        string;
+  enrolmentSource:      string;
+  currentTier:          LoyaltyTierName;
+  accountStatus:        LoyaltyAccountStatus;
+  currentPoints:        number;
+  lifetimePoints:       number;
+  lifetimeSpend:        number;
+  totalTransactions:    number;
+  lastTransactionDate:  string | null;
+  referredByMobile:     string | null;
+  consentGiven:         boolean;
+}
+
+export interface LoyaltyTransaction {
+  id:               string;
+  accountId:        string;
+  transactionDate:  string;
+  transactionType:  LoyaltyTxnType;
+  points:           number;           // positive = credit, negative = debit
+  balanceBefore:    number;
+  balanceAfter:     number;
+  monetaryValue:    number;
+  referenceBillNo:  string | null;
+  referenceAmount:  number | null;
+  description:      string | null;
+  isReversed:       boolean;
+  createdBy:        string;
+}
+
+// What the RPC returns when looking up an account at counter
+export interface LoyaltyAccountLookupResult {
+  accountId:       string;
+  accountNo:       string;
+  patientName:     string;
+  mobile:          string;
+  currentTier:     LoyaltyTierName;
+  earnMultiplier:  number;
+  currentPoints:   number;
+  lifetimePoints:  number;
+  pointValue:      number;
+  accountStatus:   LoyaltyAccountStatus;
+  isNewAccount:    boolean;
+  welcomePoints:   number;
+}
+
+// What the RPC returns for redemption eligibility
+export interface LoyaltyRedemptionCalc {
+  eligible:       boolean;
+  reason?:        string;
+  currentPoints:  number;
+  maxRedeemable:  number;
+  maxByPct:       number;
+  maxAbsolute:    number;
+  pointValue:     number;
+  discountValue:  number;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHARMACY LOCATION HIERARCHY TYPES
+// Zone → Rack → Shelf → Bin
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PharmacyZoneTemperature = 'Ambient' | 'Refrigerated' | 'Frozen' | 'Controlled';
+
+export interface PharmacyZone {
+  id:          string;
+  storeId:     string;
+  zoneCode:    string;           // 'A', 'B', 'C', 'D', 'E'
+  zoneName:    string;           // 'Oral Medicines', 'Injectables'
+  temperature: PharmacyZoneTemperature;
+  description: string | null;
+  isActive:    boolean;
+}
+
+export interface PharmacyRack {
+  id:          string;
+  zoneId:      string;
+  rackCode:    string;           // 'A1', 'A2', 'B1'
+  rackName:    string | null;    // 'Antibiotics Rack' (optional)
+  noOfShelves: number;           // how many horizontal levels this rack has
+  isActive:    boolean;
+  // Convenience fields joined from zone
+  zoneCode?:   string;
+  zoneName?:   string;
+  storeId?:    string;
+}
+
+export interface InventoryBatchLocation {
+  id?:             string;
+  storeId:         string;
+  itemId:          string;
+  batchNo:         string;
+  zoneId:          string;
+  rackId:          string;
+  shelfNo:         number;       // 1, 2, 3 … (horizontal level on rack)
+  binNo:           string;       // '01', '02', '03A' (individual slot)
+  isPrimary:       boolean;      // true = main bin, false = overflow
+  notes:           string | null;
+  createdBy?:      string;
+  // Read-only joined fields returned by vw_batch_locations
+  zoneCode?:       string;
+  zoneName?:       string;
+  temperature?:    PharmacyZoneTemperature;
+  rackCode?:       string;
+  rackName?:       string;
+  itemName?:       string;
+  itemCode?:       string;
+  locationDisplay?: string;      // 'Zone A › A1 › Shelf 2 › Bin 04'
+  locationCode?:   string;       // 'A-A1-S2-B04'
+}
 
 

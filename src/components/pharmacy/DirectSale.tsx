@@ -5,7 +5,7 @@ import {
   User, Store, Pill, Calendar, Globe, Hash,
   AlertCircle, Barcode
 } from 'lucide-react';
-import { DirectSale as DirectSaleType, DirectSaleItem } from '../../types';
+import { DirectSale as DirectSaleType, DirectSaleItem, LoyaltyAccountLookupResult, LoyaltyRedemptionCalc } from '../../types';
 import { parseGS1 } from '../../utils/gs1Parser';
 import { DirectSaleInvoiceReport } from './DirectSaleInvoiceReport';
 import { getSupabase } from '../../services/supabaseClient';
@@ -30,7 +30,12 @@ const INITIAL_PATIENT = {
 };
 
 export const DirectSale: React.FC = () => {
-  const { stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails, itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem, showToast } = useData();
+  const { 
+    stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails,
+    fetchBatchLocation,
+    itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem, showToast,
+    enrollOrFetchLoyaltyAccount, calculateLoyaltyRedemption, processLoyaltyTransaction
+  } = useData();
 
   const decimals = selectedCurrency === 'BHD' ? 3 : 2;
 
@@ -58,6 +63,17 @@ export const DirectSale: React.FC = () => {
   const [pendingSaleNo, setPendingSaleNo] = useState('');
   const [pendingSale, setPendingSale] = useState<DirectSaleType | null>(null);
 
+  // Discount state
+  const [discountPercentage, setDiscountPercentage] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
+
+  // Loyalty System states
+  const [loyaltyAccount, setLoyaltyAccount] = useState<LoyaltyAccountLookupResult | null>(null);
+  const [redemptionCalc, setRedemptionCalc] = useState<LoyaltyRedemptionCalc | null>(null);
+  const [pointsToRedeem, setPointsToRedeem] = useState<number>(0);
+  const [loyaltyLoading, setLoyaltyLoading] = useState(false);
+  const [redeemChecked, setRedeemChecked] = useState(false);
+
   // Scanner state
   const [barcodeQuery, setBarcodeQuery] = useState('');
   const [autoFocusScanner, setAutoFocusScanner] = useState(true);
@@ -82,6 +98,8 @@ export const DirectSale: React.FC = () => {
 
   // Batch data for each row
   const [rowBatches, setRowBatches] = useState<Record<number, any[]>>({});
+  // Location display for each row
+  const [rowLocations, setRowLocations] = useState<Record<number, string | null>>({});
 
   // Close dropdowns on click outside
   useEffect(() => {
@@ -161,6 +179,8 @@ export const DirectSale: React.FC = () => {
         isNewExternalPatient: data.is_new_external_patient,
         totalAmount: data.total_amount,
         taxAmount: data.tax_amount,
+        discountPercentage: data.discount_percentage || 0,
+        discountAmount: data.discount_amount || 0,
         paymentMode: data.payment_mode || 'UPI',
         referenceNo: data.reference_no || data.pg_payment_id || '',
         pgOrderId: data.pg_order_id || '',
@@ -187,6 +207,31 @@ export const DirectSale: React.FC = () => {
         })
       };
       
+      let activeAccountId = loyaltyAccount?.accountId;
+      if (!activeAccountId && sale.phoneNo && sale.phoneNo.trim()) {
+        const fullName = `${sale.firstName} ${sale.lastName || ''}`.trim() || 'Walk-in Patient';
+        const enrollment = await enrollOrFetchLoyaltyAccount(
+          sale.phoneNo.trim(),
+          fullName,
+          sale.externalNo || undefined
+        );
+        if (enrollment) {
+          activeAccountId = enrollment.accountId;
+        }
+      }
+
+      if (activeAccountId) {
+        const cashPaid = data.total_amount;
+        const billAmt = (sale.totalAmount || 0) + (redeemChecked ? Number((pointsToRedeem * (loyaltyAccount?.pointValue || 1.0)).toFixed(2)) : 0);
+        processLoyaltyTransaction(
+          activeAccountId,
+          data.invoice_no || sale.saleNo,
+          billAmt,
+          cashPaid,
+          redeemChecked ? pointsToRedeem : 0
+        );
+      }
+
       setLastDispensedSale(mappedSale);
       setShowUpiModal(false);
       setPendingSale(null);
@@ -334,6 +379,15 @@ export const DirectSale: React.FC = () => {
       totalPrice: totalPrice
     };
     setItems(newItems);
+
+    // Fetch & cache location for this batch (non-blocking)
+    if (newItems[index].itemId && selectedStore && batchNo) {
+      fetchBatchLocation(selectedStore, newItems[index].itemId, batchNo).then(loc => {
+        setRowLocations(prev => ({ ...prev, [index]: loc?.locationDisplay ?? null }));
+      });
+    } else {
+      setRowLocations(prev => ({ ...prev, [index]: null }));
+    }
   };
 
   const processMatchedDirectSaleItem = async (matchedItem: any, scannedBatch?: string, scannedExpiry?: string) => {
@@ -614,17 +668,70 @@ export const DirectSale: React.FC = () => {
     setItems(newItems);
   };
 
-    const totalSaleAmount = items.reduce((sum, item) => sum + item.totalPrice, 0);
+    const totalBeforeDiscount = items.reduce((sum, item) => sum + item.totalPrice, 0);
+    const redemptionDiscount = redeemChecked ? Number((pointsToRedeem * (loyaltyAccount?.pointValue || 1.0)).toFixed(2)) : 0;
+    const totalSaleAmount = Math.max(0, totalBeforeDiscount - discountAmount - redemptionDiscount);
+    const totalEffectiveDiscount = discountAmount + redemptionDiscount;
+    const discountFactor = totalBeforeDiscount > 0 ? (1 - totalEffectiveDiscount / totalBeforeDiscount) : 1;
     const totalTaxAmount = items.reduce((sum, item) => {
         const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
         const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
         if (tax && item.unitPrice > 0) {
-            const totalPrice = item.quantity * item.unitPrice;
-            const taxAmount = totalPrice * tax.percentage / (100 + tax.percentage);
+            const discountedPrice = item.quantity * item.unitPrice * discountFactor;
+            const taxAmount = discountedPrice * tax.percentage / (100 + tax.percentage);
             return sum + taxAmount;
         }
         return sum;
     }, 0);
+
+  const handleLoyaltyLookup = async () => {
+    const mobile = patient.phoneNo ? patient.phoneNo.trim() : '';
+    if (!mobile) {
+      showToast('error', 'Please enter a valid mobile number.');
+      return;
+    }
+    setLoyaltyLoading(true);
+    const fullName = `${patient.firstName} ${patient.lastName || ''}`.trim() || 'Walk-in Patient';
+    const result = await enrollOrFetchLoyaltyAccount(
+      mobile,
+      fullName,
+      patient.externalNo || undefined
+    );
+    if (result) {
+      setLoyaltyAccount(result);
+      if (result.isNewAccount) {
+        showToast('success', `Enrolled in Loyalty Program! Received ${result.welcomePoints} welcome points.`);
+      } else {
+        showToast('success', `Loyalty account fetched. Points: ${result.currentPoints}`);
+      }
+    } else {
+      showToast('error', 'Failed to fetch or enroll loyalty account.');
+    }
+    setLoyaltyLoading(false);
+  };
+
+  // Recalculate max redemption when bill amount or loyalty account changes
+  useEffect(() => {
+    if (loyaltyAccount) {
+      const grossBill = totalBeforeDiscount - discountAmount;
+      if (grossBill > 0) {
+        calculateLoyaltyRedemption(loyaltyAccount.accountId, grossBill).then(res => {
+          setRedemptionCalc(res);
+          // Clamp pointsToRedeem if they exceed the new max
+          if (res && pointsToRedeem > res.maxRedeemable) {
+            setPointsToRedeem(res.maxRedeemable);
+          }
+        });
+      } else {
+        setRedemptionCalc(null);
+        setPointsToRedeem(0);
+      }
+    } else {
+      setRedemptionCalc(null);
+      setPointsToRedeem(0);
+      setRedeemChecked(false);
+    }
+  }, [loyaltyAccount, totalBeforeDiscount, discountAmount]);
 
   const handleCloseInvoice = () => {
     setLastDispensedSale(null);
@@ -639,6 +746,12 @@ export const DirectSale: React.FC = () => {
     setUpiOrderId('');
     setPendingSale(null);
     setPendingSaleNo('');
+    setDiscountPercentage(0);
+    setDiscountAmount(0);
+    setLoyaltyAccount(null);
+    setRedemptionCalc(null);
+    setPointsToRedeem(0);
+    setRedeemChecked(false);
   };
 
   const loadRazorpayScript = () => {
@@ -677,6 +790,8 @@ export const DirectSale: React.FC = () => {
         saleDate: new Date().toISOString(),
         storeId: selectedStore,
         totalAmount: totalSaleAmount,
+        discountPercentage,
+        discountAmount,
         items: items,
         paymentMode,
         paymentStatus: 'pending'
@@ -767,6 +882,8 @@ export const DirectSale: React.FC = () => {
       saleDate: new Date().toISOString(),
       storeId: selectedStore,
       totalAmount: totalSaleAmount,
+      discountPercentage,
+      discountAmount,
       items: items,
       paymentMode,
       paymentStatus: 'paid'
@@ -774,6 +891,30 @@ export const DirectSale: React.FC = () => {
 
     const result = await saveDirectSale(salePayload);
     if (result.success && result.savedSale) {
+      let activeAccountId = loyaltyAccount?.accountId;
+      if (!activeAccountId && patient.phoneNo && patient.phoneNo.trim()) {
+        const fullName = `${patient.firstName} ${patient.lastName || ''}`.trim() || 'Walk-in Patient';
+        const enrollment = await enrollOrFetchLoyaltyAccount(
+          patient.phoneNo.trim(),
+          fullName,
+          patient.externalNo || undefined
+        );
+        if (enrollment) {
+          activeAccountId = enrollment.accountId;
+        }
+      }
+
+      if (activeAccountId) {
+        const cashPaid = totalSaleAmount;
+        const billAmt = totalBeforeDiscount - discountAmount;
+        await processLoyaltyTransaction(
+          activeAccountId,
+          result.savedSale.invoiceNo || saleNo,
+          billAmt,
+          cashPaid,
+          redeemChecked ? pointsToRedeem : 0
+        );
+      }
       setLastDispensedSale(result.savedSale);
     }
     setLoading(false);
@@ -871,16 +1012,39 @@ export const DirectSale: React.FC = () => {
                 onChange={e => setPatient({...patient, lastName: e.target.value})}
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Phone No.</label>
+             <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase flex justify-between items-center">
+                <span>Phone No.</span>
+                {patient.phoneNo && (
+                  <button
+                    type="button"
+                    onClick={handleLoyaltyLookup}
+                    disabled={loyaltyLoading}
+                    className="text-[9px] font-black text-violet-600 hover:text-violet-800 uppercase tracking-wider transition-colors outline-none"
+                  >
+                    {loyaltyLoading ? 'Checking...' : loyaltyAccount ? 'Refetch Wallet' : 'Check Loyalty'}
+                  </button>
+                )}
+              </label>
               <div className="relative">
                 <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
                 <input 
                   type="text" 
-                  className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  className="w-full pl-7 pr-16 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
                   value={patient.phoneNo}
-                  onChange={e => setPatient({...patient, phoneNo: e.target.value})}
+                  onChange={e => {
+                    setPatient({...patient, phoneNo: e.target.value});
+                    setLoyaltyAccount(null);
+                    setRedemptionCalc(null);
+                    setPointsToRedeem(0);
+                    setRedeemChecked(false);
+                  }}
                 />
+                {loyaltyAccount && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-violet-200">
+                    {loyaltyAccount.currentTier}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1035,17 +1199,100 @@ export const DirectSale: React.FC = () => {
                )}
             </div>
             <div className="flex items-center gap-3">
-               <div className="text-right flex gap-6 items-center border-r border-slate-100 pr-6 mr-6">
-                  <div>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Tax</p>
-                    <p className="text-sm font-bold text-slate-500 leading-none">{formatCurrency(totalTaxAmount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Payable</p>
-                    <p className="text-lg font-black text-violet-600 leading-none">{formatCurrency(totalSaleAmount)}</p>
-                  </div>
+               {/* Discount Inputs */}
+               <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 animate-in fade-in duration-200">
+                 <span className="text-[10px] font-bold text-rose-400 uppercase tracking-tight whitespace-nowrap">Discount&nbsp;%</span>
+                 <input
+                   type="number"
+                   min={0}
+                   max={100}
+                   step={0.01}
+                   className="text-xs font-bold text-rose-700 bg-transparent outline-none w-14 text-right placeholder-rose-300"
+                   placeholder="0"
+                   value={discountPercentage || ''}
+                   onChange={e => {
+                     const pct = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                     setDiscountPercentage(pct);
+                     setDiscountAmount(Number((totalBeforeDiscount * pct / 100).toFixed(2)));
+                   }}
+                 />
+                 <span className="text-[10px] font-bold text-rose-400 uppercase tracking-tight whitespace-nowrap">Amt</span>
+                 <input
+                   type="number"
+                   min={0}
+                   step={0.01}
+                   className="text-xs font-bold text-rose-700 bg-transparent outline-none w-20 text-right placeholder-rose-300"
+                   placeholder="0.00"
+                   value={discountAmount || ''}
+                   onChange={e => {
+                     const amt = Math.max(0, Number(e.target.value) || 0);
+                     setDiscountAmount(amt);
+                     setDiscountPercentage(totalBeforeDiscount > 0 ? Number(((amt / totalBeforeDiscount) * 100).toFixed(2)) : 0);
+                   }}
+                 />
                </div>
-               <button 
+
+                {/* Loyalty Point Redemption Block */}
+                {loyaltyAccount && (
+                  <div className="flex items-center gap-2 bg-violet-50 px-3 py-1.5 rounded-lg border border-violet-100 animate-in fade-in duration-200">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        className="rounded text-violet-600 focus:ring-violet-500 w-3.5 h-3.5"
+                        checked={redeemChecked}
+                        onChange={e => {
+                          setRedeemChecked(e.target.checked);
+                          if (!e.target.checked) setPointsToRedeem(0);
+                          else if (redemptionCalc) setPointsToRedeem(redemptionCalc.maxRedeemable);
+                        }}
+                      />
+                      <span className="text-[10px] font-bold text-violet-500 uppercase tracking-tight whitespace-nowrap">Redeem pts</span>
+                    </label>
+                    {redeemChecked && redemptionCalc && (
+                      <div className="flex items-center gap-1.5 ml-1 border-l border-violet-200 pl-1.5">
+                        <input
+                          type="number"
+                          min={0}
+                          max={redemptionCalc.maxRedeemable}
+                          className="text-xs font-bold text-violet-700 bg-transparent outline-none w-14 text-right"
+                          value={pointsToRedeem || ''}
+                          onChange={e => {
+                            const val = Math.min(redemptionCalc.maxRedeemable, Math.max(0, parseInt(e.target.value) || 0));
+                            setPointsToRedeem(val);
+                          }}
+                        />
+                        <span className="text-[9px] text-violet-400 font-semibold">/ max {redemptionCalc.maxRedeemable} (worth {formatCurrency(pointsToRedeem * (loyaltyAccount?.pointValue || 1.0))})</span>
+                      </div>
+                    )}
+                    {!redeemChecked && (
+                      <span className="text-[9px] text-violet-400 font-semibold">({loyaltyAccount.currentPoints} pts available)</span>
+                    )}
+                  </div>
+                )}
+
+                <div className="text-right flex gap-6 items-center border-r border-slate-100 pr-6 mr-2">
+                   {(discountAmount > 0 || redemptionDiscount > 0) && (
+                     <div>
+                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Subtotal</p>
+                       <p className="text-sm font-bold text-slate-400 leading-none line-through">{formatCurrency(totalBeforeDiscount)}</p>
+                     </div>
+                   )}
+                   {redemptionDiscount > 0 && (
+                     <div>
+                       <p className="text-[10px] text-rose-500 uppercase font-bold tracking-tight">Redemption</p>
+                       <p className="text-sm font-bold text-rose-600 leading-none">-{formatCurrency(redemptionDiscount)}</p>
+                     </div>
+                   )}
+                   <div>
+                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Tax</p>
+                     <p className="text-sm font-bold text-slate-500 leading-none">{formatCurrency(totalTaxAmount)}</p>
+                   </div>
+                   <div>
+                     <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">Total Payable</p>
+                     <p className="text-lg font-black text-violet-600 leading-none">{formatCurrency(totalSaleAmount)}</p>
+                   </div>
+                </div>
+                <button 
                  onClick={addItemRow}
                  disabled={!selectedStore}
                  className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold rounded-lg transition-all disabled:opacity-40"
@@ -1254,6 +1501,14 @@ export const DirectSale: React.FC = () => {
                                <option key={b.batchNo} value={b.batchNo}>{b.batchNo} (MRP: {b.mrp})</option>
                              ))}
                            </select>
+                           {/* Location display */}
+                           {rowLocations[idx] ? (
+                             <div style={{ fontSize: 10, marginTop: 2, color: '#4c51bf', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+                               <span>📍</span><span>{rowLocations[idx]}</span>
+                             </div>
+                           ) : item.batchNo ? (
+                             <div style={{ fontSize: 10, marginTop: 2, color: '#cbd5e0', fontStyle: 'italic' }}>📍 No location</div>
+                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-center font-bold">
                            {item.batchNo ? (

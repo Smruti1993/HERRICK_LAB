@@ -3,7 +3,9 @@ import {
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
   DoctorSchedule, ScheduleTemplate, SlotType,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund,
+  LoyaltyProgramConfig, LoyaltyTier, LoyaltyRedemptionRules, LoyaltyBonusRule, LoyaltyAccount, LoyaltyTransaction, LoyaltyAccountLookupResult, LoyaltyRedemptionCalc,
+  PharmacyZone, PharmacyRack, InventoryBatchLocation
 } from '../types';
 import { 
     getSupabase, 
@@ -218,6 +220,36 @@ interface DataContextType {
 
   updateDbConnection: (url: string, key: string) => void;
   disconnectDb: () => void;
+
+  // Loyalty Wallet System
+  loyaltyAccounts: LoyaltyAccount[];
+  loyaltyTransactions: LoyaltyTransaction[];
+  loyaltyProgramConfig: LoyaltyProgramConfig | null;
+  loyaltyTiers: LoyaltyTier[];
+  loyaltyRedemptionRules: LoyaltyRedemptionRules | null;
+  loyaltyBonusRules: LoyaltyBonusRule[];
+  
+  enrollOrFetchLoyaltyAccount: (mobile: string, name: string, patientId?: string) => Promise<LoyaltyAccountLookupResult | null>;
+  calculateLoyaltyRedemption: (accountId: string, billAmount: number) => Promise<LoyaltyRedemptionCalc | null>;
+  processLoyaltyTransaction: (accountId: string, billNo: string, billAmount: number, cashPaid: number, pointsRedeemed: number) => Promise<boolean>;
+  reverseLoyaltyTransaction: (billNo: string) => Promise<boolean>;
+  manualLoyaltyAdjustment: (accountId: string, type: 'ADJUST_ADD' | 'ADJUST_SUB', points: number, reason: string) => Promise<boolean>;
+  saveLoyaltyProgramConfig: (config: LoyaltyProgramConfig) => Promise<boolean>;
+  saveLoyaltyTier: (tier: LoyaltyTier) => Promise<boolean>;
+  saveLoyaltyRedemptionRules: (rules: LoyaltyRedemptionRules) => Promise<boolean>;
+  saveLoyaltyBonusRule: (rule: LoyaltyBonusRule) => Promise<boolean>;
+
+  // Pharmacy Location Hierarchy
+  pharmacyZones: PharmacyZone[];
+  pharmacyRacks: PharmacyRack[];
+  savePharmacyZone: (zone: Omit<PharmacyZone, 'id'> & { id?: string }) => Promise<boolean>;
+  deletePharmacyZone: (id: string) => Promise<boolean>;
+  savePharmacyRack: (rack: Omit<PharmacyRack, 'id'> & { id?: string }) => Promise<boolean>;
+  deletePharmacyRack: (id: string) => Promise<boolean>;
+  saveBatchLocation: (loc: InventoryBatchLocation) => Promise<boolean>;
+  deleteBatchLocation: (id: string) => Promise<boolean>;
+  fetchBatchLocation: (storeId: string, itemId: string, batchNo: string) => Promise<InventoryBatchLocation | null>;
+  fetchStoreBatchLocations: (storeId: string, searchTerm?: string) => Promise<InventoryBatchLocation[]>;
 }
 
 export const getCurrencySymbol = (code: string): string => {
@@ -361,6 +393,18 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [gstr2bUploads, setGstr2bUploads] = useState<GSTR2BUpload[]>([]);
   const [gstr2bInvoices, setGstr2bInvoices] = useState<GSTR2BInvoice[]>([]);
   const [patientRefunds, setPatientRefunds] = useState<PatientRefund[]>([]);
+
+  // Loyalty Wallet System States
+  const [loyaltyAccounts, setLoyaltyAccounts] = useState<LoyaltyAccount[]>([]);
+  const [loyaltyTransactions, setLoyaltyTransactions] = useState<LoyaltyTransaction[]>([]);
+  const [loyaltyProgramConfig, setLoyaltyProgramConfig] = useState<LoyaltyProgramConfig | null>(null);
+  const [loyaltyTiers, setLoyaltyTiers] = useState<LoyaltyTier[]>([]);
+  const [loyaltyRedemptionRules, setLoyaltyRedemptionRules] = useState<LoyaltyRedemptionRules | null>(null);
+  const [loyaltyBonusRules, setLoyaltyBonusRules] = useState<LoyaltyBonusRule[]>([]);
+
+  // Pharmacy Location Hierarchy masters
+  const [pharmacyZones, setPharmacyZones] = useState<PharmacyZone[]>([]);
+  const [pharmacyRacks, setPharmacyRacks] = useState<PharmacyRack[]>([]);
 
 
 
@@ -1450,6 +1494,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('patient_documents').select('*'),    // 2
           supabase.from('dental_icd_master').select('*'),    // 3
           supabase.from('patient_demographics').select('*'), // 4
+          supabase.from('loyalty_program_config').select('*'), // 5
+          supabase.from('loyalty_tiers').select('*').order('min_lifetime_points', { ascending: true }), // 6
+          supabase.from('loyalty_redemption_rules').select('*'), // 7
+          supabase.from('loyalty_bonus_rules').select('*'),    // 8
+          supabase.from('loyalty_accounts').select('*'),       // 9
+          supabase.from('loyalty_transactions').select('*').order('transaction_date', { ascending: false }), // 10
+          supabase.from('pharmacy_zones').select('*').eq('is_active', true).order('zone_code'), // 11
+          supabase.from('pharmacy_racks').select('*').eq('is_active', true).order('rack_code'), // 12
         ]);
 
         // Helper to safely extract data from optional results
@@ -1467,6 +1519,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const docRes  = getOptional(2);
         const denRes  = getOptional(3);
         const demoRes = getOptional(4);
+        const loyaltyConfigRes = getOptional(5);
+        const loyaltyTiersRes = getOptional(6);
+        const loyaltyRedeemRulesRes = getOptional(7);
+        const loyaltyBonusRulesRes = getOptional(8);
+        const loyaltyAccountsRes = getOptional(9);
+        const loyaltyTxnsRes = getOptional(10);
+        const phZonesRes = getOptional(11);
+        const phRacksRes = getOptional(12);
 
         // Core table name index (for error reporting)
         const tableNames = [
@@ -1622,6 +1682,129 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
          if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
          if (tmRes && tmRes.data) setTaxMasters(tmRes.data.map(mapTaxMasterFromDb));
          if (itmRes && itmRes.data) setItemTaxMappings(itmRes.data.map(mapItemTaxMappingFromDb));
+        // Map Loyalty program config
+        if (loyaltyConfigRes && loyaltyConfigRes.data && loyaltyConfigRes.data.length > 0) {
+          const cfg = loyaltyConfigRes.data[0];
+          setLoyaltyProgramConfig({
+            id: cfg.id,
+            programName: cfg.program_name,
+            programStatus: cfg.program_status,
+            effectiveFrom: cfg.effective_from,
+            pointValue: Number(cfg.point_value || 0),
+            earnRate: Number(cfg.earn_rate || 0),
+            minBillToEarn: Number(cfg.min_bill_to_earn || 0),
+            pointsRounding: cfg.points_rounding,
+            expiryDays: Number(cfg.expiry_days || 0),
+            expiryType: cfg.expiry_type,
+            expiryWarningDays: Number(cfg.expiry_warning_days || 0),
+            smsEnabled: Boolean(cfg.sms_enabled),
+            smsOnEarn: Boolean(cfg.sms_on_earn),
+            smsOnRedeem: Boolean(cfg.sms_on_redeem),
+            smsOnExpiryWarning: Boolean(cfg.sms_on_expiry_warning),
+            autoEnroll: Boolean(cfg.auto_enroll)
+          });
+        }
+
+        // Map Loyalty Tiers
+        if (loyaltyTiersRes && loyaltyTiersRes.data) {
+          setLoyaltyTiers(loyaltyTiersRes.data.map((t: any) => ({
+            id: t.id,
+            tierName: t.tier_name,
+            minLifetimePoints: Number(t.min_lifetime_points || 0),
+            earnMultiplier: Number(t.earn_multiplier || 0),
+            downgradeDays: t.downgrade_days ? Number(t.downgrade_days) : null,
+            birthdayBonusPoints: Number(t.birthday_bonus_points || 0),
+            welcomeBonusPoints: Number(t.welcome_bonus_points || 0),
+            isActive: Boolean(t.is_active)
+          })));
+        }
+
+        // Map Loyalty Redemption Rules
+        if (loyaltyRedeemRulesRes && loyaltyRedeemRulesRes.data && loyaltyRedeemRulesRes.data.length > 0) {
+          const r = loyaltyRedeemRulesRes.data[0];
+          setLoyaltyRedemptionRules({
+            minPointsToRedeem: Number(r.min_points_to_redeem || 0),
+            maxRedemptionPct: Number(r.max_redemption_pct || 0),
+            maxPointsPerBill: Number(r.max_points_per_bill || 0),
+            partialRedemption: Boolean(r.partial_redemption),
+            blockOnDiscountedBill: Boolean(r.block_on_discounted_bill),
+            excludeGstFromRedeem: Boolean(r.exclude_gst_from_redeem)
+          });
+        }
+
+        // Map Loyalty Bonus Rules
+        if (loyaltyBonusRulesRes && loyaltyBonusRulesRes.data) {
+          setLoyaltyBonusRules(loyaltyBonusRulesRes.data.map((b: any) => ({
+            id: b.id,
+            bonusType: b.bonus_type,
+            pointsAwarded: b.points_awarded ? Number(b.points_awarded) : null,
+            earnMultiplier: Number(b.earn_multiplier || 0),
+            triggerCondition: b.trigger_condition || '',
+            validFrom: b.valid_from || null,
+            validTo: b.valid_to || null,
+            isActive: Boolean(b.is_active)
+          })));
+        }
+
+        // Map Loyalty Accounts
+        if (loyaltyAccountsRes && loyaltyAccountsRes.data) {
+          setLoyaltyAccounts(loyaltyAccountsRes.data.map((acc: any) => ({
+            id: acc.id,
+            accountNo: acc.account_no,
+            mobile: acc.mobile,
+            patientName: acc.patient_name,
+            dateOfBirth: acc.date_of_birth || null,
+            gender: acc.gender || null,
+            email: acc.email || null,
+            patientId: acc.patient_id || null,
+            enrolmentDate: acc.enrolment_date,
+            enrolmentSource: acc.enrolment_source,
+            currentTier: acc.current_tier,
+            accountStatus: acc.account_status,
+            currentPoints: Number(acc.current_points || 0),
+            lifetimePoints: Number(acc.lifetime_points || 0),
+            lifetimeSpend: Number(acc.lifetime_spend || 0),
+            totalTransactions: Number(acc.total_transactions || 0),
+            lastTransactionDate: acc.last_transaction_date || null,
+            referredByMobile: acc.referred_by_mobile || null,
+            consentGiven: Boolean(acc.consent_given)
+          })));
+        }
+
+        // Map Loyalty Transactions
+        if (loyaltyTxnsRes && loyaltyTxnsRes.data) {
+          setLoyaltyTransactions(loyaltyTxnsRes.data.map((txn: any) => ({
+            id: txn.id,
+            accountId: txn.account_id,
+            transactionDate: txn.transaction_date,
+            transactionType: txn.transaction_type,
+            points: Number(txn.points || 0),
+            balanceBefore: Number(txn.balance_before || 0),
+            balanceAfter: Number(txn.balance_after || 0),
+            monetaryValue: Number(txn.monetary_value || 0),
+            referenceBillNo: txn.reference_bill_no || null,
+            referenceAmount: txn.reference_amount ? Number(txn.reference_amount) : null,
+            description: txn.description || null,
+            isReversed: Boolean(txn.is_reversed),
+            createdBy: txn.created_by
+          })));
+        }
+
+        // Pharmacy Location Hierarchy
+        if (phZonesRes?.data) {
+          setPharmacyZones(phZonesRes.data.map((z: any) => ({
+            id: z.id, storeId: z.store_id, zoneCode: z.zone_code,
+            zoneName: z.zone_name, temperature: z.temperature,
+            description: z.description, isActive: z.is_active
+          })));
+        }
+        if (phRacksRes?.data) {
+          setPharmacyRacks(phRacksRes.data.map((r: any) => ({
+            id: r.id, zoneId: r.zone_id, rackCode: r.rack_code,
+            rackName: r.rack_name, noOfShelves: r.no_of_shelves, isActive: r.is_active
+          })));
+        }
+
          if (curRes && curRes.data && curRes.data.length > 0) {
            const dbCurrencies = curRes.data.map(mapCurrencyFromDb);
            setCurrencies(dbCurrencies);
@@ -2511,6 +2694,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         is_insured: sale.isInsured,
         is_new_external_patient: sale.isNewExternalPatient,
         total_amount: sale.totalAmount,
+        discount_percentage: sale.discountPercentage || 0,
+        discount_amount: sale.discountAmount || 0,
         payment_mode: sale.paymentMode || 'Cash',
         payment_status: sale.paymentStatus || 'paid',
         reference_no: sale.referenceNo || null,
@@ -2718,6 +2903,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isNewExternalPatient: sale.is_new_external_patient,
         totalAmount: sale.total_amount,
         taxAmount: sale.tax_amount,
+        discountPercentage: sale.discount_percentage || 0,
+        discountAmount: sale.discount_amount || 0,
         items: (sale.items || []).map((i: any) => {
           const invItem = inventoryItems.find((inv: any) => inv.id === i.item_id);
           return {
@@ -4330,6 +4517,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               throw new Error(errData.error || 'Failed to cancel bill');
           }
 
+          if (original.invoiceNo) {
+              await reverseLoyaltyTransaction(original.invoiceNo);
+          }
+
           showToast('success', 'Invoice cancelled.');
           return true;
       } catch (error: any) {
@@ -4344,6 +4535,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               if (cancelError) {
                   throw new Error('Direct cancel failed: ' + cancelError.message);
+              }
+
+              if (original.invoiceNo) {
+                  await reverseLoyaltyTransaction(original.invoiceNo);
               }
 
               showToast('success', 'Invoice cancelled successfully (via direct database fallback).');
@@ -5337,6 +5532,512 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const paddedSequence = nextSequence.toString().padStart(6, '0');
     return `${prefix}${paddedSequence}`;
+  };
+
+  // ─── LOYALTY FUNCTIONS ───────────────────────────────────
+
+  // 1. Enroll or fetch loyalty account
+  const enrollOrFetchLoyaltyAccount = async (
+    mobile: string,
+    name: string,
+    patientId?: string
+  ): Promise<LoyaltyAccountLookupResult | null> => {
+    if (!requireDb()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('enroll_or_fetch_loyalty_account', {
+        p_mobile:     mobile,
+        p_name:       name,
+        p_patient_id: patientId || null,
+        p_created_by: user?.username || user?.email || 'staff'
+      });
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      return {
+        accountId: data.account_id,
+        accountNo: data.account_no,
+        patientName: data.patient_name,
+        mobile: data.mobile,
+        currentTier: data.current_tier,
+        earnMultiplier: Number(data.earn_multiplier || 1.0),
+        currentPoints: Number(data.current_points || 0),
+        lifetimePoints: Number(data.lifetime_points || 0),
+        pointValue: Number(data.point_value || 1.0),
+        accountStatus: data.account_status,
+        isNewAccount: Boolean(data.is_new_account),
+        welcomePoints: Number(data.welcome_points || 0)
+      };
+    } catch (err) {
+      console.error('Loyalty lookup failed:', err);
+      return null;
+    }
+  };
+
+  // 2. Calculate redemption rules
+  const calculateLoyaltyRedemption = async (
+    accountId: string,
+    billAmount: number
+  ): Promise<LoyaltyRedemptionCalc | null> => {
+    if (!requireDb()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('calculate_loyalty_redemption', {
+        p_account_id:  accountId,
+        p_bill_amount: billAmount
+      });
+      if (error) throw error;
+      return {
+        eligible: Boolean(data.eligible),
+        reason: data.reason || undefined,
+        currentPoints: Number(data.current_points || 0),
+        maxRedeemable: Number(data.max_redeemable || 0),
+        maxByPct: Number(data.max_by_pct || 0),
+        maxAbsolute: Number(data.max_absolute || 0),
+        pointValue: Number(data.point_value || 1.0),
+        discountValue: Number(data.discount_value || 0)
+      };
+    } catch (err) {
+      console.error('Loyalty redemption calc failed:', err);
+      return null;
+    }
+  };
+
+  // 3. Process transaction (earn / redeem points)
+  const processLoyaltyTransaction = async (
+    accountId:      string,
+    billNo:         string,
+    billAmount:     number,
+    cashPaid:       number,
+    pointsRedeemed: number
+  ): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('process_loyalty_transaction', {
+        p_account_id:       accountId,
+        p_bill_no:          billNo,
+        p_bill_amount:      billAmount,
+        p_cash_paid:        cashPaid,
+        p_points_redeemed:  pointsRedeemed,
+        p_created_by:       user?.username || user?.email || 'staff'
+      });
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err) {
+      console.error('Loyalty transaction failed:', err);
+      return false;
+    }
+  };
+
+  // 4. Reverse loyalty transaction on bill cancellation
+  const reverseLoyaltyTransaction = async (billNo: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('reverse_loyalty_transaction', {
+        p_bill_no:    billNo,
+        p_created_by: user?.username || user?.email || 'staff'
+      });
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err) {
+      console.error('Loyalty reversal failed:', err);
+      return false;
+    }
+  };
+
+  // 5. Manual adjust points
+  const manualLoyaltyAdjustment = async (
+    accountId: string,
+    type:      'ADJUST_ADD' | 'ADJUST_SUB',
+    points:    number,
+    reason:    string
+  ): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('manual_points_adjustment', {
+        p_account_id: accountId,
+        p_type:       type,
+        p_points:     points,
+        p_reason:     reason,
+        p_created_by: user?.username || user?.email || 'staff'
+      });
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', 'Points adjusted successfully.');
+      return true;
+    } catch (err: any) {
+      console.error('Manual adjustment failed:', err);
+      showToast('error', `Adjustment failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  // 6. Save Loyalty Program Config
+  const saveLoyaltyProgramConfig = async (config: LoyaltyProgramConfig): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbConfig = {
+        program_name: config.programName,
+        program_status: config.programStatus,
+        point_value: Number(config.pointValue || 1.00),
+        earn_rate: Number(config.earnRate || 1.00),
+        min_bill_to_earn: Number(config.minBillToEarn || 0.00),
+        points_rounding: config.pointsRounding,
+        expiry_days: Number(config.expiryDays || 365),
+        expiry_type: config.expiryType,
+        expiry_warning_days: Number(config.expiryWarningDays || 30),
+        sms_enabled: Boolean(config.smsEnabled),
+        sms_on_earn: Boolean(config.smsOnEarn),
+        sms_on_redeem: Boolean(config.smsOnRedeem),
+        sms_on_expiry_warning: Boolean(config.smsOnExpiryWarning),
+        auto_enroll: Boolean(config.autoEnroll),
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('loyalty_program_config')
+        .upsert({
+          ...(config.id ? { id: config.id } : {}),
+          ...dbConfig
+        });
+
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', 'Loyalty config saved successfully.');
+      return true;
+    } catch (err: any) {
+      console.error('Save loyalty config failed:', err);
+      showToast('error', `Save failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  // 7. Save Loyalty Tier
+  const saveLoyaltyTier = async (tier: LoyaltyTier): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbTier = {
+        min_lifetime_points: Number(tier.minLifetimePoints || 0),
+        earn_multiplier: Number(tier.earnMultiplier || 1.00),
+        downgrade_days: tier.downgradeDays ? Number(tier.downgradeDays) : null,
+        birthday_bonus_points: Number(tier.birthdayBonusPoints || 0),
+        welcome_bonus_points: Number(tier.welcomeBonusPoints || 0),
+        is_active: Boolean(tier.isActive)
+      };
+
+      const { error } = await supabase
+        .from('loyalty_tiers')
+        .upsert({
+          ...(tier.id ? { id: tier.id } : {}),
+          tier_name: tier.tierName,
+          ...dbTier
+        });
+
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', `${tier.tierName} tier saved successfully.`);
+      return true;
+    } catch (err: any) {
+      console.error('Save loyalty tier failed:', err);
+      showToast('error', `Save failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  // 8. Save Loyalty Redemption Rules
+  const saveLoyaltyRedemptionRules = async (rules: LoyaltyRedemptionRules): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbRules = {
+        min_points_to_redeem: Number(rules.minPointsToRedeem || 0),
+        max_redemption_pct: Number(rules.maxRedemptionPct || 0),
+        max_points_per_bill: Number(rules.maxPointsPerBill || 0),
+        partial_redemption: Boolean(rules.partialRedemption),
+        block_on_discounted_bill: Boolean(rules.blockOnDiscountedBill),
+        exclude_gst_from_redeem: Boolean(rules.excludeGstFromRedeem),
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('loyalty_redemption_rules')
+        .upsert({
+          ...(rules.id ? { id: rules.id } : {}),
+          ...dbRules
+        });
+
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', 'Redemption rules saved successfully.');
+      return true;
+    } catch (err: any) {
+      console.error('Save redemption rules failed:', err);
+      showToast('error', `Save failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  // 9. Save Loyalty Bonus Rule
+  const saveLoyaltyBonusRule = async (rule: LoyaltyBonusRule): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbRule = {
+        points_awarded: rule.pointsAwarded ? Number(rule.pointsAwarded) : null,
+        earn_multiplier: Number(rule.earnMultiplier || 1.00),
+        trigger_condition: rule.triggerCondition || '',
+        valid_from: rule.validFrom || null,
+        valid_to: rule.validTo || null,
+        is_active: Boolean(rule.isActive),
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('loyalty_bonus_rules')
+        .upsert({
+          ...(rule.id ? { id: rule.id } : {}),
+          bonus_type: rule.bonusType,
+          ...dbRule
+        });
+
+      if (error) throw error;
+      setRefreshTrigger(prev => prev + 1);
+      showToast('success', 'Bonus rule saved successfully.');
+      return true;
+    } catch (err: any) {
+      console.error('Save bonus rule failed:', err);
+      showToast('error', `Save failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PHARMACY LOCATION HIERARCHY — CRUD functions
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const savePharmacyZone = async (zone: Omit<PharmacyZone, 'id'> & { id?: string }): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbZone = {
+        store_id:    zone.storeId,
+        zone_code:   zone.zoneCode.toUpperCase().trim(),
+        zone_name:   zone.zoneName.trim(),
+        temperature: zone.temperature,
+        description: zone.description ?? null,
+        is_active:   zone.isActive
+      };
+      const { data, error } = await supabase
+        .from('pharmacy_zones')
+        .upsert({ ...(zone.id ? { id: zone.id } : {}), ...dbZone }, { onConflict: 'id' })
+        .select()
+        .single();
+      if (error) throw error;
+      const saved: PharmacyZone = {
+        id: data.id, storeId: data.store_id, zoneCode: data.zone_code,
+        zoneName: data.zone_name, temperature: data.temperature,
+        description: data.description, isActive: data.is_active
+      };
+      setPharmacyZones(prev => zone.id
+        ? prev.map(z => z.id === zone.id ? saved : z)
+        : [...prev, saved]
+      );
+      showToast('success', `Zone ${saved.zoneCode} saved.`);
+      return true;
+    } catch (err: any) {
+      console.error('savePharmacyZone failed:', err);
+      showToast('error', `Failed to save zone: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deletePharmacyZone = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const { error } = await getSupabase().from('pharmacy_zones').delete().eq('id', id);
+      if (error) throw error;
+      setPharmacyZones(prev => prev.filter(z => z.id !== id));
+      showToast('success', 'Zone deleted.');
+      return true;
+    } catch (err: any) {
+      console.error('deletePharmacyZone failed:', err);
+      showToast('error', `Delete failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  const savePharmacyRack = async (rack: Omit<PharmacyRack, 'id'> & { id?: string }): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbRack = {
+        zone_id:      rack.zoneId,
+        rack_code:    rack.rackCode.toUpperCase().trim(),
+        rack_name:    rack.rackName?.trim() ?? null,
+        no_of_shelves: Number(rack.noOfShelves),
+        is_active:    rack.isActive
+      };
+      const { data, error } = await supabase
+        .from('pharmacy_racks')
+        .upsert({ ...(rack.id ? { id: rack.id } : {}), ...dbRack }, { onConflict: 'id' })
+        .select()
+        .single();
+      if (error) throw error;
+      const saved: PharmacyRack = {
+        id: data.id, zoneId: data.zone_id, rackCode: data.rack_code,
+        rackName: data.rack_name, noOfShelves: data.no_of_shelves, isActive: data.is_active
+      };
+      setPharmacyRacks(prev => rack.id
+        ? prev.map(r => r.id === rack.id ? saved : r)
+        : [...prev, saved]
+      );
+      showToast('success', `Rack ${saved.rackCode} saved.`);
+      return true;
+    } catch (err: any) {
+      console.error('savePharmacyRack failed:', err);
+      showToast('error', `Failed to save rack: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deletePharmacyRack = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const { error } = await getSupabase().from('pharmacy_racks').delete().eq('id', id);
+      if (error) throw error;
+      setPharmacyRacks(prev => prev.filter(r => r.id !== id));
+      showToast('success', 'Rack deleted.');
+      return true;
+    } catch (err: any) {
+      console.error('deletePharmacyRack failed:', err);
+      showToast('error', `Delete failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  const saveBatchLocation = async (loc: InventoryBatchLocation): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const dbLoc = {
+        store_id:   loc.storeId,
+        item_id:    loc.itemId,
+        batch_no:   loc.batchNo,
+        zone_id:    loc.zoneId,
+        rack_id:    loc.rackId,
+        shelf_no:   Number(loc.shelfNo),
+        bin_no:     loc.binNo.trim(),
+        is_primary: Boolean(loc.isPrimary),
+        notes:      loc.notes ?? null,
+        created_by: loc.createdBy ?? null,
+        updated_at: new Date().toISOString()
+      };
+      const { error } = await supabase
+        .from('inventory_batch_locations')
+        .upsert({ ...(loc.id ? { id: loc.id } : {}), ...dbLoc });
+      if (error) throw error;
+      showToast('success', 'Batch location saved.');
+      return true;
+    } catch (err: any) {
+      console.error('saveBatchLocation failed:', err);
+      showToast('error', `Failed to save location: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deleteBatchLocation = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const { error } = await getSupabase().from('inventory_batch_locations').delete().eq('id', id);
+      if (error) throw error;
+      showToast('success', 'Batch location removed.');
+      return true;
+    } catch (err: any) {
+      console.error('deleteBatchLocation failed:', err);
+      showToast('error', `Delete failed: ${err.message}`);
+      return false;
+    }
+  };
+
+  /**
+   * Fetch primary location for a specific batch — called on-demand in dispense modals.
+   * Returns null if no location has been assigned yet.
+   */
+  const fetchBatchLocation = async (
+    storeId: string, itemId: string, batchNo: string
+  ): Promise<InventoryBatchLocation | null> => {
+    if (!requireDb()) return null;
+    try {
+      const { data, error } = await getSupabase()
+        .from('vw_batch_locations')
+        .select('*')
+        .eq('store_id', storeId)
+        .eq('item_id', itemId)
+        .eq('batch_no', batchNo)
+        .eq('is_primary', true)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return {
+        id: data.id, storeId: data.store_id, itemId: data.item_id,
+        batchNo: data.batch_no, zoneId: data.zone_id, rackId: data.rack_id,
+        shelfNo: data.shelf_no, binNo: data.bin_no, isPrimary: data.is_primary,
+        notes: data.notes, createdBy: data.created_by,
+        zoneCode: data.zone_code, zoneName: data.zone_name, temperature: data.temperature,
+        rackCode: data.rack_code, rackName: data.rack_name,
+        itemName: data.item_name, itemCode: data.item_code,
+        locationDisplay: data.location_display, locationCode: data.location_code
+      };
+    } catch (err: any) {
+      console.error('fetchBatchLocation failed:', err);
+      return null;
+    }
+  };
+
+  /**
+   * Fetch all batch locations for the master screen — with optional search.
+   */
+  const fetchStoreBatchLocations = async (
+    storeId: string, searchTerm?: string
+  ): Promise<InventoryBatchLocation[]> => {
+    if (!requireDb()) return [];
+    try {
+      let query = getSupabase()
+        .from('vw_batch_locations')
+        .select('*')
+        .eq('store_id', storeId)
+        .order('zone_code')
+        .order('rack_code')
+        .order('shelf_no')
+        .order('bin_no');
+      if (searchTerm && searchTerm.trim()) {
+        const s = `%${searchTerm.trim()}%`;
+        query = query.or(
+          `item_name.ilike.${s},item_code.ilike.${s},batch_no.ilike.${s},location_code.ilike.${s}`
+        );
+      }
+      const { data, error } = await query;
+      if (error) throw error;
+      return (data || []).map((d: any) => ({
+        id: d.id, storeId: d.store_id, itemId: d.item_id,
+        batchNo: d.batch_no, zoneId: d.zone_id, rackId: d.rack_id,
+        shelfNo: d.shelf_no, binNo: d.bin_no, isPrimary: d.is_primary,
+        notes: d.notes, createdBy: d.created_by,
+        zoneCode: d.zone_code, zoneName: d.zone_name, temperature: d.temperature,
+        rackCode: d.rack_code, rackName: d.rack_name,
+        itemName: d.item_name, itemCode: d.item_code,
+        locationDisplay: d.location_display, locationCode: d.location_code
+      }));
+    } catch (err: any) {
+      console.error('fetchStoreBatchLocations failed:', err);
+      return [];
+    }
   };
 
   const processPharmacyReturn = async (
@@ -6521,10 +7222,22 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       journalVouchers, saveJournalVoucher, deleteJournalVoucher, postAutoJournalVoucher,
       gstr2bUploads, gstr2bInvoices, saveGstr2bUpload, markUploadReconciled,
       currencies, selectedCurrency, setSelectedCurrency, saveCurrency, deleteCurrency, formatCurrency, completeDirectSalePayment,
-       toasts, showToast, addToast, removeToast,
-       isLoading, isDbConnected, updateDbConnection, disconnectDb,
-       patientRefunds, processPatientRefund
-     }}>
+      toasts, showToast, addToast, removeToast,
+      isLoading, isDbConnected, updateDbConnection, disconnectDb,
+      patientRefunds, processPatientRefund,
+
+      // Loyalty Wallet System
+      loyaltyAccounts, loyaltyTransactions, loyaltyProgramConfig, loyaltyTiers, loyaltyRedemptionRules, loyaltyBonusRules,
+      enrollOrFetchLoyaltyAccount, calculateLoyaltyRedemption, processLoyaltyTransaction, reverseLoyaltyTransaction, manualLoyaltyAdjustment,
+      saveLoyaltyProgramConfig, saveLoyaltyTier, saveLoyaltyRedemptionRules, saveLoyaltyBonusRule,
+
+      // Pharmacy Location Hierarchy
+      pharmacyZones, pharmacyRacks,
+      savePharmacyZone, deletePharmacyZone,
+      savePharmacyRack, deletePharmacyRack,
+      saveBatchLocation, deleteBatchLocation,
+      fetchBatchLocation, fetchStoreBatchLocations
+    }}>
       {children}
     </DataContext.Provider>
   );

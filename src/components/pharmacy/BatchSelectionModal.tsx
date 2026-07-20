@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Search, Package, AlertCircle, AlertTriangle, CheckCircle } from 'lucide-react';
 import { useData } from '../../context/DataContext';
+import { InventoryBatchLocation } from '../../types';
 
 interface BatchSelectionModalProps {
     storeId: string;
@@ -21,26 +22,40 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
     onClose,
     onSelect
 }) => {
-    const { fetchBatchDetails, itemTaxMappings, taxMasters, inventoryItems } = useData();
+    const { fetchBatchDetails, fetchBatchLocation, itemTaxMappings, taxMasters, inventoryItems } = useData();
     const [batches, setBatches] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [loading, setLoading] = useState(true);
     const [showExpired, setShowExpired] = useState(false);
+    // Map batchNo → location (null = unassigned)
+    const [locationMap, setLocationMap] = useState<Record<string, InventoryBatchLocation | null>>({});
 
     useEffect(() => {
         const loadBatches = async () => {
             setLoading(true);
             const batchData = await fetchBatchDetails(storeId, itemId);
-            // Sort: sufficient stock first, then by expiry (FIFO)
-            setBatches(batchData.sort((a, b) => {
+            // Sort: sufficient stock first, then by expiry FEFO (earliest first)
+            const sorted = batchData.sort((a, b) => {
                 const aHas = a.currentStock > 0 ? 1 : 0;
                 const bHas = b.currentStock > 0 ? 1 : 0;
                 if (bHas !== aHas) return bHas - aHas;
                 if (!a.expiryDate) return 1;
                 if (!b.expiryDate) return -1;
                 return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
-            }));
+            });
+            setBatches(sorted);
             setLoading(false);
+
+            // Fetch locations in parallel for all batches
+            const locs = await Promise.allSettled(
+                sorted.map(b => fetchBatchLocation(storeId, itemId, b.batchNo))
+            );
+            const map: Record<string, InventoryBatchLocation | null> = {};
+            sorted.forEach((b, i) => {
+                const r = locs[i];
+                map[b.batchNo] = r.status === 'fulfilled' ? r.value : null;
+            });
+            setLocationMap(map);
         };
         loadBatches();
     }, [storeId, itemId, fetchBatchDetails]);
@@ -160,7 +175,7 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                         }
                                     >
                                         <div className="flex flex-col gap-0.5">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span className={`font-bold text-sm ${isExpired ? 'text-red-950' : isDisabled ? 'text-slate-500' : 'text-slate-800'}`}>Batch: {batch.batchNo}</span>
                                                 {isExpired && (
                                                     <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded uppercase shadow-sm">Expired</span>
@@ -171,10 +186,27 @@ export const BatchSelectionModal: React.FC<BatchSelectionModalProps> = ({
                                                 {!isExpired && hasPartialStock && (
                                                     <span className="text-[9px] font-black bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded uppercase">Partial</span>
                                                 )}
+                                                {/* FEFO badge — only for the first valid batch */}
+                                                {!isExpired && !hasNoStock && filteredBatches.findIndex(fb => !fb.expiryDate || new Date(fb.expiryDate) >= new Date()) === filteredBatches.indexOf(batch) && (
+                                                    <span className="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.5 rounded uppercase">🥇 Dispense First</span>
+                                                )}
                                             </div>
                                             <span className={`text-[10px] uppercase font-bold ${isExpired ? 'text-red-500' : isDisabled ? 'text-slate-400/70' : 'text-slate-400'}`}>
                                                 Expiry: {batch.expiryDate ? new Date(batch.expiryDate).toLocaleDateString() : 'N/A'}
                                             </span>
+                                            {/* Location badge */}
+                                            {locationMap[batch.batchNo] ? (
+                                                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded flex items-center gap-1">
+                                                    📍 {locationMap[batch.batchNo]!.locationDisplay}
+                                                    {locationMap[batch.batchNo]!.temperature !== 'Ambient' && (
+                                                        <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-700 px-1 rounded uppercase">
+                                                            {locationMap[batch.batchNo]!.temperature}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] text-slate-300 italic">📍 No location assigned</span>
+                                            )}
                                             {isExpired && (
                                                 <span className="text-[9px] text-red-600 font-bold flex items-center gap-1 mt-0.5">
                                                     🚫 Expired drug — do not dispense
