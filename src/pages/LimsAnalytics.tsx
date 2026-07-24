@@ -48,10 +48,8 @@ export default function LimsAnalytics() {
             service_order:service_order_id (
               service_name,
               appointment:appointment_id (
-                patient:patient_id (
-                  first_name,
-                  last_name
-                )
+                id,
+                patient_id
               )
             )
           )
@@ -60,6 +58,49 @@ export default function LimsAnalytics() {
         .limit(50);
 
       if (logs) {
+        // Collect patient_id values and fetch details separately
+        const patientIds = Array.from(new Set(
+          logs
+            .map((l: any) => l.lab_order?.service_order?.appointment?.patient_id)
+            .filter(Boolean)
+        ));
+
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || ''
+                };
+              });
+            }
+          }
+        }
+
+        // Inject patient back into logs objects so the UI doesn't break
+        logs.forEach((l: any) => {
+          const patientId = l.lab_order?.service_order?.appointment?.patient_id;
+          if (patientId && l.lab_order?.service_order?.appointment) {
+            (l.lab_order.service_order.appointment as any).patient = patientsMap[patientId] || null;
+          }
+        });
+
         setAuditLogs(logs);
       }
 

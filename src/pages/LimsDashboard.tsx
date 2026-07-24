@@ -113,7 +113,7 @@ export default function LimsDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch lab orders with nested relations
+      // 1. Fetch lab orders with nested relations (avoid nested patient join - FK missing)
       const { data: dbOrders, error } = await supabase
         .from('lims_lab_orders')
         .select(`
@@ -124,17 +124,55 @@ export default function LimsDashboard() {
             cpt_code,
             appointment:appointment_id (
               id,
-              patient:patient_id (
-                id, first_name, last_name, gender, dob
-              )
+              patient_id
             )
           )
         `);
 
       let fetchedOrders: LimsLabOrder[] = [];
       if (dbOrders && !error) {
+        // Collect unique patient IDs and fetch patient details separately
+        const patientIds = Array.from(new Set(
+          (dbOrders as any[])
+            .map(o => o.service_order?.appointment?.patient_id)
+            .filter(Boolean)
+        ));
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                const year = p.year_of_birth || '1990';
+                const month = String(p.month_of_birth || 1).padStart(2, '0');
+                const day = String(p.day_of_birth || 1).padStart(2, '0');
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || '',
+                  gender: p.gender,
+                  dob: `${year}-${month}-${day}`
+                };
+              });
+            }
+          }
+        }
+
         fetchedOrders = dbOrders.map((o: any) => {
-          const patient = o.service_order?.appointment?.patient || {};
+          const patientId = o.service_order?.appointment?.patient_id;
+          const patient = patientsMap[patientId] || {};
           return {
             id: o.id,
             serviceOrderId: o.service_order_id,

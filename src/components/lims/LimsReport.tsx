@@ -20,7 +20,7 @@ export default function LimsReport({ labOrderId, onClose }: LimsReportProps) {
   const fetchReportDetails = async () => {
     setLoading(true);
     try {
-      // Fetch order header with patient details
+      // Fetch order header (avoid nested patient join due to missing FK constraint)
       const { data: orderData } = await supabase
         .from('lims_lab_orders')
         .select(`
@@ -31,14 +31,7 @@ export default function LimsReport({ labOrderId, onClose }: LimsReportProps) {
             cpt_code,
             appointment:appointment_id (
               id,
-              patient:patient_id (
-                id,
-                first_name,
-                last_name,
-                gender,
-                dob,
-                phone
-              )
+              patient_id
             )
           )
         `)
@@ -46,7 +39,38 @@ export default function LimsReport({ labOrderId, onClose }: LimsReportProps) {
         .single();
 
       if (orderData) {
-        const patient = (orderData as any).service_order?.appointment?.patient || {};
+        const patientId = (orderData as any).service_order?.appointment?.patient_id;
+        let patient = {} as any;
+        if (patientId) {
+          const { data: patData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob, phone')
+            .eq('id', patientId)
+            .maybeSingle();
+          if (patData) {
+            patient = patData;
+          } else {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth, mobile')
+              .eq('id', patientId)
+              .maybeSingle();
+            if (pdData) {
+              const year = pdData.year_of_birth || '1990';
+              const month = String(pdData.month_of_birth || 1).padStart(2, '0');
+              const day = String(pdData.day_of_birth || 1).padStart(2, '0');
+              patient = {
+                id: pdData.id,
+                first_name: pdData.first_name,
+                last_name: pdData.last_name || '',
+                gender: pdData.gender,
+                dob: `${year}-${month}-${day}`,
+                phone: pdData.mobile || 'N/A'
+              };
+            }
+          }
+        }
+
         let ageText = '30 Years';
         if (patient.dob) {
           const dob = new Date(patient.dob);
@@ -120,7 +144,7 @@ export default function LimsReport({ labOrderId, onClose }: LimsReportProps) {
           <span className="text-sm font-semibold text-slate-350">Certified Patient Report</span>
         </div>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={handlePrint}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
           >

@@ -178,16 +178,10 @@ export default function LimsAcceptSample() {
               appointment:appointment_id (
                 id,
                 visit_type,
+                patient_id,
                 doctor:doctor_id (
                   first_name,
                   last_name
-                ),
-                patient:patient_id (
-                  id,
-                  first_name,
-                  last_name,
-                  gender,
-                  dob
                 )
               )
             )
@@ -211,6 +205,51 @@ export default function LimsAcceptSample() {
       if (queryErr) throw queryErr;
 
       if (samplesData) {
+        // Collect patient_id values and fetch details separately
+        const patientIds = Array.from(new Set(
+          (samplesData as any[])
+            .map(s => {
+              const labOrder = resolveSingle(s.lab_order);
+              const sOrder = labOrder ? resolveSingle(labOrder.service_order) : null;
+              const appt = sOrder ? resolveSingle(sOrder.appointment) : null;
+              return appt?.patient_id;
+            })
+            .filter(Boolean)
+        ));
+
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                const year = p.year_of_birth || '1990';
+                const month = String(p.month_of_birth || 1).padStart(2, '0');
+                const day = String(p.day_of_birth || 1).padStart(2, '0');
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || '',
+                  gender: p.gender,
+                  dob: `${year}-${month}-${day}`
+                };
+              });
+            }
+          }
+        }
+
         // Normalize nested relations arrays to single objects if needed
         const normalized = (samplesData as any[]).map(s => {
           const specObj = resolveSingle(s.specimen);
@@ -218,7 +257,8 @@ export default function LimsAcceptSample() {
           const labOrder = resolveSingle(s.lab_order);
           const sOrder = labOrder ? resolveSingle(labOrder.service_order) : null;
           const appt = sOrder ? resolveSingle(sOrder.appointment) : null;
-          const patient = appt ? resolveSingle(appt.patient) : null;
+          const patientId = appt?.patient_id;
+          const patient = patientId ? patientsMap[patientId] : null;
           const doctor = appt ? resolveSingle(appt.doctor) : null;
           const orderingDoctor = sOrder ? resolveSingle(sOrder.ordering_doctor) : null;
 

@@ -40,8 +40,111 @@ export const Layout = () => {
       navigate('/login');
   };
 
-  // Group items by category
-  const groupedNav = NAV_ITEMS.reduce((acc, item) => {
+  // Group items by category and filter by RBAC permissions
+  const SCREEN_CODE_MAP: Record<string, string> = {
+    // Main System / Administration
+    '/': 'DASHBOARD',
+    '/appointments': 'APPOINTMENTS',
+    '/patients': 'PATIENTS',
+    '/abdm-profiles': 'ABDM_PROFILES',
+    '/doctor-workbench': 'DOCTOR_WORKBENCH',
+    '/reports': 'REPORTS',
+    '/employees': 'EMPLOYEES',
+    '/availability': 'AVAILABILITY',
+    '/masters': 'MASTERS',
+    '/rbac': 'RBAC_CONFIG',
+
+    // Inventory
+    '/inventory': 'INVENTORY_DASHBOARD',
+    '/inventory/dashboard': 'INVENTORY_DASHBOARD',
+    '/inventory/opening-stock': 'INVENTORY_DASHBOARD',
+    '/inventory/reports/stock-ledger': 'INVENTORY_DASHBOARD',
+    '/inventory/item-master': 'INVENTORY_DASHBOARD',
+    '/inventory/store-master': 'INVENTORY_DASHBOARD',
+    '/inventory/item-store-map': 'INVENTORY_DASHBOARD',
+
+    // Pharmacy
+    '/pharmacy': 'PHARMACY_DASHBOARD',
+    '/pharmacy/masters/drug-generic': 'PHARMACY_DASHBOARD',
+    '/pharmacy/masters/drug-master': 'PHARMACY_DASHBOARD',
+    '/pharmacy/masters/zones': 'PHARMACY_DASHBOARD',
+    '/pharmacy/masters/racks': 'PHARMACY_DASHBOARD',
+    '/pharmacy/masters/batch-locations': 'PHARMACY_DASHBOARD',
+    '/pharmacy/direct-sale': 'PHARMACY_DASHBOARD',
+    '/pharmacy/direct-sale-history': 'PHARMACY_DASHBOARD',
+    '/pharmacy/op-pharmacy': 'PHARMACY_DASHBOARD',
+    '/pharmacy/drug-return': 'PHARMACY_DASHBOARD',
+    '/pharmacy/loyalty': 'PHARMACY_DASHBOARD',
+
+    // Procurement
+    '/procurement': 'PROCUREMENT_DASHBOARD',
+    '/procurement/vendor-master': 'PROCUREMENT_DASHBOARD',
+    '/procurement/vendor-compliance': 'PROCUREMENT_DASHBOARD',
+    '/procurement/tax': 'PROCUREMENT_DASHBOARD',
+    '/procurement/purchase-order': 'PROCUREMENT_DASHBOARD',
+    '/procurement/grn': 'PROCUREMENT_DASHBOARD',
+    '/procurement/purchase-receipt': 'PROCUREMENT_DASHBOARD',
+    '/procurement/purchase-return': 'PROCUREMENT_DASHBOARD',
+    '/procurement/expiry-return': 'PROCUREMENT_DASHBOARD',
+
+    // Finance
+    '/finance': 'FIN_BILLING',
+    '/finance/billing': 'FIN_BILLING',
+    '/finance/masters/organization': 'FIN_ORG',
+    '/finance/masters/plan-definition': 'FIN_PLAN',
+    '/finance/masters/sponsor-tariff': 'FIN_TARIFF',
+    '/finance/masters/chart-of-accounts': 'FIN_COA',
+    '/finance/transactions/journal-vouchers': 'FIN_JV',
+    '/finance/transactions/refund': 'FIN_REFUND',
+    
+    // LIMS Lab
+    '/lims/dashboard': 'LIMS_DASHBOARD'
+  };
+
+  const isAdmin = user?.username.toLowerCase() === 'admin' || 
+                  user?.role?.toLowerCase() === 'administrator' || 
+                  user?.role?.toLowerCase() === 'admin';
+
+  const hasAccess = (path?: string): boolean => {
+    if (!path) return true;
+    if (isAdmin) return true;
+    const code = SCREEN_CODE_MAP[path];
+    if (!code) return true; // Unprotected screen
+    return !!user?.privileges?.[code]?.can_view;
+  };
+
+  const filterNavItem = (item: NavItem): NavItem | null => {
+    if (!hasAccess(item.path)) return null;
+
+    if (item.subItems) {
+      const filteredSubs = item.subItems
+        .map(sub => {
+          const hasSubSub = sub.subItems && sub.subItems.length > 0;
+          if (hasSubSub) {
+            const filteredSubSubs = sub.subItems!.filter(ss => hasAccess(ss.path));
+            if (filteredSubSubs.length === 0) return null;
+            return { ...sub, subItems: filteredSubSubs };
+          }
+          if (sub.path && !hasAccess(sub.path)) return null;
+          return sub;
+        })
+        .filter((sub): sub is Exclude<typeof sub, null> => sub !== null);
+
+      if (filteredSubs.length === 0) {
+        if (item.path === '/finance' || item.path === '/inventory' || item.path === '/pharmacy' || item.path === '/procurement') {
+          return null;
+        }
+      }
+      return { ...item, subItems: filteredSubs };
+    }
+
+    return item;
+  };
+
+  const groupedNav = NAV_ITEMS.reduce((acc, rawItem) => {
+    const item = filterNavItem(rawItem);
+    if (!item) return acc;
+    
     const cat = item.category || 'Other';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(item);

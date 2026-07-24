@@ -4,6 +4,7 @@ import {
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
   DoctorSchedule, ScheduleTemplate, SlotType,
   VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund,
+  Role, Screen, Privilege,
   LoyaltyProgramConfig, LoyaltyTier, LoyaltyRedemptionRules, LoyaltyBonusRule, LoyaltyAccount, LoyaltyTransaction, LoyaltyAccountLookupResult, LoyaltyRedemptionCalc,
   PharmacyZone, PharmacyRack, InventoryBatchLocation
 } from '../types';
@@ -250,6 +251,18 @@ interface DataContextType {
   deleteBatchLocation: (id: string) => Promise<boolean>;
   fetchBatchLocation: (storeId: string, itemId: string, batchNo: string) => Promise<InventoryBatchLocation | null>;
   fetchStoreBatchLocations: (storeId: string, searchTerm?: string) => Promise<InventoryBatchLocation[]>;
+  // RBAC Roles & Screens
+  roles: Role[];
+  screens: Screen[];
+  saveRole: (role: Role) => Promise<boolean>;
+  deleteRole: (id: string) => Promise<boolean>;
+  saveScreen: (screen: Omit<Screen, 'id'> & { id?: string }) => Promise<boolean>;
+  deleteScreen: (id: string) => Promise<boolean>;
+  saveRolePrivileges: (roleId: string, privileges: Omit<Privilege, 'screen_code'|'screen_name'|'module'>[]) => Promise<boolean>;
+  saveUserOverrides: (userId: string, overrides: Omit<Privilege, 'screen_code'|'screen_name'|'module'>[]) => Promise<boolean>;
+  updateAppUserRole: (userId: string, roleId: string | null, isActive: boolean, userCode?: string, mobile?: string) => Promise<boolean>;
+  saveAppUser: (appUser: Partial<AppUser> & { password?: string }) => Promise<boolean>;
+  deleteAppUser: (userId: string) => Promise<boolean>;
 }
 
 export const getCurrencySymbol = (code: string): string => {
@@ -405,6 +418,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Pharmacy Location Hierarchy masters
   const [pharmacyZones, setPharmacyZones] = useState<PharmacyZone[]>([]);
   const [pharmacyRacks, setPharmacyRacks] = useState<PharmacyRack[]>([]);
+
+  // RBAC states
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [screens, setScreens] = useState<Screen[]>([]);
 
 
 
@@ -1502,6 +1519,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('loyalty_transactions').select('*').order('transaction_date', { ascending: false }), // 10
           supabase.from('pharmacy_zones').select('*').eq('is_active', true).order('zone_code'), // 11
           supabase.from('pharmacy_racks').select('*').eq('is_active', true).order('rack_code'), // 12
+          supabase.from('roles').select('*'),                  // 13
+          supabase.from('screens').select('*').order('display_order', { ascending: true }) // 14
         ]);
 
         // Helper to safely extract data from optional results
@@ -1527,6 +1546,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const loyaltyTxnsRes = getOptional(10);
         const phZonesRes = getOptional(11);
         const phRacksRes = getOptional(12);
+        const rolesRes = getOptional(13);
+        const screensRes = getOptional(14);
 
         // Core table name index (for error reporting)
         const tableNames = [
@@ -1802,6 +1823,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setPharmacyRacks(phRacksRes.data.map((r: any) => ({
             id: r.id, zoneId: r.zone_id, rackCode: r.rack_code,
             rackName: r.rack_name, noOfShelves: r.no_of_shelves, isActive: r.is_active
+          })));
+        }
+
+        if (rolesRes?.data) {
+          setRoles(rolesRes.data.map((r: any) => ({
+            id: r.id,
+            role_code: r.role_code,
+            role_name: r.role_name,
+            description: r.description
+          })));
+        }
+
+        if (screensRes?.data) {
+          setScreens(screensRes.data.map((s: any) => ({
+            id: s.id,
+            module: s.module,
+            screen_code: s.screen_code,
+            screen_name: s.screen_name,
+            screen_url: s.screen_url,
+            display_order: Number(s.display_order || 0)
           })));
         }
 
@@ -3885,7 +3926,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 .select('*')
                 .eq('username', username)
                 .eq('password', password)
-                .single(),
+                .maybeSingle(),
               timeoutPromise
           ]) as any;
 
@@ -3896,12 +3937,111 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               return false;
           }
 
+          // Check if active
+          if (data.is_active === false) {
+              showToast('error', 'Your account has been deactivated. Please contact administrator.');
+              setIsLoading(false);
+              return false;
+          }
+
+          // Fetch Effective Privileges
+          const privilegesMap: Record<string, Privilege> = {};
+          const isUserAdmin = username.toLowerCase() === 'admin' || 
+                             data.role?.toLowerCase() === 'administrator' || 
+                             data.role?.toLowerCase() === 'admin';
+
+          // Load screen registry
+          const { data: screensList } = await supabase.from('screens').select('*');
+          const allScreens = screensList || [];
+
+          if (isUserAdmin) {
+              // Superuser has all access
+              allScreens.forEach((s: any) => {
+                  privilegesMap[s.screen_code] = {
+                      screen_id: s.id,
+                      screen_code: s.screen_code,
+                      screen_name: s.screen_name,
+                      module: s.module,
+                      can_view: true,
+                      can_create: true,
+                      can_edit: true,
+                      can_delete: true,
+                      can_export: true
+                  };
+              });
+          } else {
+              // 1. Fetch Role Privileges
+              if (data.role_id) {
+                  const { data: rpList } = await supabase
+                      .from('role_privileges')
+                      .select(`
+                          *,
+                          screen:screen_id ( screen_code, screen_name, module )
+                      `)
+                      .eq('role_id', data.role_id);
+                  
+                  if (rpList) {
+                      rpList.forEach((rp: any) => {
+                          const scr = Array.isArray(rp.screen) ? rp.screen[0] : rp.screen;
+                          if (scr) {
+                              privilegesMap[scr.screen_code] = {
+                                  screen_id: rp.screen_id,
+                                  screen_code: scr.screen_code,
+                                  screen_name: scr.screen_name,
+                                  module: scr.module,
+                                  can_view: !!rp.can_view,
+                                  can_create: !!rp.can_create,
+                                  can_edit: !!rp.can_edit,
+                                  can_delete: !!rp.can_delete,
+                                  can_export: !!rp.can_export
+                              };
+                          }
+                      });
+                  }
+              }
+
+              // 2. Fetch User Privilege Overrides (take precedence)
+              const { data: upList } = await supabase
+                  .from('user_privilege_overrides')
+                  .select(`
+                      *,
+                      screen:screen_id ( screen_code, screen_name, module )
+                  `)
+                  .eq('user_id', data.id);
+              
+              if (upList) {
+                  upList.forEach((up: any) => {
+                      const scr = Array.isArray(up.screen) ? up.screen[0] : up.screen;
+                      if (scr) {
+                          privilegesMap[scr.screen_code] = {
+                              screen_id: up.screen_id,
+                              screen_code: scr.screen_code,
+                              screen_name: scr.screen_name,
+                              module: scr.module,
+                              can_view: !!up.can_view,
+                              can_create: !!up.can_create,
+                              can_edit: !!up.can_edit,
+                              can_delete: !!up.can_delete,
+                              can_export: !!up.can_export
+                          };
+                      }
+                  });
+              }
+          }
+
           const loggedUser: AppUser = {
               id: data.id,
               username: data.username,
               role: data.role,
               fullName: data.full_name || 'User',
-              employeeId: data.employee_id
+              employeeId: data.employee_id,
+              user_code: data.user_code,
+              mobile: data.mobile,
+              department_id: data.department_id,
+              location_id: data.location_id,
+              role_id: data.role_id,
+              is_active: !!data.is_active,
+              privileges: privilegesMap
           };
 
           setUser(loggedUser);
@@ -3923,7 +4063,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           username: 'demo',
           role: 'Administrator',
           fullName: 'Demo Admin',
-          employeeId: 'DEMO-001'
+          employeeId: 'DEMO-001',
+          is_active: true
       };
       setUser(demoUser);
       localStorage.setItem('medicore_user', JSON.stringify(demoUser));
@@ -7182,6 +7323,284 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return isSuccess;
   };
 
+  const saveRole = async (role: Role): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('roles')
+        .upsert({
+          id: role.id || undefined,
+          role_code: role.role_code.toUpperCase(),
+          role_name: role.role_name,
+          description: role.description || null
+        }, { onConflict: 'role_code' });
+
+      if (error) throw error;
+      showToast('success', `Role ${role.role_name} saved successfully.`);
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error saving role:", err);
+      showToast('error', `Failed to save role: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deleteRole = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('roles')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast('info', 'Role deleted.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error deleting role:", err);
+      showToast('error', `Failed to delete role: ${err.message}`);
+      return false;
+    }
+  };
+
+  const saveScreen = async (screen: Omit<Screen, 'id'> & { id?: string }): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = {
+        module: screen.module,
+        screen_code: screen.screen_code.trim().toUpperCase(),
+        screen_name: screen.screen_name.trim(),
+        screen_url: screen.screen_url.trim(),
+        display_order: Number(screen.display_order) || 0
+      };
+      if (screen.id) {
+        payload.id = screen.id;
+      }
+      const { error } = await supabase
+        .from('screens')
+        .upsert(payload, { onConflict: 'screen_code' });
+
+      if (error) throw error;
+      showToast('success', `Screen "${screen.screen_name}" registered successfully.`);
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error saving screen:", err);
+      showToast('error', `Failed to register screen: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deleteScreen = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('screens')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      showToast('info', 'Screen registration deleted.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error deleting screen:", err);
+      showToast('error', `Failed to delete screen registration: ${err.message}`);
+      return false;
+    }
+  };
+
+  const saveRolePrivileges = async (roleId: string, privilegesList: Omit<Privilege, 'screen_code'|'screen_name'|'module'>[]): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // Delete old privileges for this role
+      await supabase.from('role_privileges').delete().eq('role_id', roleId);
+
+      if (privilegesList.length > 0) {
+        const dbPayload = privilegesList.map(p => ({
+          role_id: roleId,
+          screen_id: p.screen_id,
+          can_view: !!p.can_view,
+          can_create: !!p.can_create,
+          can_edit: !!p.can_edit,
+          can_delete: !!p.can_delete,
+          can_export: !!p.can_export
+        }));
+        const { error } = await supabase.from('role_privileges').insert(dbPayload);
+        if (error) throw error;
+      }
+
+      showToast('success', 'Role privileges updated.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error saving role privileges:", err);
+      showToast('error', `Failed to update privileges: ${err.message}`);
+      return false;
+    }
+  };
+
+  const saveUserOverrides = async (userId: string, overridesList: Omit<Privilege, 'screen_code'|'screen_name'|'module'>[]): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // Delete old overrides
+      await supabase.from('user_privilege_overrides').delete().eq('user_id', userId);
+
+      if (overridesList.length > 0) {
+        const dbPayload = overridesList.map(o => ({
+          user_id: userId,
+          screen_id: o.screen_id,
+          can_view: !!o.can_view,
+          can_create: !!o.can_create,
+          can_edit: !!o.can_edit,
+          can_delete: !!o.can_delete,
+          can_export: !!o.can_export
+        }));
+        const { error } = await supabase.from('user_privilege_overrides').insert(dbPayload);
+        if (error) throw error;
+      }
+
+      showToast('success', 'User privilege overrides updated.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error saving user overrides:", err);
+      showToast('error', `Failed to update overrides: ${err.message}`);
+      return false;
+    }
+  };
+
+  const updateAppUserRole = async (userId: string, roleId: string | null, isActive: boolean, userCode?: string, mobile?: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // Resolve the matching role row to sync legacy 'role' string field
+      let roleName = '';
+      if (roleId) {
+        const matched = roles.find(r => r.id === roleId);
+        if (matched) {
+          roleName = matched.role_name;
+        }
+      }
+
+      const updateData: any = {
+        role_id: roleId || null,
+        is_active: isActive,
+        updated_at: new Date().toISOString()
+      };
+      if (roleName) {
+        updateData.role = roleName; // Keep legacy 'role' column updated in sync
+      }
+      if (userCode !== undefined) updateData.user_code = userCode;
+      if (mobile !== undefined) updateData.mobile = mobile;
+
+      const { error } = await supabase
+        .from('app_users')
+        .update(updateData)
+        .eq('id', userId);
+
+      if (error) throw error;
+      showToast('success', 'User access permissions updated.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error updating user role/status:", err);
+      showToast('error', `Failed to update user: ${err.message}`);
+      return false;
+    }
+  };
+
+  const saveAppUser = async (appUser: Partial<AppUser> & { password?: string }): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      let roleName = '';
+      if (appUser.role_id) {
+        const matched = roles.find(r => r.id === appUser.role_id);
+        if (matched) {
+          roleName = matched.role_name;
+        }
+      }
+
+      const payload: any = {
+        username: appUser.username,
+        full_name: appUser.fullName,
+        user_code: appUser.user_code,
+        email: appUser.email,
+        mobile: appUser.mobile,
+        department_id: appUser.department_id || null,
+        location_id: appUser.location_id || null,
+        role_id: appUser.role_id || null,
+        role: roleName || appUser.role || 'User',
+        is_active: appUser.is_active !== undefined ? appUser.is_active : true,
+        updated_at: new Date().toISOString()
+      };
+
+      if (appUser.password) {
+        payload.password = appUser.password;
+      }
+
+      if (appUser.id) {
+        // Edit existing
+        const { error } = await supabase
+          .from('app_users')
+          .update(payload)
+          .eq('id', appUser.id);
+        if (error) throw error;
+        showToast('success', 'User updated successfully.');
+      } else {
+        // Create new
+        payload.id = crypto.randomUUID();
+        payload.created_at = new Date().toISOString();
+        if (!payload.password) {
+          throw new Error("Password is required for new users.");
+        }
+        const { error } = await supabase
+          .from('app_users')
+          .insert(payload);
+        if (error) throw error;
+        showToast('success', 'User created successfully.');
+      }
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error saving user:", err);
+      showToast('error', `Failed to save user: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deleteAppUser = async (userId: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('app_users')
+        .delete()
+        .eq('id', userId);
+      if (error) throw error;
+      showToast('success', 'User deleted successfully.');
+      setRefreshTrigger(prev => prev + 1);
+      return true;
+    } catch (err: any) {
+      console.error("Error deleting user:", err);
+      showToast('error', `Failed to delete user: ${err.message}`);
+      return false;
+    }
+  };
+
   return (
     <DataContext.Provider value={{
       user, login, loginDemo, logout,
@@ -7230,6 +7649,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       loyaltyAccounts, loyaltyTransactions, loyaltyProgramConfig, loyaltyTiers, loyaltyRedemptionRules, loyaltyBonusRules,
       enrollOrFetchLoyaltyAccount, calculateLoyaltyRedemption, processLoyaltyTransaction, reverseLoyaltyTransaction, manualLoyaltyAdjustment,
       saveLoyaltyProgramConfig, saveLoyaltyTier, saveLoyaltyRedemptionRules, saveLoyaltyBonusRule,
+
+      // RBAC values
+      roles, screens, saveRole, deleteRole, saveScreen, deleteScreen, saveRolePrivileges, saveUserOverrides, updateAppUserRole, saveAppUser, deleteAppUser,
 
       // Pharmacy Location Hierarchy
       pharmacyZones, pharmacyRacks,

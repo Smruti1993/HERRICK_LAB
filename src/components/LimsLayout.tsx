@@ -24,6 +24,15 @@ export default function LimsLayout() {
   const [mastersCount, setMastersCount] = useState(0);
   const supabase = getSupabase();
 
+  const isAdmin = user?.username.toLowerCase() === 'admin' || 
+                  user?.role?.toLowerCase() === 'administrator' || 
+                  user?.role?.toLowerCase() === 'admin';
+
+  const hasAccess = (screenCode: string) => {
+    if (isAdmin) return true;
+    return !!user?.privileges?.[screenCode]?.can_view;
+  };
+
   const fetchRealtimeCounts = async () => {
     try {
       // 1. Get Laboratory count (Ordered status)
@@ -135,132 +144,142 @@ export default function LimsLayout() {
 
           <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
             {/* Laboratory Dashboard link */}
-            <NavLink
-              to="/lims/dashboard"
-              className={({ isActive }) =>
-                `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                  isActive 
-                    ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className="flex items-center gap-3">
-                    <FlaskConical className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                    <span>Laboratory</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {labCount > 0 && (
-                      <span className={`text-xxs px-2 py-0.5 rounded-full font-bold ${
-                        isActive ? 'bg-[#1C58D9] text-white' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {labCount}
-                      </span>
-                    )}
-                    <ChevronRight className={`w-3.5 h-3.5 opacity-50 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400'}`} />
-                  </div>
-                </>
-              )}
-            </NavLink>
+            {hasAccess('LIMS_DASHBOARD') && (
+              <NavLink
+                to="/lims/dashboard"
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <FlaskConical className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Laboratory</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {labCount > 0 && (
+                        <span className={`text-xxs px-2 py-0.5 rounded-full font-bold ${
+                          isActive ? 'bg-[#1C58D9] text-white' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {labCount}
+                        </span>
+                      )}
+                      <ChevronRight className={`w-3.5 h-3.5 opacity-50 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400'}`} />
+                    </div>
+                  </>
+                )}
+              </NavLink>
+            )}
 
             {/* Reports Link */}
-            <NavLink
-              to="/lims/analytics"
-              className={({ isActive }) =>
-                `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                  isActive 
-                    ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className="flex items-center gap-3">
-                    <FileText className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                    <span>Report</span>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
-                </>
-              )}
-            </NavLink>
+            {hasAccess('LIMS_ANALYTICS') && (
+              <NavLink
+                to="/lims/analytics"
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <FileText className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Report</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
+                  </>
+                )}
+              </NavLink>
+            )}
 
             {/* Masters Link */}
-            <NavLink
-              to="/lims/masters"
-              className={({ isActive }) =>
-                `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                  isActive 
-                    ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className="flex items-center gap-3">
-                    <Settings className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                    <span>Masters</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    {mastersCount > 0 && (
-                      <span className={`text-xxs px-2 py-0.5 rounded-full font-bold ${
-                        isActive ? 'bg-[#1C58D9]/20 text-[#1C58D9]' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {mastersCount}
-                      </span>
-                    )}
-                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
-                  </div>
-                </>
-              )}
-            </NavLink>
+            {hasAccess('LIMS_MASTERS') && (
+              <NavLink
+                to="/lims/masters"
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Settings className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Masters</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {mastersCount > 0 && (
+                        <span className={`text-xxs px-2 py-0.5 rounded-full font-bold ${
+                          isActive ? 'bg-[#1C58D9]/20 text-[#1C58D9]' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {mastersCount}
+                        </span>
+                      )}
+                      <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
+                    </div>
+                  </>
+                )}
+              </NavLink>
+            )}
 
             {/* Configurations Link */}
-            <NavLink
-              to="/lims/amendments"
-              className={({ isActive }) =>
-                `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                  isActive 
-                    ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className="flex items-center gap-3">
-                    <Sliders className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                    <span>Configurations</span>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
-                </>
-              )}
-            </NavLink>
+            {hasAccess('LIMS_AMENDMENTS') && (
+              <NavLink
+                to="/lims/amendments"
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Sliders className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Configurations</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
+                  </>
+                )}
+              </NavLink>
+            )}
 
             {/* Transactions Link */}
-            <NavLink
-              to="/lims/amendments" // Pointing to Amendments as transaction desk
-              className={({ isActive }) =>
-                `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                  isActive 
-                    ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <div className="flex items-center gap-3">
-                    <Grid className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                    <span>Transactions</span>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
-                </>
-              )}
-            </NavLink>
+            {hasAccess('LIMS_AMENDMENTS') && (
+              <NavLink
+                to="/lims/amendments" // Pointing to Amendments as transaction desk
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Grid className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Transactions</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
+                  </>
+                )}
+              </NavLink>
+            )}
           </nav>
 
           {/* User Profile Block at the Bottom */}

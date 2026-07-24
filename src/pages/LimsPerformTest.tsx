@@ -289,18 +289,11 @@ export default function LimsPerformTest() {
             ),
             appointment:appointment_id (
               id,
+              patient_id,
               doctor:doctor_id (
                 id,
                 first_name,
                 last_name
-              ),
-              patient:patient_id (
-                id,
-                first_name,
-                last_name,
-                gender,
-                dob,
-                phone
               )
             )
           )
@@ -385,11 +378,53 @@ export default function LimsPerformTest() {
       if (queryErr) throw queryErr;
 
       if (ordersData) {
+        // Collect patient_id values and fetch details separately
+        const patientIds = Array.from(new Set(
+          (ordersData as any[])
+            .map(o => o.service_order?.appointment?.patient_id)
+            .filter(Boolean)
+        ));
+
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob, phone')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth, mobile')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                const year = p.year_of_birth || '1990';
+                const month = String(p.month_of_birth || 1).padStart(2, '0');
+                const day = String(p.day_of_birth || 1).padStart(2, '0');
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || '',
+                  gender: p.gender,
+                  dob: `${year}-${month}-${day}`,
+                  phone: p.mobile || 'N/A'
+                };
+              });
+            }
+          }
+        }
+
         // Normalize relations
         let formattedList: OrderRecord[] = (ordersData as any[]).map(o => {
           const serviceOrder = o.service_order || {};
           const appointment = serviceOrder.appointment || {};
-          const patient = appointment.patient || {};
+          const patientId = appointment.patient_id;
+          const patient = patientId ? patientsMap[patientId] : {};
           
           let patientAgeText = 'N/A';
           if (patient.dob) {
@@ -536,13 +571,7 @@ export default function LimsPerformTest() {
                 service_id,
                 appointment:appointment_id (
                   id,
-                  patient:patient_id (
-                    id,
-                    first_name,
-                    last_name,
-                    gender,
-                    dob
-                  )
+                  patient_id
                 )
               )
             `)
@@ -550,6 +579,41 @@ export default function LimsPerformTest() {
             .single();
 
           if (orderData) {
+            const patientId = (orderData as any).service_order?.appointment?.patient_id;
+            let patient = null;
+            if (patientId) {
+              const { data: patData } = await supabase
+                .from('patients')
+                .select('id, first_name, last_name, gender, dob')
+                .eq('id', patientId)
+                .maybeSingle();
+              if (patData) {
+                patient = patData;
+              } else {
+                const { data: pdData } = await supabase
+                  .from('patient_demographics')
+                  .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth')
+                  .eq('id', patientId)
+                  .maybeSingle();
+                if (pdData) {
+                  const year = pdData.year_of_birth || '1990';
+                  const month = String(pdData.month_of_birth || 1).padStart(2, '0');
+                  const day = String(pdData.day_of_birth || 1).padStart(2, '0');
+                  patient = {
+                    id: pdData.id,
+                    first_name: pdData.first_name,
+                    last_name: pdData.last_name || '',
+                    gender: pdData.gender,
+                    dob: `${year}-${month}-${day}`
+                  };
+                }
+              }
+            }
+
+            if (orderData.service_order?.appointment) {
+              (orderData as any).service_order.appointment.patient = patient;
+            }
+
             const serviceId = (orderData as any).service_order?.service_id;
             let params: any[] = [];
             if (serviceId) {

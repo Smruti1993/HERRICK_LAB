@@ -41,17 +41,56 @@ export default function LimsAmendments() {
             cpt_code,
             appointment:appointment_id (
               id,
-              patient:patient_id (
-                id, first_name, last_name, gender, dob
-              )
+              patient_id
             )
           )
         `)
         .eq('status', 'Certified');
 
       if (data) {
+        // Fetch patient details separately because of the missing FK on appointments.patient_id -> patients.id
+        const patientIds = Array.from(new Set(
+          (data as any[])
+            .map(o => o.service_order?.appointment?.patient_id)
+            .filter(Boolean)
+        ));
+
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                const year = p.year_of_birth || '1990';
+                const month = String(p.month_of_birth || 1).padStart(2, '0');
+                const day = String(p.day_of_birth || 1).padStart(2, '0');
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || '',
+                  gender: p.gender,
+                  dob: `${year}-${month}-${day}`
+                };
+              });
+            }
+          }
+        }
+
         const formatted = data.map((o: any) => {
-          const patient = o.service_order?.appointment?.patient || {};
+          const patientId = o.service_order?.appointment?.patient_id;
+          const patient = patientId ? patientsMap[patientId] : {};
           return {
             id: o.id,
             serviceOrderId: o.service_order_id,

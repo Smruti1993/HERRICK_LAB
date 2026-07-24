@@ -132,6 +132,34 @@ export interface Employee {
   status: 'Active' | 'Inactive';
 }
 
+export interface Role {
+  id: string;
+  role_code: string;
+  role_name: string;
+  description?: string;
+}
+
+export interface Screen {
+  id: string;
+  module: string;
+  screen_code: string;
+  screen_name: string;
+  screen_url: string;
+  display_order: number;
+}
+
+export interface Privilege {
+  screen_id: string;
+  screen_code: string;
+  screen_name: string;
+  module: string;
+  can_view: boolean;
+  can_create: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_export: boolean;
+}
+
 export interface AppUser {
   id: string;
   username: string;
@@ -139,6 +167,15 @@ export interface AppUser {
   fullName: string;
   email?: string;
   employeeId?: string;
+
+  user_code?: string;
+  mobile?: string;
+  department_id?: string;
+  location_id?: string;
+  role_id?: string;
+  is_active: boolean;
+  
+  privileges?: Record<string, Privilege>; // screen_code -> effective Privilege map
 }
 
 export interface Patient {

@@ -154,16 +154,10 @@ export default function LimsCollectSample() {
             appointment:appointment_id (
               id,
               visit_type,
+              patient_id,
               doctor:doctor_id (
                 first_name,
                 last_name
-              ),
-              patient:patient_id (
-                id,
-                first_name,
-                last_name,
-                gender,
-                dob
               )
             )
           )
@@ -271,6 +265,52 @@ export default function LimsCollectSample() {
       if (queryErr) throw queryErr;
 
       if (ordersData) {
+        // Fetch patient details separately because of the missing FK on appointments.patient_id -> patients.id
+        const patientIds = Array.from(new Set(
+          (ordersData as any[])
+            .map(o => {
+              const serviceOrder = Array.isArray(o.service_order) ? o.service_order[0] : o.service_order;
+              const appointment = serviceOrder && Array.isArray(serviceOrder.appointment) 
+                ? serviceOrder.appointment[0] 
+                : serviceOrder?.appointment;
+              return appointment?.patient_id;
+            })
+            .filter(Boolean)
+        ));
+
+        let patientsMap: Record<string, any> = {};
+        if (patientIds.length > 0) {
+          const { data: pData } = await supabase
+            .from('patients')
+            .select('id, first_name, last_name, gender, dob')
+            .in('id', patientIds);
+          if (pData) {
+            pData.forEach((p: any) => { patientsMap[p.id] = p; });
+          }
+          
+          const missingIds = patientIds.filter(id => !patientsMap[id]);
+          if (missingIds.length > 0) {
+            const { data: pdData } = await supabase
+              .from('patient_demographics')
+              .select('id, first_name, last_name, gender, year_of_birth, month_of_birth, day_of_birth')
+              .in('id', missingIds);
+            if (pdData) {
+              pdData.forEach((p: any) => {
+                const year = p.year_of_birth || '1990';
+                const month = String(p.month_of_birth || 1).padStart(2, '0');
+                const day = String(p.day_of_birth || 1).padStart(2, '0');
+                patientsMap[p.id] = {
+                  id: p.id,
+                  first_name: p.first_name,
+                  last_name: p.last_name || '',
+                  gender: p.gender,
+                  dob: `${year}-${month}-${day}`
+                };
+              });
+            }
+          }
+        }
+
         // Normalize nested relations from arrays to single objects if needed
         const normalizedOrders = (ordersData as any[]).map(o => {
           const serviceOrder = Array.isArray(o.service_order) ? o.service_order[0] : o.service_order;
@@ -279,9 +319,8 @@ export default function LimsCollectSample() {
             ? serviceOrder.appointment[0] 
             : serviceOrder?.appointment;
 
-          const patient = appointment && Array.isArray(appointment.patient)
-            ? appointment.patient[0]
-            : appointment?.patient;
+          const patientId = appointment?.patient_id;
+          const patient = patientId ? patientsMap[patientId] : null;
 
           const doctor = appointment && Array.isArray(appointment.doctor)
             ? appointment.doctor[0]

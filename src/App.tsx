@@ -2,6 +2,7 @@ import React from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { DataProvider, useData } from './context/DataContext';
 import { Layout } from './components/Layout';
+import { RbacConfig } from './pages/RbacConfig';
 import { Dashboard } from './pages/Dashboard';
 import { Appointments } from './pages/Appointments';
 import { Patients } from './pages/Patients';
@@ -54,7 +55,7 @@ import LimsCollectSample from './pages/LimsCollectSample';
 import LimsAcceptSample from './pages/LimsAcceptSample';
 import LimsPerformTest from './pages/LimsPerformTest';
 
-import { FileText } from 'lucide-react';
+import { FileText, ShieldAlert } from 'lucide-react';
 import { Login } from './pages/Login';
 
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
@@ -73,6 +74,50 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
     return <>{children}</>;
 };
 
+const ScreenGuard = ({ screenCode, children }: { screenCode: string; children: React.ReactNode }) => {
+    const { user } = useData();
+
+    if (!user) {
+        return <Navigate to="/login" replace />;
+    }
+
+    const isAdmin = user.username.toLowerCase() === 'admin' || 
+                    user.role?.toLowerCase() === 'administrator' || 
+                    user.role?.toLowerCase() === 'admin';
+                    
+    if (isAdmin) {
+        return <>{children}</>;
+    }
+
+    const privilege = user.privileges?.[screenCode];
+    if (!privilege || !privilege.can_view) {
+        // Dynamic redirect if user visits root page but doesn't have main dashboard access
+        if (screenCode === 'DASHBOARD') {
+            const hasLims = !!user.privileges?.['LIMS_DASHBOARD']?.can_view;
+            if (hasLims) {
+                return <Navigate to="/lims/dashboard" replace />;
+            }
+            const hasFin = !!user.privileges?.['FIN_BILLING']?.can_view;
+            if (hasFin) {
+                return <Navigate to="/finance/billing" replace />;
+            }
+        }
+        return (
+            <div className="flex flex-col items-center justify-center h-[80vh] text-slate-400 bg-white rounded-2xl border border-slate-200 shadow-sm max-w-4xl mx-auto p-8 animate-in fade-in duration-300">
+                <div className="bg-red-50 p-4 rounded-full mb-4 border border-red-100">
+                    <ShieldAlert className="w-12 h-12 text-red-500" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800 mb-2">Access Denied</h2>
+                <p className="text-sm text-slate-500 max-w-md text-center">
+                    You do not have the required permissions to view this screen ({screenCode}). Please contact your system administrator.
+                </p>
+            </div>
+        );
+    }
+
+    return <>{children}</>;
+};
+
 const AppRoutes = () => {
     return (
         <Routes>
@@ -80,16 +125,16 @@ const AppRoutes = () => {
           <Route path="/connection" element={<Connection />} />
           
           <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="appointments" element={<Appointments />} />
-            <Route path="patients" element={<Patients />} />
-            <Route path="abdm-profiles" element={<AbdmProfiles />} />
-            <Route path="doctor-workbench" element={<DoctorWorkbench />} />
-            <Route path="consultation/:appointmentId" element={<Consultation />} />
-            <Route path="reports" element={<Reports />} />
-            <Route path="employees" element={<Employees />} />
-            <Route path="availability" element={<Availability />} />
-            <Route path="masters" element={<Masters />} />
+            <Route index element={<ScreenGuard screenCode="DASHBOARD"><Dashboard /></ScreenGuard>} />
+            <Route path="appointments" element={<ScreenGuard screenCode="APPOINTMENTS"><Appointments /></ScreenGuard>} />
+            <Route path="patients" element={<ScreenGuard screenCode="PATIENTS"><Patients /></ScreenGuard>} />
+            <Route path="abdm-profiles" element={<ScreenGuard screenCode="ABDM_PROFILES"><AbdmProfiles /></ScreenGuard>} />
+            <Route path="doctor-workbench" element={<ScreenGuard screenCode="DOCTOR_WORKBENCH"><DoctorWorkbench /></ScreenGuard>} />
+            <Route path="consultation/:appointmentId" element={<ScreenGuard screenCode="DOCTOR_WORKBENCH"><Consultation /></ScreenGuard>} />
+            <Route path="reports" element={<ScreenGuard screenCode="REPORTS"><Reports /></ScreenGuard>} />
+            <Route path="employees" element={<ScreenGuard screenCode="EMPLOYEES"><Employees /></ScreenGuard>} />
+            <Route path="availability" element={<ScreenGuard screenCode="AVAILABILITY"><Availability /></ScreenGuard>} />
+            <Route path="masters" element={<ScreenGuard screenCode="MASTERS"><Masters /></ScreenGuard>} />
             <Route path="inventory">
               <Route index element={<Navigate to="item-master" replace />} />
               <Route path="dashboard" element={<InventoryDashboard />} />
@@ -136,14 +181,16 @@ const AppRoutes = () => {
             </Route>
             <Route path="finance">
               <Route index element={<Navigate to="masters/organization" replace />} />
-              <Route path="billing" element={<Billing />} />
-              <Route path="masters/organization" element={<OrganizationMaster />} />
-              <Route path="masters/plan-definition" element={<PlanDefinition />} />
-              <Route path="masters/sponsor-tariff" element={<SponsorTariff />} />
-              <Route path="masters/chart-of-accounts" element={<ChartOfAccounts />} />
-              <Route path="transactions/journal-vouchers" element={<JournalVouchers />} />
-              <Route path="transactions/refund" element={<Refund />} />
+              <Route path="billing" element={<ScreenGuard screenCode="FIN_BILLING"><Billing /></ScreenGuard>} />
+              <Route path="masters/organization" element={<ScreenGuard screenCode="FIN_ORG"><OrganizationMaster /></ScreenGuard>} />
+              <Route path="masters/plan-definition" element={<ScreenGuard screenCode="FIN_PLAN"><PlanDefinition /></ScreenGuard>} />
+              <Route path="masters/sponsor-tariff" element={<ScreenGuard screenCode="FIN_TARIFF"><SponsorTariff /></ScreenGuard>} />
+              <Route path="masters/chart-of-accounts" element={<ScreenGuard screenCode="FIN_COA"><ChartOfAccounts /></ScreenGuard>} />
+              <Route path="transactions/journal-vouchers" element={<ScreenGuard screenCode="FIN_JV"><JournalVouchers /></ScreenGuard>} />
+              <Route path="transactions/refund" element={<ScreenGuard screenCode="FIN_REFUND"><Refund /></ScreenGuard>} />
             </Route>
+
+            <Route path="rbac" element={<ScreenGuard screenCode="RBAC_CONFIG"><RbacConfig /></ScreenGuard>} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
@@ -151,16 +198,16 @@ const AppRoutes = () => {
           {/* LIMS layout routes */}
           <Route path="/lims" element={<PrivateRoute><LimsLayout /></PrivateRoute>}>
             <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<LimsDashboard />} />
-            <Route path="masters" element={<LimsMasters />} />
-            <Route path="amendments" element={<LimsAmendments />} />
-            <Route path="analytics" element={<LimsAnalytics />} />
-            <Route path="collect" element={<LimsCollectSample />} />
-            <Route path="collect/:orderId" element={<LimsCollectSample />} />
-            <Route path="accept" element={<LimsAcceptSample />} />
-            <Route path="accept/:orderId" element={<LimsAcceptSample />} />
-            <Route path="perform" element={<LimsPerformTest />} />
-            <Route path="perform/:orderId" element={<LimsPerformTest />} />
+            <Route path="dashboard" element={<ScreenGuard screenCode="LIMS_DASHBOARD"><LimsDashboard /></ScreenGuard>} />
+            <Route path="masters" element={<ScreenGuard screenCode="LIMS_MASTERS"><LimsMasters /></ScreenGuard>} />
+            <Route path="amendments" element={<ScreenGuard screenCode="LIMS_AMENDMENTS"><LimsAmendments /></ScreenGuard>} />
+            <Route path="analytics" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsAnalytics /></ScreenGuard>} />
+            <Route path="collect" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
+            <Route path="collect/:orderId" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
+            <Route path="accept" element={<ScreenGuard screenCode="LIMS_ACCEPT"><LimsAcceptSample /></ScreenGuard>} />
+            <Route path="accept/:orderId" element={<ScreenGuard screenCode="LIMS_ACCEPT"><LimsAcceptSample /></ScreenGuard>} />
+            <Route path="perform" element={<ScreenGuard screenCode="LIMS_PERFORM"><LimsPerformTest /></ScreenGuard>} />
+            <Route path="perform/:orderId" element={<ScreenGuard screenCode="LIMS_PERFORM"><LimsPerformTest /></ScreenGuard>} />
           </Route>
         </Routes>
     );

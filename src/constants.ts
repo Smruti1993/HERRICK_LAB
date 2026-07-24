@@ -1,4 +1,4 @@
-import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill, ShoppingCart, Award } from 'lucide-react';
+import { Home, Users, Calendar, Settings, Clock, Activity, Database, CreditCard, Stethoscope, FileBarChart, Package, Pill, ShoppingCart, Award, Shield } from 'lucide-react';
 
 export const APP_NAME = "MediCore HMS";
 
@@ -168,6 +168,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
 
   { label: 'Connection', path: '/connection', icon: Database, category: 'System' },
+  { label: 'RBAC Control', path: '/rbac', icon: Shield, category: 'System' },
 ];
 
 export const MOCK_DEPARTMENTS = [
