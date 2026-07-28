@@ -107,6 +107,7 @@ export const GRNPage: React.FC = () => {
   const [modalQuantity, setModalQuantity] = useState(1);
   const [modalRate, setModalRate] = useState(0);
   const [modalBatchCode, setModalBatchCode] = useState('');
+  const [modalQcStatus, setModalQcStatus] = useState<'Pending' | 'Passed' | 'Failed'>('Passed');
   const [modalExpiryDate, setModalExpiryDate] = useState('');
   const [modalLocator, setModalLocator] = useState('MAIN-01');
 
@@ -271,6 +272,7 @@ export const GRNPage: React.FC = () => {
           itemName: pi.itemName || item?.itemName || 'Unknown Item',
           locator: 'MAIN-01',
           batchCode: `B-${Date.now().toString().slice(-4)}`,
+          qcStatus: 'Passed' as const,
           expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           poQuantity: qty,
           receivedQuantity: qty,
@@ -417,6 +419,7 @@ export const GRNPage: React.FC = () => {
       itemCode: selectedItem.itemCode,
       locator: modalLocator,
       batchCode: modalBatchCode.toUpperCase(),
+      qcStatus: modalQcStatus,
       expiryDate: modalExpiryDate,
       poQuantity: 0,
       receivedQuantity: qty,
@@ -445,6 +448,7 @@ export const GRNPage: React.FC = () => {
     setItemSearchQuery('');
     setModalBatchCode('');
     setModalExpiryDate('');
+    setModalQcStatus('Passed');
     
     showToast('success', `${selectedItem.itemName} added to GRN list.`);
   };
@@ -1265,6 +1269,7 @@ export const GRNPage: React.FC = () => {
                           <th className="py-2.5 px-3">Batch Code</th>
                           <th className="py-2.5 px-3">Batch Date</th>
                           <th className="py-2.5 px-3">Expiry Date</th>
+                          <th className="py-2.5 px-3">QC Status</th>
                           <th className="py-2.5 px-3 text-center">PO Qty</th>
                           <th className="py-2.5 px-3 text-center">Received Qty</th>
                           <th className="py-2.5 px-3 text-center">Accepted Qty</th>
@@ -1327,6 +1332,17 @@ export const GRNPage: React.FC = () => {
                                 onChange={(e) => updateItemRow(idx, 'expiryDate', e.target.value)}
                               />
                             </td>
+                            <td className="py-3 px-3">
+                               <select
+                                 className="px-2 py-1 border border-slate-200 rounded-lg outline-none text-xs focus:border-emerald-500 font-semibold"
+                                 value={i.qcStatus || 'Passed'}
+                                 onChange={(e) => updateItemRow(idx, 'qcStatus', e.target.value as any)}
+                               >
+                                 <option value="Passed">Passed</option>
+                                 <option value="Pending">Pending</option>
+                                 <option value="Failed">Failed</option>
+                               </select>
+                             </td>
                             <td className="py-3 px-3 text-center font-bold text-slate-500">{i.poQuantity || 0}</td>
                             <td className="py-3 px-3 text-center">
                               <input 
@@ -1669,6 +1685,18 @@ export const GRNPage: React.FC = () => {
                     value={modalLocator}
                     onChange={(e) => setModalLocator(e.target.value)}
                   />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">QC Status</label>
+                  <select
+                    className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-700 font-semibold text-sm outline-none focus:ring-2 focus:ring-emerald-500 transition-all appearance-none"
+                    value={modalQcStatus}
+                    onChange={(e) => setModalQcStatus(e.target.value as any)}
+                  >
+                    <option value="Passed">Passed</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Failed">Failed</option>
+                  </select>
                 </div>
               </div>
 

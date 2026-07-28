@@ -2,16 +2,23 @@ import { useState } from 'react';
 import { ItemMaster } from '../components/inventory/ItemMaster';
 import { StoreMaster } from '../components/inventory/StoreMaster';
 import { ItemStoreMapping } from '../components/inventory/ItemStoreMapping';
-import { LayoutDashboard, FileText, PackageSearch, Store, MapPin } from 'lucide-react';
+import { StockTransfer } from '../components/inventory/StockTransfer';
+import { LayoutDashboard, FileText, PackageSearch, Store, MapPin, ArrowLeftRight } from 'lucide-react';
 
 export const Inventory = () => {
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'master' | 'store' | 'mapping'>('master');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'master' | 'store' | 'mapping' | 'transfer'>('master');
 
     const navigation = [
         {
             group: 'Inventory',
             items: [
                 { id: 'dashboard', label: 'Dashboard / Overview', icon: LayoutDashboard },
+            ]
+        },
+        {
+            group: 'Operations',
+            items: [
+                { id: 'transfer', label: 'Stock Transfer', icon: ArrowLeftRight },
             ]
         },
         {
@@ -98,6 +105,7 @@ export const Inventory = () => {
                         {activeTab === 'master' && <ItemMaster />}
                         {activeTab === 'store' && <StoreMaster />}
                         {activeTab === 'mapping' && <ItemStoreMapping />}
+                        {activeTab === 'transfer' && <StockTransfer />}
                     </div>
                 </div>
             </div>

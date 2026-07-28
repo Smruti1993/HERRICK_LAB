@@ -187,6 +187,39 @@ router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
 
     const fromStatus = currentOrder.status;
 
+    // --- REAGENT DEDUCTION & REVERSAL LOGIC ---
+    if (targetStatus === 'Certified') {
+      const { data: deductResult, error: deductError } = await supabase.rpc('process_reagent_deduction', {
+        p_lab_order_id: labOrderId,
+        p_performed_by: userId,
+        p_override: comments ? true : false,
+        p_override_reason: comments || null
+      });
+      
+      if (deductError) {
+        console.error('Reagent deduction failed:', deductError);
+        res.status(400).json({ 
+          error: deductError.message, 
+          code: 'SHORTFALL', 
+          details: deductError.details 
+        });
+        return;
+      }
+    }
+
+    if (fromStatus === 'Certified' && targetStatus !== 'Certified') {
+      const { data: reverseResult, error: reverseError } = await supabase.rpc('process_reagent_reversal', {
+        p_lab_order_id: labOrderId,
+        p_performed_by: userId
+      });
+      
+      if (reverseError) {
+        console.error('Reagent reversal failed:', reverseError);
+        res.status(400).json({ error: `Reagent reversal failed: ${reverseError.message}` });
+        return;
+      }
+    }
+
     // Prep update fields depending on transition target
     const updateFields: any = { status: targetStatus };
     const now = new Date().toISOString();

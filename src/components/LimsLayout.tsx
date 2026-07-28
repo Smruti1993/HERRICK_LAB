@@ -13,7 +13,8 @@ import {
   Sliders, 
   Grid, 
   LogOut,
-  ArrowLeft
+  ArrowLeft,
+  Beaker
 } from 'lucide-react';
 
 export default function LimsLayout() {
@@ -193,6 +194,30 @@ export default function LimsLayout() {
                     <div className="flex items-center gap-3">
                       <FileText className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
                       <span>Report</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
+                  </>
+                )}
+              </NavLink>
+            )}
+
+            {/* Reagent Inventory Dashboard Link */}
+            {hasAccess('LIMS_ANALYTICS') && (
+              <NavLink
+                to="/lims/reagents-dashboard"
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    isActive 
+                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <Beaker className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
+                      <span>Reagent Inventory</span>
                     </div>
                     <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
                   </>

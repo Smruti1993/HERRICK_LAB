@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
+
 import { LimsLabOrder, LimsSpecimen, LimsContainer, LimsServiceParameter } from '../types';
 import { 
   Activity, 
@@ -777,6 +778,7 @@ export default function LimsDashboard() {
         </div>
 
       </div>
+
 
       {/* 12 Grid Action Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl">

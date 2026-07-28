@@ -6,7 +6,7 @@ import {
   VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund,
   Role, Screen, Privilege,
   LoyaltyProgramConfig, LoyaltyTier, LoyaltyRedemptionRules, LoyaltyBonusRule, LoyaltyAccount, LoyaltyTransaction, LoyaltyAccountLookupResult, LoyaltyRedemptionCalc,
-  PharmacyZone, PharmacyRack, InventoryBatchLocation
+  PharmacyZone, PharmacyRack, InventoryBatchLocation, LabServiceReagent, LabReagentConsumptionLog
 } from '../types';
 import { 
     getSupabase, 
@@ -92,6 +92,12 @@ interface DataContextType {
   storeItemMappings: StoreItemMapping[];
   saveStoreItemMapping: (mapping: StoreItemMapping) => Promise<void>;
   deleteStoreItemMapping: (id: string) => Promise<void>;
+
+  reagentsMapping: LabServiceReagent[];
+  fetchReagentMappings: (serviceId?: string) => Promise<void>;
+  saveReagentMapping: (mapping: LabServiceReagent) => Promise<boolean>;
+  deleteReagentMapping: (id: string) => Promise<boolean>;
+  fetchReagentConsumptionLog: (labOrderId: string) => Promise<LabReagentConsumptionLog[]>;
 
   openingStocks: OpeningStock[];
   saveOpeningStock: (stock: OpeningStock) => Promise<void>;
@@ -336,6 +342,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [drugGenerics, setDrugGenerics] = useState<DrugGeneric[]>([]);
   const [drugMasters, setDrugMasters] = useState<DrugMaster[]>([]);
   const [patientDocuments, setPatientDocuments] = useState<PatientDocument[]>([]);
+  const [reagentsMapping, setReagentsMapping] = useState<LabServiceReagent[]>([]);
   const [vitalSignGroups, setVitalSignGroups] = useState<VitalSignGroup[]>([
     { id: 'vsg-1', name: 'Vital Sign', status: 'Active' }
   ]);
@@ -844,6 +851,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isApprovalRequired: i.is_approval_required,
     isInsuranceCover: i.is_insurance_cover,
     drugSubGroups: i.drug_sub_groups,
+    storageCondition: i.storage_condition,
     purchaseUom: i.purchase_uom,
     salesUom: i.sales_uom,
     purchaseConversionFactor: Number(i.purchase_conversion_factor || 1),
@@ -870,6 +878,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     branchName: s.branches?.name || s.branch_name, // Support join or denormalized
     status: s.status,
     isActive: s.is_active,
+    storeType: s.store_type,
+    departmentId: s.department_id,
     createdAt: s.created_at
   });
 
@@ -879,7 +889,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     store_name: s.storeName,
     branch_id: s.branchId,
     status: s.status,
-    is_active: s.isActive
+    is_active: s.isActive,
+    store_type: s.storeType || null,
+    department_id: s.departmentId || null
   });
 
   const mapStoreMappingFromDb = (m: any): StoreItemMapping => ({
@@ -923,6 +935,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     is_approval_required: i.isApprovalRequired,
     is_insurance_cover: i.isInsuranceCover,
     drug_sub_groups: i.drugSubGroups,
+    storage_condition: i.storageCondition || null,
     purchase_uom: i.purchaseUom,
     sales_uom: i.salesUom,
     purchase_conversion_factor: i.purchaseConversionFactor || 1,
@@ -1177,7 +1190,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       igstAmount: Number(i.igst_amount || 0),
       totalAmount: Number(i.total_amount || 0),
       remarks: i.remarks,
-      isBulky: !!i.is_bulky
+      isBulky: !!i.is_bulky,
+      qcStatus: i.qc_status || 'Passed'
     })),
     invoiceNo: g.invoice_no || undefined,
     createdAt: g.created_at
@@ -3501,7 +3515,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               igst_amount: i.igstAmount || 0,
               total_amount: i.totalAmount,
               remarks: i.remarks || null,
-              is_bulky: !!i.isBulky
+              is_bulky: !!i.isBulky,
+              qc_status: i.qcStatus || 'Passed'
             }));
             const { error: itemsError } = await supabase.from('procurement_grn_items').insert(dbItems);
             if (itemsError) throw itemsError;
@@ -5519,6 +5534,133 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (error) {
         showToast('error', 'Failed to remove mapping.');
         if (original) setStoreItemMappings(prev => [...prev, original]);
+    }
+  };
+
+  const fetchReagentMappings = async (serviceId?: string) => {
+    if (!requireDb()) return;
+    const supabase = getSupabase();
+    try {
+      let query = supabase
+        .from('lab_service_reagents')
+        .select(`
+          id,
+          service_id,
+          item_id,
+          store_id,
+          quantity_per_test,
+          unit_id,
+          is_mandatory,
+          inventory_items(item_name, item_code),
+          stores(store_name),
+          units(code)
+        `);
+      if (serviceId) {
+        query = query.eq('service_id', serviceId);
+      }
+      const { data, error } = await query;
+      if (error) {
+        showToast('error', `Failed to fetch reagent mappings: ${error.message}`);
+      } else {
+        const mappings: LabServiceReagent[] = (data || []).map((r: any) => ({
+          id: r.id,
+          serviceId: r.service_id,
+          itemId: r.item_id,
+          storeId: r.store_id,
+          quantityPerTest: Number(r.quantity_per_test || 0),
+          unitId: r.unit_id,
+          isMandatory: !!r.is_mandatory,
+          itemName: r.inventory_items?.item_name,
+          itemCode: r.inventory_items?.item_code,
+          storeName: r.stores?.store_name,
+          unitCode: r.units?.code
+        }));
+        setReagentsMapping(mappings);
+      }
+    } catch (err: any) {
+      console.error('Error fetching reagent mappings:', err);
+    }
+  };
+
+  const saveReagentMapping = async (mapping: LabServiceReagent): Promise<boolean> => {
+    if (!requireDb()) return false;
+    const supabase = getSupabase();
+    try {
+      const payload = {
+        id: mapping.id || undefined,
+        service_id: mapping.serviceId,
+        item_id: mapping.itemId,
+        store_id: mapping.storeId,
+        quantity_per_test: mapping.quantityPerTest,
+        unit_id: mapping.unitId,
+        is_mandatory: mapping.isMandatory
+      };
+      const { error } = await supabase.from('lab_service_reagents').upsert(payload);
+      if (error) {
+        showToast('error', `Failed to save reagent mapping: ${error.message}`);
+        return false;
+      }
+      showToast('success', 'Reagent mapping saved.');
+      await fetchReagentMappings(mapping.serviceId);
+      return true;
+    } catch (err: any) {
+      showToast('error', `Error saving mapping: ${err.message}`);
+      return false;
+    }
+  };
+
+  const deleteReagentMapping = async (id: string): Promise<boolean> => {
+    if (!requireDb()) return false;
+    const supabase = getSupabase();
+    try {
+      const originalMapping = reagentsMapping.find(r => r.id === id);
+      const serviceId = originalMapping?.serviceId;
+      const { error } = await supabase.from('lab_service_reagents').delete().eq('id', id);
+      if (error) {
+        showToast('error', `Failed to delete reagent mapping: ${error.message}`);
+        return false;
+      }
+      showToast('info', 'Reagent mapping removed.');
+      if (serviceId) {
+        await fetchReagentMappings(serviceId);
+      }
+      return true;
+    } catch (err: any) {
+      showToast('error', `Error deleting mapping: ${err.message}`);
+      return false;
+    }
+  };
+
+  const fetchReagentConsumptionLog = async (labOrderId: string): Promise<LabReagentConsumptionLog[]> => {
+    if (!requireDb()) return [];
+    const supabase = getSupabase();
+    try {
+      const { data, error } = await supabase
+        .from('lab_reagent_consumption_log')
+        .select('*')
+        .eq('lab_order_id', labOrderId)
+        .order('created_at', { ascending: true });
+      if (error) {
+        console.error('Error fetching reagent log:', error);
+        return [];
+      }
+      return (data || []).map((l: any) => ({
+        id: l.id,
+        labOrderId: l.lab_order_id,
+        serviceId: l.service_id,
+        itemId: l.item_id,
+        storeId: l.store_id,
+        quantityDeducted: Number(l.quantity_deducted || 0),
+        ledgerRefId: l.ledger_ref_id,
+        action: l.action,
+        reversedByLogId: l.reversed_by_log_id,
+        overrideReason: l.override_reason,
+        performedBy: l.performed_by,
+        createdAt: l.created_at
+      }));
+    } catch (err: any) {
+      console.error('Exception in fetchReagentConsumptionLog:', err);
+      return [];
     }
   };
 
@@ -7623,6 +7765,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       inventoryItems, saveInventoryItem, uploadInventoryItems, branches, saveBranch, deleteBranch,
       stores, saveStore, deleteStore,
       storeItemMappings, saveStoreItemMapping, deleteStoreItemMapping,
+      reagentsMapping, fetchReagentMappings, saveReagentMapping, deleteReagentMapping, fetchReagentConsumptionLog,
       openingStocks, saveOpeningStock, fetchStockLedger, fetchDashboardMetrics,
       saveDirectSale, fetchDirectSales, fetchBatchDetails, repairPh000006, processPharmacyReturn, fetchBillItems,
       prescriptions, savePrescription, dispensePrescription,

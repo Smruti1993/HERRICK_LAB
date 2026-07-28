@@ -4,7 +4,7 @@ import { Store } from '../../types';
 import { Plus, Search, X, Edit2, Trash2, Save, Building2 } from 'lucide-react';
 
 export const StoreMaster = () => {
-    const { stores, saveStore, deleteStore, branches, showToast } = useData();
+    const { stores, saveStore, deleteStore, branches, showToast, departments } = useData();
     const [searchTerm, setSearchTerm] = useState('');
     const [showForm, setShowForm] = useState(false);
     
@@ -14,7 +14,9 @@ export const StoreMaster = () => {
         storeName: '',
         branchId: '',
         status: 'Active',
-        isActive: true
+        isActive: true,
+        storeType: 'CENTRAL',
+        departmentId: ''
     };
 
     const [form, setForm] = useState<Store>(initialForm);
@@ -85,6 +87,8 @@ export const StoreMaster = () => {
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Store Code</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Store Name</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Hospital / Branch</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Store Type</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Department</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Actions</th>
                             </tr>
@@ -92,7 +96,7 @@ export const StoreMaster = () => {
                         <tbody className="divide-y divide-slate-50">
                             {filteredStores.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">
+                                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400 italic">
                                         No stores found. Get started by adding your first store!
                                     </td>
                                 </tr>
@@ -112,6 +116,20 @@ export const StoreMaster = () => {
                                                 <Building2 className="w-4 h-4 text-slate-400" />
                                                 {store.branchName || 'Not Assigned'}
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                                                store.storeType === 'CENTRAL' 
+                                                    ? 'bg-blue-50 text-blue-600 border border-blue-100'
+                                                    : store.storeType === 'SUB_STORE'
+                                                    ? 'bg-violet-50 text-violet-600 border border-violet-100'
+                                                    : 'bg-amber-50 text-amber-600 border border-amber-100'
+                                            }`}>
+                                                {store.storeType || 'CENTRAL'}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-slate-600">
+                                            {departments.find(d => d.id === store.departmentId)?.name || 'Not Applicable'}
                                         </td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
@@ -212,6 +230,36 @@ export const StoreMaster = () => {
                                             <option key={b.id} value={b.id}>{b.name}</option>
                                         ))}
                                     </select>
+                                </div>
+
+                                {/* Store Type & Department selection */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Store Type *</label>
+                                        <select 
+                                            required
+                                            className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"
+                                            value={form.storeType || 'CENTRAL'}
+                                            onChange={e => setForm({ ...form, storeType: e.target.value as any })}
+                                        >
+                                            <option value="CENTRAL">Central</option>
+                                            <option value="SUB_STORE">Sub-Store</option>
+                                            <option value="PHARMACY">Pharmacy</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Department</label>
+                                        <select 
+                                            className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all appearance-none"
+                                            value={form.departmentId || ''}
+                                            onChange={e => setForm({ ...form, departmentId: e.target.value })}
+                                        >
+                                            <option value="">Select Department (Optional)</option>
+                                            {departments.map(d => (
+                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4 pt-2">

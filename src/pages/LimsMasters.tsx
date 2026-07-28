@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabase } from '../services/supabaseClient';
+import { ReagentsMappingSubtab } from '../components/lims/ReagentsMappingSubtab';
 import {
   LimsSpecimen,
   LimsContainer,
@@ -20,7 +21,7 @@ import {
 } from 'lucide-react';
 
 type MainTab = 'services' | 'specimens' | 'containers' | 'equipment' | 'microbiology' | 'outsource';
-type ServiceSubTab = 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat';
+type ServiceSubTab = 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat' | 'reagents';
 
 const RESULT_TYPES = ['Numeric', 'Alphanumeric', 'Template', 'Parameter', 'Form'] as const;
 
@@ -153,7 +154,28 @@ export default function LimsMasters() {
       setRanges([]);
       setParamOptions([]);
       setIsAddingService(false);
-      const rt = (selectedService.result_type || 'Numeric') as typeof RESULT_TYPES[number];
+
+      // Fetch LIMS service config details
+      const { data: configData } = await supabase
+        .from('lims_service_configs')
+        .select('*')
+        .eq('service_id', selectedService.id)
+        .maybeSingle();
+
+      const config = configData || {
+        result_type: 'Numeric',
+        clinical_significance: '',
+        patient_instruction: '',
+        phlebotomist_instruction: '',
+        technician_instruction: '',
+        gender_wise: false,
+        age_range_wise: false,
+        delta_check: false,
+        is_result_mandatory: true,
+        is_derived: false
+      };
+
+      const rt = (config.result_type || 'Numeric') as typeof RESULT_TYPES[number];
       
       setServiceForm({
         code: selectedService.code || '',
@@ -205,17 +227,17 @@ export default function LimsMasters() {
       fetchRefRemarks(selectedService.id);
       setLabDetails({
         resultType: rt,
-        clinicalSignificance: selectedService.clinical_significance || '',
+        clinicalSignificance: config.clinical_significance || '',
         investigationDescription: selectedService.cpt_description || '',
-        patientInstruction: selectedService.patient_instruction || '',
-        phlebotomistInstruction: selectedService.phlebotomist_instruction || '',
-        technicianInstruction: selectedService.technician_instruction || '',
+        patientInstruction: config.patient_instruction || '',
+        phlebotomistInstruction: config.phlebotomist_instruction || '',
+        technicianInstruction: config.technician_instruction || '',
         shortName: selectedService.alternate_name || '',
-        genderWise: !!selectedService.gender_wise,
-        ageRangeWise: !!selectedService.age_range_wise,
-        deltaCheck: !!selectedService.delta_check,
-        isResultMandatory: selectedService.is_result_mandatory !== false,
-        isDerived: !!selectedService.is_derived,
+        genderWise: !!config.gender_wise,
+        ageRangeWise: !!config.age_range_wise,
+        deltaCheck: !!config.delta_check,
+        isResultMandatory: config.is_result_mandatory !== false,
+        isDerived: !!config.is_derived,
       });
     };
     load();
@@ -331,11 +353,15 @@ export default function LimsMasters() {
       billing_group_name: serviceForm.billingGroupName,
       financial_group: serviceForm.financialGroup,
       cpt_description: serviceForm.cptDescription || null,
-      special_instructions: serviceForm.specialInstructions || null,
-      result_type: serviceForm.resultType
+      special_instructions: serviceForm.specialInstructions || null
     };
     const { error } = await supabase.from('service_definitions').insert(payload);
     if (!error) {
+      // Create defaults in lims_service_configs
+      await supabase.from('lims_service_configs').insert({
+        service_id: payload.id,
+        result_type: serviceForm.resultType
+      });
       alert('Service master created successfully!');
       fetchServices();
       // Select the newly created service immediately
@@ -379,11 +405,15 @@ export default function LimsMasters() {
       billing_group_name: serviceForm.billingGroupName,
       financial_group: serviceForm.financialGroup,
       cpt_description: serviceForm.cptDescription || null,
-      special_instructions: serviceForm.specialInstructions || null,
-      result_type: serviceForm.resultType
+      special_instructions: serviceForm.specialInstructions || null
     }).eq('id', selectedService.id);
 
     if (!error) {
+      // Upsert result_type in lims_service_configs
+      await supabase.from('lims_service_configs').upsert({
+        service_id: selectedService.id,
+        result_type: serviceForm.resultType
+      });
       alert('Service master details updated successfully!');
       fetchServices();
     } else {
@@ -592,11 +622,23 @@ export default function LimsMasters() {
 
   const handleSaveLabDetails = async () => {
     if (!selectedService) return;
-    const { error } = await supabase.from('service_definitions').update({
-      result_type: labDetails.resultType,
+
+    // A. Update core fields on service_definitions
+    const { error: coreError } = await supabase.from('service_definitions').update({
       alternate_name: labDetails.shortName || null,
-      clinical_significance: labDetails.clinicalSignificance || null,
       cpt_description: labDetails.investigationDescription || null,
+    }).eq('id', selectedService.id);
+
+    if (coreError) {
+      alert('Error saving core details: ' + coreError.message);
+      return;
+    }
+
+    // B. Upsert LIMS config details
+    const { error: configError } = await supabase.from('lims_service_configs').upsert({
+      service_id: selectedService.id,
+      result_type: labDetails.resultType,
+      clinical_significance: labDetails.clinicalSignificance || null,
       patient_instruction: labDetails.patientInstruction || null,
       phlebotomist_instruction: labDetails.phlebotomistInstruction || null,
       technician_instruction: labDetails.technicianInstruction || null,
@@ -605,9 +647,9 @@ export default function LimsMasters() {
       delta_check: labDetails.deltaCheck,
       is_result_mandatory: labDetails.isResultMandatory,
       is_derived: labDetails.isDerived
-    }).eq('id', selectedService.id);
+    });
 
-    if (!error) {
+    if (!configError) {
       alert('Lab details saved successfully!');
       const updatedService = {
         ...selectedService,
@@ -627,7 +669,7 @@ export default function LimsMasters() {
       setSelectedService(updatedService);
       setServices(prev => prev.map(s => s.id === selectedService.id ? updatedService : s));
     } else {
-      alert('Error saving lab details: ' + error.message);
+      alert('Error saving LIMS configs: ' + configError.message);
     }
   };
 
@@ -738,6 +780,7 @@ export default function LimsMasters() {
     { id: 'remarks', label: 'Reference Range Remarks' },
     { id: 'alphanumeric', label: 'Alphanumeric Results', disabled: !isAlphanumericType && !(isParameterType) },
     { id: 'tat', label: 'Turnaround Time' },
+    { id: 'reagents', label: 'Reagents Mapped' },
   ];
 
   return (
@@ -1903,6 +1946,10 @@ export default function LimsMasters() {
                           )}
                           <p className="text-xxs text-slate-400">TAT column will be added to the lims_service_parameters table in a future migration.</p>
                         </div>
+                      )}
+
+                      {serviceSubTab === 'reagents' && (
+                        <ReagentsMappingSubtab selectedService={selectedService} />
                       )}
                     </div>
                   </div>

@@ -18,6 +18,7 @@ import { Reports } from './pages/Reports';
 import { ItemMaster } from './components/inventory/ItemMaster';
 import { StoreMaster } from './components/inventory/StoreMaster';
 import { ItemStoreMapping } from './components/inventory/ItemStoreMapping';
+import { StockTransfer } from './components/inventory/StockTransfer';
 import { OpeningStockPage } from './components/inventory/OpeningStock';
 import { StockLedgerReport } from './components/inventory/reports/StockLedger';
 import { InventoryDashboard } from './components/inventory/InventoryDashboard';
@@ -50,6 +51,7 @@ import LimsMasters from './pages/LimsMasters';
 import LimsDashboard from './pages/LimsDashboard';
 import LimsAmendments from './pages/LimsAmendments';
 import LimsAnalytics from './pages/LimsAnalytics';
+import LimsReagentsDashboard from './pages/LimsReagentsDashboard';
 import LimsLayout from './components/LimsLayout';
 import LimsCollectSample from './pages/LimsCollectSample';
 import LimsAcceptSample from './pages/LimsAcceptSample';
@@ -149,6 +151,7 @@ const AppRoutes = () => {
               } />
               <Route path="reports/stock-ledger" element={<StockLedgerReport />} />
               <Route path="opening-stock" element={<OpeningStockPage />} />
+              <Route path="stock-transfer" element={<StockTransfer />} />
               <Route path="masters" element={<Navigate to="/inventory/item-master" replace />} />
               <Route path="item-master" element={<ItemMaster />} />
               <Route path="store-master" element={<StoreMaster />} />
@@ -202,6 +205,7 @@ const AppRoutes = () => {
             <Route path="masters" element={<ScreenGuard screenCode="LIMS_MASTERS"><LimsMasters /></ScreenGuard>} />
             <Route path="amendments" element={<ScreenGuard screenCode="LIMS_AMENDMENTS"><LimsAmendments /></ScreenGuard>} />
             <Route path="analytics" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsAnalytics /></ScreenGuard>} />
+            <Route path="reagents-dashboard" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsReagentsDashboard /></ScreenGuard>} />
             <Route path="collect" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="collect/:orderId" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="accept" element={<ScreenGuard screenCode="LIMS_ACCEPT"><LimsAcceptSample /></ScreenGuard>} />

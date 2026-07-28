@@ -484,6 +484,8 @@ export interface Store {
   branchName?: string;
   status: 'Active' | 'Inactive';
   isActive: boolean;
+  storeType?: 'CENTRAL' | 'SUB_STORE' | 'PHARMACY';
+  departmentId?: string;
   createdAt?: string;
 }
 
@@ -522,6 +524,7 @@ export interface InventoryItem {
   isApprovalRequired: boolean;
   isInsuranceCover: boolean;
   drugSubGroups?: string;
+  storageCondition?: 'Room temp' | 'Refrigerated 2-8°C' | 'Frozen -20°C';
   
   // Accounts and Sales Info
   purchaseUom: string;
@@ -1056,6 +1059,7 @@ export interface GRNItem {
   totalAmount: number;
   remarks?: string;
   isBulky: boolean;
+  qcStatus?: 'Pending' | 'Passed' | 'Failed';
 }
 
 export interface GRN {
@@ -1618,6 +1622,35 @@ export interface InventoryBatchLocation {
   itemCode?:       string;
   locationDisplay?: string;      // 'Zone A › A1 › Shelf 2 › Bin 04'
   locationCode?:   string;       // 'A-A1-S2-B04'
+}
+
+export interface LabServiceReagent {
+  id: string;
+  serviceId: string;
+  itemId: string;
+  storeId: string;
+  quantityPerTest: number;
+  unitId: string;
+  isMandatory: boolean;
+  itemName?: string;
+  itemCode?: string;
+  storeName?: string;
+  unitCode?: string;
+}
+
+export interface LabReagentConsumptionLog {
+  id: string;
+  labOrderId: string;
+  serviceId: string;
+  itemId: string;
+  storeId: string;
+  quantityDeducted: number;
+  ledgerRefId?: string;
+  action: 'DEDUCT' | 'REVERSE' | 'OVERRIDE_DEDUCT';
+  reversedByLogId?: string;
+  overrideReason?: string;
+  performedBy?: string;
+  createdAt?: string;
 }
 
 

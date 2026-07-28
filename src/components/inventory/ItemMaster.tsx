@@ -41,6 +41,7 @@ export const ItemMaster = () => {
         isApprovalRequired: true,
         isInsuranceCover: true,
         drugSubGroups: '',
+        storageCondition: 'Room temp',
         purchaseUom: 'EACH',
         salesUom: 'EACH',
         purchaseConversionFactor: 1,
@@ -416,6 +417,20 @@ export const ItemMaster = () => {
                                         onChange={e => setForm({ ...form, gtin: e.target.value })}
                                     />
                                 </div>
+                                {form.itemCategory?.toLowerCase() === 'reagent' && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Storage Condition</label>
+                                        <select
+                                            className="w-full h-10 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                            value={form.storageCondition || 'Room temp'}
+                                            onChange={e => setForm({ ...form, storageCondition: e.target.value as any })}
+                                        >
+                                            <option value="Room temp">Room temp</option>
+                                            <option value="Refrigerated 2-8°C">Refrigerated 2-8°C</option>
+                                            <option value="Frozen -20°C">Frozen -20°C</option>
+                                        </select>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Checkboxes */}

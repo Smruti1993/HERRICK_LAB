@@ -42,6 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
     subItems: [
       { label: 'Dashboard / Overview', path: '/inventory/dashboard' },
       { label: 'Opening Stock', path: '/inventory/opening-stock' },
+      { label: 'Stock Transfer', path: '/inventory/stock-transfer' },
       { 
         label: 'Reports', 
         path: '/inventory/reports',
