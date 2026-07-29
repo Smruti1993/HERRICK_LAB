@@ -163,40 +163,39 @@ export default function LimsReagentsDashboard() {
         return;
       }
 
-      // 2. Fetch ledger rows ordered by created_at so the last row per batch = latest closing_stock
+      // 2. Fetch ALL ledger rows for these store+item combos (no ordering needed)
       const storeIds = Array.from(new Set(mappings.map((m: any) => m.store_id)));
       const itemIds  = Array.from(new Set(mappings.map((m: any) => m.item_id)));
 
       const { data: ledgerRaw } = await supabase
         .from('inventory_stock_ledger')
-        .select('store_id, item_id, batch_no, expiry_date, stock_in_quantity, stock_out_quantity, closing_stock')
+        .select('store_id, item_id, batch_no, expiry_date, stock_in_quantity, stock_out_quantity')
         .in('store_id', storeIds)
-        .in('item_id', itemIds)
-        .order('created_at', { ascending: true });
+        .in('item_id', itemIds);
 
       const ledger = ledgerRaw || [];
 
-      // 3. Build lot map — use closing_stock (written by backend on every transaction) as the
-      //    authoritative balance. Because rows are ordered ascending, the last row per batch
-      //    always has the most up-to-date closing_stock.
+      // 3. Aggregate balances per store+item+batch using SUM(in) - SUM(out).
+      //    IMPORTANT: closing_stock is the running total across ALL batches combined,
+      //    not per-batch. Using it per-batch would double-count. We must compute
+      //    batch-level balance from raw in/out quantities.
       type LotEntry = { batchNo: string; expiryDate: string | null; balance: number };
       const lotsMap: Record<string, LotEntry[]> = {};
 
       for (const row of ledger) {
-        const key = `${row.store_id}__${row.item_id}`;
+        const key      = `${row.store_id}__${row.item_id}`;
         if (!lotsMap[key]) lotsMap[key] = [];
         const batchKey = row.batch_no || '';
-        // Prefer closing_stock; fall back to computed net if closing_stock is null
-        const closingStock = row.closing_stock != null ? Number(row.closing_stock) : null;
-        const netMove      = Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0);
+        const netMove  = Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0);
         const existing = lotsMap[key].find(l => l.batchNo === batchKey);
         if (existing) {
-          existing.balance = closingStock !== null ? closingStock : existing.balance + netMove;
+          // Accumulate across all rows for this batch
+          existing.balance += netMove;
         } else {
           lotsMap[key].push({
-            batchNo: batchKey,
-            expiryDate: row.expiry_date || null,
-            balance: closingStock !== null ? closingStock : netMove,
+            batchNo:     batchKey,
+            expiryDate:  row.expiry_date || null,
+            balance:     netMove,
           });
         }
       }
