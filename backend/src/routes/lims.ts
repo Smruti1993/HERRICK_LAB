@@ -166,11 +166,22 @@ router.get('/orders', async (req: AuthenticatedRequest, res: Response) => {
 // 3. Status Transition Endpoint
 router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { labOrderId, targetStatus, userId, comments } = req.body;
+    const { labOrderId, targetStatus, userId, comments, overrideReason } = req.body;
 
     if (!labOrderId || !targetStatus || !userId) {
       res.status(400).json({ error: 'Missing labOrderId, targetStatus or userId' });
       return;
+    }
+
+    // --- OVERRIDE REASON VALIDATION ---
+    // If an override reason is provided, enforce minimum length (5 non-whitespace chars).
+    // This prevents empty/whitespace/placeholder reasons from bypassing the mandatory stock check.
+    if (overrideReason !== undefined && overrideReason !== null) {
+      const trimmed = String(overrideReason).trim();
+      if (trimmed.length < 5) {
+        res.status(400).json({ error: 'An override reason of at least 5 characters is required to certify without sufficient stock.' });
+        return;
+      }
     }
 
     // Get current order status
@@ -189,11 +200,16 @@ router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
 
     // --- REAGENT DEDUCTION & REVERSAL LOGIC ---
     if (targetStatus === 'Certified') {
+      // p_override is ONLY true when a dedicated, validated overrideReason is present.
+      // The old 'comments' field is intentionally NOT used to trigger overrides.
+      const validatedOverrideReason = overrideReason ? String(overrideReason).trim() : null;
+      const isOverride = validatedOverrideReason !== null && validatedOverrideReason.length >= 5;
+
       const { data: deductResult, error: deductError } = await supabase.rpc('process_reagent_deduction', {
         p_lab_order_id: labOrderId,
         p_performed_by: userId,
-        p_override: comments ? true : false,
-        p_override_reason: comments || null
+        p_override: isOverride,
+        p_override_reason: isOverride ? validatedOverrideReason : null
       });
       
       if (deductError) {
@@ -262,14 +278,18 @@ router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
 
     if (updateErr) throw updateErr;
 
-    // Audit Log Row
+    // Audit Log Row — use comments for non-certify transitions; for certify use overrideReason if provided
+    const auditNote = targetStatus === 'Certified' && overrideReason
+      ? `Certified with supervisor override: ${String(overrideReason).trim()}`
+      : comments;
+
     await logAuditTrail(
       labOrderId,
       fromStatus,
       targetStatus,
       `Transition to ${targetStatus}`,
       userId,
-      comments
+      auditNote
     );
 
     res.json({ success: true, fromStatus, toStatus: targetStatus });
@@ -278,6 +298,7 @@ router.post('/transition', async (req: AuthenticatedRequest, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // 4. Save test results & Auto-flagging ranges engine
 router.post('/results/save', async (req: AuthenticatedRequest, res: Response) => {

@@ -1,0 +1,20 @@
+# Dependency directories
+node_modules/
+backend/node_modules/
+
+# Build outputs
+dist/
+backend/dist/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+
+# Local/Scratch files
+scratch/
+
+# Supabase temp files
+supabase/.temp/

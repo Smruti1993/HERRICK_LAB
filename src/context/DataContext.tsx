@@ -3,7 +3,7 @@ import {
   Patient, Employee, Department, Unit, ServiceCentre, 
   DoctorAvailability, Appointment, ToastMessage, Bill, Payment,
   DoctorSchedule, ScheduleTemplate, SlotType,
-  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund,
+  VitalSign, Diagnosis, ClinicalNote, Allergy, NarrativeDiagnosis, MasterDiagnosis, DentalICD, ServiceDefinition, AppUser, ServiceTariff, ServiceOrder, ServiceLocationMapping, VitalSignGroup, VitalSignParameter, PatientDocument, InventoryItem, InventoryItemStock, InventoryItemPricing, Branch, Store, StoreItemMapping, OpeningStock, StockLedgerEntry, DashboardMetrics, DirectSale, Prescription, PrescriptionItem, DrugGeneric, DrugMaster, TaxMaster, ItemTaxMapping, Organization, OrganizationContact, SponsorTariff, Vendor, VendorTerm, PurchaseOrder, PurchaseOrderItem, GRN, GRNItem, PurchaseReceipt, PurchaseReceiptItem, PurchaseReturn, PurchaseReturnItem, ExpiryReturn, ExpiryReturnItem, ChartOfAccount, JournalVoucher, JournalVoucherItem, GSTR2BUpload, GSTR2BInvoice, Currency, PatientRefund,
   Role, Screen, Privilege,
   LoyaltyProgramConfig, LoyaltyTier, LoyaltyRedemptionRules, LoyaltyBonusRule, LoyaltyAccount, LoyaltyTransaction, LoyaltyAccountLookupResult, LoyaltyRedemptionCalc,
   PharmacyZone, PharmacyRack, InventoryBatchLocation, LabServiceReagent, LabReagentConsumptionLog
@@ -47,6 +47,8 @@ interface DataContextType {
   serviceTariffs: ServiceTariff[];
   saveServiceDefinition: (service: ServiceDefinition) => void;
   uploadServiceDefinitions: (services: ServiceDefinition[]) => Promise<void>;
+  serviceLocationMappings: ServiceLocationMapping[];
+  saveServiceLocationMappings: (serviceId: string, mappings: ServiceLocationMapping[]) => Promise<void>;
 
   dentalICDs: DentalICD[];
   saveDentalICD: (icd: DentalICD) => void;
@@ -362,6 +364,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [branches, setBranches] = useState<Branch[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [storeItemMappings, setStoreItemMappings] = useState<StoreItemMapping[]>([]);
+  const [serviceLocationMappings, setServiceLocationMappings] = useState<ServiceLocationMapping[]>([]);
   const [openingStocks, setOpeningStocks] = useState<OpeningStock[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [sponsorTariffs, setSponsorTariffs] = useState<SponsorTariff[]>(() => {
@@ -487,8 +490,25 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // --- Mappers ---
   const mapDeptFromDb = (d: any): Department => ({ id: d.id, name: d.name, code: d.code, status: d.status });
   const mapServiceCentreFromDb = (d: any): ServiceCentre => ({ id: d.id, name: d.name, code: d.code, status: d.status, departmentId: d.department_id });
-  const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status, vatRegNo: b.vat_reg_no });
-  const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status, vat_reg_no: b.vatRegNo });
+  const mapBranchFromDb = (b: any): Branch => ({ id: b.id, name: b.name, code: b.code, status: b.status, vatRegNo: b.vat_reg_no, logoUrl: b.logo_url });
+  const mapBranchToDb = (b: Branch) => ({ id: b.id, name: b.name, code: b.code, status: b.status, vat_reg_no: b.vatRegNo, logo_url: b.logoUrl });
+  
+  const mapLocationMappingFromDb = (m: any): ServiceLocationMapping => ({
+    id: m.id,
+    serviceId: m.service_id,
+    branchId: m.branch_id,
+    departmentId: m.department_id,
+    serviceCentreId: m.service_centre_id,
+    isPrimary: m.is_primary
+  });
+  const mapLocationMappingToDb = (m: ServiceLocationMapping) => ({
+    id: m.id,
+    service_id: m.serviceId,
+    branch_id: m.branchId,
+    department_id: m.departmentId || null,
+    service_centre_id: m.serviceCentreId,
+    is_primary: m.isPrimary
+  });
   
   const mapEmpFromDb = (e: any): Employee => ({
     id: e.id, firstName: e.first_name, lastName: e.last_name, email: e.email, phone: e.phone,
@@ -552,19 +572,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const mapBillFromDb = (b: any, items: any[], payments: any[]): Bill => ({
-    id: b.id, 
+    id: b.id,
     invoiceNo: b.invoice_no,
-    patientId: b.patient_id, 
-    appointmentId: b.appointment_id, 
+    patientId: b.patient_id,
+    appointmentId: b.appointment_id,
     date: b.date,
-    status: b.status, 
-    totalAmount: Number(b.total_amount || 0), 
-    paidAmount: Number(b.paid_amount || 0),
-    discountAmount: Number(b.discount_amount || 0),
-    taxAmount: Number(b.tax_amount || 0),
-    roundOff: Number(b.round_off || 0),
+    status: b.status,
+    // Use parseFloat for Postgres numeric columns — PostgREST returns them as strings
+    totalAmount: parseFloat(b.total_amount ?? '0') || 0,
+    paidAmount: parseFloat(b.paid_amount ?? '0') || 0,
+    discountAmount: parseFloat(b.discount_amount ?? '0') || 0,
+    taxAmount: parseFloat(b.tax_amount ?? '0') || 0,
+    roundOff: parseFloat(b.round_off ?? '0') || 0,
     paymentMode: b.payment_mode,
-    amountReceived: Number(b.amount_received || 0),
+    amountReceived: parseFloat(b.amount_received ?? '0') || 0,
     referenceNo: b.reference_no,
     notes: b.notes,
     departmentId: b.department_id,
@@ -572,24 +593,36 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     prescriptionId: b.prescription_id,
     doctorId: b.doctor_id,
     createdBy: b.created_by,
-    items: items.map(i => ({ 
-        id: i.id, 
-        description: i.description, 
-        quantity: Number(i.quantity || 0), 
-        unitPrice: Number(i.unit_price || 0), 
-        total: Number(i.total || 0),
+    // New schema columns
+    branchId: b.branch_id ?? undefined,
+    payerType: b.payer_type ?? 'Self',
+    sponsorId: b.sponsor_id ?? undefined,
+    patientDueAmount: parseFloat(b.patient_due_amount ?? '0') || 0,
+    sponsorDueAmount: parseFloat(b.sponsor_due_amount ?? '0') || 0,
+    items: items.map(i => ({
+        id: i.id,
+        description: i.description,
+        quantity: parseInt(i.quantity ?? '0', 10) || 0,
+        unitPrice: parseFloat(i.unit_price ?? '0') || 0,
+        total: parseFloat(i.total ?? '0') || 0,
         itemId: i.item_id,
         batchNo: i.batch_no,
-        discountAmount: Number(i.discount_amount || 0),
-        discountPercentage: Number(i.discount_percentage || 0),
-        taxAmount: Number(i.tax_amount || 0),
-        taxPercentage: Number(i.tax_percentage || 0),
-        itemType: i.item_type
+        discountAmount: parseFloat(i.discount_amount ?? '0') || 0,
+        discountPercentage: parseFloat(i.discount_percentage ?? '0') || 0,
+        taxAmount: parseFloat(i.tax_amount ?? '0') || 0,
+        taxPercentage: parseFloat(i.tax_percentage ?? '0') || 0,
+        itemType: i.item_type,
     })),
-    payments: payments.map(p => ({ id: p.id, date: p.date, amount: Number(p.amount || 0), method: p.method, reference: p.reference })),
+    payments: payments.map(p => ({
+        id: p.id,
+        date: p.date,
+        amount: parseFloat(p.amount ?? '0') || 0,
+        method: p.method,
+        reference: p.reference,
+    })),
     refundStatus: b.refund_status || 'Pending',
-    refundId: b.refund_id || undefined,
-    cancelledAt: b.cancelled_at || undefined
+    refundId: b.refund_id ?? undefined,
+    cancelledAt: b.cancelled_at ?? undefined,
   });
 
   const mapVitalFromDb = (v: any): VitalSign => ({
@@ -1444,6 +1477,16 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsDbConnected(true);
       const supabase = getSupabase();
 
+      // Load branches list early so it's available on the Login screen
+      try {
+        const { data: brData, error: brErr } = await supabase.from('branches').select('*');
+        if (!brErr && brData) {
+          setBranches(brData.map(mapBranchFromDb));
+        }
+      } catch (e) {
+        console.warn('Failed to load branches on init:', e);
+      }
+
       // Only fetch data if user is logged in
       if (!user) {
           setIsLoading(false);
@@ -1534,7 +1577,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           supabase.from('pharmacy_zones').select('*').eq('is_active', true).order('zone_code'), // 11
           supabase.from('pharmacy_racks').select('*').eq('is_active', true).order('rack_code'), // 12
           supabase.from('roles').select('*'),                  // 13
-          supabase.from('screens').select('*').order('display_order', { ascending: true }) // 14
+          supabase.from('screens').select('*').order('display_order', { ascending: true }), // 14
+          supabase.from('service_location_mappings').select('*') // 15
         ]);
 
         // Helper to safely extract data from optional results
@@ -1562,6 +1606,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const phRacksRes = getOptional(12);
         const rolesRes = getOptional(13);
         const screensRes = getOptional(14);
+        const slmRes = getOptional(15);
 
         // Core table name index (for error reporting)
         const tableNames = [
@@ -1712,6 +1757,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (brRes && brRes.data) setBranches(brRes.data.map(mapBranchFromDb));
         if (stRes2 && stRes2.data) setStores(stRes2.data.map(mapStoreFromDb));
         if (mRes && mRes.data) setStoreItemMappings(mRes.data.map(mapStoreMappingFromDb));
+        if (slmRes && slmRes.data) setServiceLocationMappings(slmRes.data.map(mapLocationMappingFromDb));
         
          if (dgRes && dgRes.data) setDrugGenerics(dgRes.data.map(mapDrugGenericFromDb));
          if (dmRes && dmRes.data) setDrugMasters(dmRes.data.map(mapDrugMasterFromDb));
@@ -4311,6 +4357,42 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       showToast('success', 'Service saved successfully.');
+  };
+
+  const saveServiceLocationMappings = async (serviceId: string, mappings: ServiceLocationMapping[]) => {
+      if (!requireDb()) return;
+
+      // Optimistically update local state
+      setServiceLocationMappings(prev => {
+          const others = prev.filter(m => m.serviceId !== serviceId);
+          return [...others, ...mappings];
+      });
+
+      // Delete existing mappings for this service first
+      const { error: deleteError } = await getSupabase()
+          .from('service_location_mappings')
+          .delete()
+          .eq('service_id', serviceId);
+
+      if (deleteError) {
+          console.warn('Failed to delete old mappings (might be first save):', deleteError.message);
+      }
+
+      if (mappings.length > 0) {
+          const dbPayload = mappings.map(mapLocationMappingToDb);
+          const { error: insertError } = await getSupabase()
+              .from('service_location_mappings')
+              .insert(dbPayload);
+
+          if (insertError) {
+              showToast('error', `Failed to save assigned locations: ${insertError.message}`);
+              // Revert local state (reload mappings)
+              try {
+                  const { data } = await getSupabase().from('service_location_mappings').select('*');
+                  if (data) setServiceLocationMappings(data.map(mapLocationMappingFromDb));
+              } catch (err) {}
+          }
+      }
   };
 
   const uploadServiceDefinitions = async (incomingServices: ServiceDefinition[]) => {
@@ -7753,6 +7835,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       serviceCentres, addServiceCentre,
       masterDiagnoses, uploadMasterDiagnoses,
       serviceDefinitions, serviceTariffs, saveServiceDefinition, uploadServiceDefinitions,
+      serviceLocationMappings, saveServiceLocationMappings,
       dentalICDs, saveDentalICD, uploadDentalICDs, deleteDentalICD,
       availabilities, saveAvailability, deleteAvailability,
       doctorSchedules, scheduleTemplates, setRefreshTrigger,

@@ -52,6 +52,7 @@ import LimsDashboard from './pages/LimsDashboard';
 import LimsAmendments from './pages/LimsAmendments';
 import LimsAnalytics from './pages/LimsAnalytics';
 import LimsReagentsDashboard from './pages/LimsReagentsDashboard';
+import LimsProfileReports from './pages/LimsProfileReports';
 import LimsLayout from './components/LimsLayout';
 import LimsCollectSample from './pages/LimsCollectSample';
 import LimsAcceptSample from './pages/LimsAcceptSample';
@@ -206,6 +207,7 @@ const AppRoutes = () => {
             <Route path="amendments" element={<ScreenGuard screenCode="LIMS_AMENDMENTS"><LimsAmendments /></ScreenGuard>} />
             <Route path="analytics" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsAnalytics /></ScreenGuard>} />
             <Route path="reagents-dashboard" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsReagentsDashboard /></ScreenGuard>} />
+            <Route path="reports-profiles" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsProfileReports /></ScreenGuard>} />
             <Route path="collect" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="collect/:orderId" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="accept" element={<ScreenGuard screenCode="LIMS_ACCEPT"><LimsAcceptSample /></ScreenGuard>} />

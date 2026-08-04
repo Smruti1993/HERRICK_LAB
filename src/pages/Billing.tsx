@@ -3,6 +3,13 @@ import { useData, getCurrencySymbol } from '../context/DataContext';
 import { Pagination } from '../components/Pagination';
 import { Plus, Search, Printer, DollarSign, FileText, Trash2, X, History, CreditCard, Package, Pill, Stethoscope, Save, ArrowLeft, MoreHorizontal, CheckSquare, Square, Loader2, Ban, AlertTriangle, ChevronDown } from 'lucide-react';
 import { Bill, BillItem, Payment, ServiceDefinition } from '../types';
+// ── New modular billing components ─────────────────────────────────────────
+import { InvoiceList } from '../components/billing/InvoiceList';
+import { PendingInvoiceList } from '../components/billing/PendingInvoiceList';
+import { InvoiceDetail } from '../components/billing/InvoiceDetail';
+import { CreditMemoForm } from '../components/billing/CreditMemoForm';
+import { RefundScreen } from '../components/billing/RefundScreen';
+import { CashierReconciliation } from '../components/billing/CashierReconciliation';
 
 export const Billing = () => {
     const {
@@ -16,6 +23,21 @@ export const Billing = () => {
 
     // --- Tabs State ---
     const [activeTab, setActiveTab] = useState('Invoice List');
+
+    // --- New component modal state ---
+    const [detailBill, setDetailBill] = useState<Bill | null>(null);
+    const [creditMemoBill, setCreditMemoBill] = useState<Bill | null>(null);
+    const [refundBill, setRefundBill] = useState<Bill | null>(null);
+
+    // Handler: bill order from PendingInvoiceList → open create modal pre-filled
+    const handleBillOrders = (orderIds: string[], patientId: string, appointmentId?: string) => {
+        setLinkedOrderIds(orderIds);
+        setNewBillPatient(patientId);
+        if (appointmentId) setNewBillAppointmentId(appointmentId);
+        setActiveTab('Invoice List');
+        setShowCreateModal(true);
+    };
+
 
     // --- Invoice List View State ---
     const [searchTerm, setSearchTerm] = useState('');
@@ -452,7 +474,7 @@ export const Billing = () => {
 
     // --- Handlers: Print ---
 
-    const handlePrint = (bill: Bill) => {
+    const handlePrint = (bill: Bill, preOpenedWindow?: Window | null) => {
         const patient = patients.find(p => p.id === bill.patientId);
         const apt = appointments.find(a => a.id === bill.appointmentId);
         const doctorId = bill.doctorId || apt?.doctorId;
@@ -461,7 +483,7 @@ export const Billing = () => {
         const patientAge = patient?.dob ? (new Date().getFullYear() - new Date(patient.dob).getFullYear()) : '';
         const mrnFormatted = patient ? patient.id.slice(-8).toUpperCase() : '';
         const visitNo = apt ? `OPD-${apt.id.slice(-6).toUpperCase()}` : (bill.appointmentId ? `OPD-${bill.appointmentId.slice(-6).toUpperCase()}` : '-');
-        const printWindow = window.open('', '_blank');
+        const printWindow = preOpenedWindow || window.open('', '_blank');
         if (!printWindow) return;
 
         const html = `
@@ -875,338 +897,49 @@ export const Billing = () => {
         <div className="space-y-4">
 
             {/* Top Tabs */}
-            <div className="flex gap-1 border-b border-slate-200">
-                {['Invoice List', 'Pending Invoice List', 'Credit Memo'].map(tab => (
+            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+                {[
+                    { id: 'Invoice List', label: 'Invoices' },
+                    { id: 'Pending Invoice List', label: 'Pending' },
+                    { id: 'Reconciliation', label: 'Reconciliation' },
+                    { id: 'Credit Memo', label: 'Credit Memo' },
+                ].map(tab => (
                     <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-2 text-sm font-medium border-t border-x rounded-t-lg transition-colors relative top-[1px] ${activeTab === tab
-                                ? 'bg-white border-slate-200 text-slate-800 border-b-transparent'
+                        key={tab.id}
+                        id={`tab-${tab.id.toLowerCase().replace(/\s+/g, '-')}`}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`px-4 py-2 text-sm font-medium border-t border-x rounded-t-lg transition-colors relative top-[1px] ${
+                            activeTab === tab.id
+                                ? 'bg-white border-slate-200 text-blue-700 border-b-transparent font-semibold'
                                 : 'bg-slate-100 border-transparent text-slate-500 hover:bg-slate-200'
-                            }`}
+                        }`}
                     >
-                        {tab}
+                        {tab.label}
                     </button>
                 ))}
             </div>
 
+            {/* ── INVOICE LIST TAB (new modular component) ────────────────── */}
             {activeTab === 'Invoice List' && (
-                <div className="space-y-6 animate-in fade-in duration-300">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800">Billing & Invoices</h2>
-                            <p className="text-slate-500 text-sm">Manage patient invoices and payments</p>
-                        </div>
-                        <button
-                            onClick={() => setShowCreateModal(true)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition-colors w-fit"
-                        >
-                            <Plus className="w-4 h-4" /> New Invoice
-                        </button>
-                    </div>
-
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
-                        {/* Filters */}
-                        <div className="p-4 border-b border-slate-100 flex flex-wrap items-center gap-4 bg-slate-50/50">
-                            <div className="relative max-w-xs flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                                <input
-                                    className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                    placeholder="Search patient..."
-                                    value={searchTerm}
-                                    onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                                />
-                            </div>
-                            <select
-                                className="bg-white border border-slate-300 text-slate-600 text-sm rounded-lg px-3 py-2 outline-none"
-                                value={statusFilter}
-                                onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}
-                            >
-                                <option value="All">All Status</option>
-                                <option value="Unpaid">Unpaid</option>
-                                <option value="Partial">Partial</option>
-                                <option value="Paid">Paid</option>
-                                <option value="Cancelled">Cancelled</option>
-                                <option value="Receipt">Receipt</option>
-                            </select>
-                        </div>
-
-                        {/* Table */}
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-slate-50 text-slate-500">
-                                    <tr>
-                                        <th className="px-6 py-3 font-semibold">Invoice ID</th>
-                                        <th className="px-6 py-3 font-semibold">Date</th>
-                                        <th className="px-6 py-3 font-semibold">Patient</th>
-                                        <th className="px-6 py-3 font-semibold">Amount</th>
-                                        <th className="px-6 py-3 font-semibold">Paid</th>
-                                        <th className="px-6 py-3 font-semibold">Status</th>
-                                        <th className="px-6 py-3 font-semibold text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {filteredBills.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
-                                                <FileText className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                                                No invoices found
-                                            </td>
-                                        </tr>
-                                    ) : (
-                                        paginatedBills.map(row => {
-                                            return (
-                                                <tr key={row.keyId} className="hover:bg-slate-50 transition-colors">
-                                                    <td className="px-6 py-4 font-mono text-xs text-slate-500">{row.invoiceNo}</td>
-                                                    <td className="px-6 py-4">{new Date(row.date).toLocaleDateString()}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">{row.patientName}</td>
-                                                    <td className="px-6 py-4 font-medium text-slate-900">{formatCurrency(row.totalAmount)}</td>
-                                                    <td className="px-6 py-4 text-green-600">{row.isReceipt ? '' : formatCurrency(row.paidAmount)}</td>
-                                                    <td className="px-6 py-4">
-                                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                                                            row.isReceipt ? 'bg-purple-100 text-purple-800 border-purple-200' :
-                                                            row.status === 'Paid' ? 'bg-green-100 text-green-800 border-green-200' :
-                                                            row.status === 'Partial' ? 'bg-orange-100 text-orange-800 border-orange-200' :
-                                                            row.status === 'Partial_Return' ? 'bg-amber-100 text-amber-800 border-amber-200' :
-                                                            row.status === 'Cancelled' ? 'bg-slate-100 text-slate-500 border-slate-200 line-through' :
-                                                            'bg-red-100 text-red-800 border-red-200'
-                                                        }`}>
-                                                            {row.status === 'Partial_Return' ? 'Partial Return' : row.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4 text-right">
-                                                        <div className="flex justify-end gap-2">
-                                                            {!row.isReceipt && row.status !== 'Cancelled' && (
-                                                                <button
-                                                                    onClick={() => openPaymentModal(row.parentBill)}
-                                                                    className={`p-2 rounded-lg transition-colors ${row.status === 'Paid'
-                                                                            ? 'text-slate-500 hover:bg-slate-100'
-                                                                            : 'text-blue-600 hover:bg-blue-50'
-                                                                        }`}
-                                                                    title={row.status === 'Paid' ? "View Payment History" : "Record Payment"}
-                                                                >
-                                                                    {row.status === 'Paid' ? (
-                                                                        <History className="w-4 h-4" />
-                                                                    ) : (
-                                                                        <span className="text-[10px] font-black leading-none min-w-[16px] h-4 flex items-center justify-center">
-                                                                            {getCurrencySymbol(selectedCurrency)}
-                                                                        </span>
-                                                                    )}
-                                                                </button>
-                                                            )}
-
-                                                            {!row.isReceipt && row.status !== 'Cancelled' && (
-                                                                <button
-                                                                    onClick={() => setBillToCancel(row.parentBill.id)}
-                                                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                                    title="Cancel Invoice"
-                                                                >
-                                                                    <Ban className="w-4 h-4" />
-                                                                </button>
-                                                            )}
-
-                                                            {(row.isReceipt || (row.status !== 'Cancelled' && (row.status === 'Paid' || row.status === 'Partial' || row.status === 'Partial_Return' || row.invoiceNo?.startsWith('INV-D-')))) && (
-                                                                <button
-                                                                    onClick={() => handlePrintReceipt(row.parentBill, row.payment)}
-                                                                    className="p-2 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-55 rounded-lg transition-colors"
-                                                                    title="Print Receipt"
-                                                                >
-                                                                    <FileText className="w-4 h-4" />
-                                                                </button>
-                                                            )}
-
-                                                            {!row.isReceipt && (
-                                                                <button
-                                                                    onClick={() => handlePrint(row.parentBill)}
-                                                                    className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
-                                                                    title="Print Invoice"
-                                                                >
-                                                                    <Printer className="w-4 h-4" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                        <Pagination
-                            currentPage={currentPage}
-                            totalPages={Math.ceil(filteredBills.length / itemsPerPage)}
-                            totalItems={filteredBills.length}
-                            itemsPerPage={itemsPerPage}
-                            onPageChange={setCurrentPage}
-                            colorTheme="blue"
-                        />
-                    </div>
-                </div>
+                <InvoiceList
+                    onNewInvoice={() => setShowCreateModal(true)}
+                    onViewDetail={(bill) => setDetailBill(bill)}
+                    onRecordPayment={(bill) => openPaymentModal(bill)}
+                    onPrint={handlePrint}
+                    onPrintReceipt={handlePrintReceipt}
+                    onCancel={(id) => setBillToCancel(id)}
+                />
             )}
-
+            {/* ── PENDING INVOICE LIST TAB ────────────────── */}
             {activeTab === 'Pending Invoice List' && (
-                <div className="bg-white rounded-lg shadow-sm border border-slate-200 animate-in fade-in duration-300">
-                    {/* Filters */}
-                    <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-                        <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-slate-600">
-                            <div className="flex items-center gap-2">
-                                <span>MR No:</span>
-                                <input
-                                    className="border border-slate-300 rounded px-2 py-1 w-24 outline-none focus:border-blue-500 bg-white"
-                                    value={pendingFilters.mrNo}
-                                    onChange={e => { setPendingFilters({ ...pendingFilters, mrNo: e.target.value }); setPendingPage(1); }}
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span>From Date:</span>
-                                <input
-                                    type="date"
-                                    className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white"
-                                    value={pendingFilters.fromDate}
-                                    onChange={e => { setPendingFilters({ ...pendingFilters, fromDate: e.target.value }); setPendingPage(1); }}
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span>To Date:</span>
-                                <input
-                                    type="date"
-                                    className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white"
-                                    value={pendingFilters.toDate}
-                                    onChange={e => { setPendingFilters({ ...pendingFilters, toDate: e.target.value }); setPendingPage(1); }}
-                                />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span>Visit Type:</span>
-                                <select
-                                    className="border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 bg-white w-28"
-                                    value={pendingFilters.visitType}
-                                    onChange={e => { setPendingFilters({ ...pendingFilters, visitType: e.target.value }); setPendingPage(1); }}
-                                >
-                                    <option value="">-- Select --</option>
-                                    <option value="New Visit">New Visit</option>
-                                    <option value="Follow-up">Follow-up</option>
-                                </select>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span>Consultant:</span>
-                                <div className="relative">
-                                    <input
-                                        className="border border-slate-300 rounded px-2 py-1 pr-7 w-32 outline-none focus:border-blue-500 bg-white"
-                                        value={pendingFilters.consultant}
-                                        onChange={e => { setPendingFilters({ ...pendingFilters, consultant: e.target.value }); setPendingPage(1); }}
-                                    />
-                                    <Search className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <span>Department:</span>
-                                <div className="relative">
-                                    <input
-                                        className="border border-slate-300 rounded px-2 py-1 pr-7 w-32 outline-none focus:border-blue-500 bg-white"
-                                        value={pendingFilters.department}
-                                        onChange={e => { setPendingFilters({ ...pendingFilters, department: e.target.value }); setPendingPage(1); }}
-                                    />
-                                    <Search className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                                </div>
-                            </div>
-                            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1 rounded shadow-sm">Search</button>
-                        </div>
-
-                        <div className="mt-4 flex gap-2">
-                            <button className="bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded shadow-sm font-bold">Excel</button>
-                            <button
-                                className="bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded shadow-sm font-bold flex items-center gap-1"
-                                onClick={() => setShowCreateModal(true)}
-                            >
-                                New <ChevronDown className="w-3 h-3" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Table */}
-                    <div className="overflow-x-auto min-h-[400px] border-t border-slate-200">
-                        <div className="bg-gradient-to-b from-blue-400 to-blue-500 text-white text-xs font-bold px-4 py-2 border-b border-blue-600 flex items-center gap-2">
-                            <span>Pending Invoice</span>
-                        </div>
-                        <table className="w-full text-xs text-left border-collapse">
-                            <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-300">
-                                <tr>
-                                    <th className="p-2 border-r border-slate-200">MRNO</th>
-                                    <th className="p-2 border-r border-slate-200">Encounter Date</th>
-                                    <th className="p-2 border-r border-slate-200">Visit No</th>
-                                    <th className="p-2 border-r border-slate-200">Consultant</th>
-                                    <th className="p-2 border-r border-slate-200">Department</th>
-                                    <th className="p-2 border-r border-slate-200">Service Approval</th>
-                                    <th className="p-2 border-r border-slate-200">Sponsor</th>
-                                    <th className="p-2 border-r border-slate-200">Order No</th>
-                                    <th className="p-2">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {pendingInvoices.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={9} className="p-12 text-center text-slate-400 italic">No pending orders found.</td>
-                                    </tr>
-                                ) : (
-                                    paginatedPendingInvoices.map((order, idx) => {
-                                        const apt = appointments.find(a => a.id === order.appointmentId);
-                                        const patient = patients.find(p => p.id === apt?.patientId);
-                                        const doctor = employees.find(e => e.id === order.orderingDoctorId);
-                                        const dept = departments.find(d => d.id === (doctor?.departmentId || apt?.departmentId));
-
-                                        return (
-                                            <tr key={idx} className="hover:bg-blue-50 transition-colors">
-                                                <td className="p-2 border-r border-slate-200 font-medium">{patient?.id.slice(-8).toUpperCase()}</td>
-                                                <td className="p-2 border-r border-slate-200">{new Date(order.orderDate).toLocaleString()}</td>
-                                                <td className="p-2 border-r border-slate-200 text-slate-500">{apt?.id.slice(-6)}</td>
-                                                <td className="p-2 border-r border-slate-200">Dr. {doctor?.lastName || '-'}</td>
-                                                <td className="p-2 border-r border-slate-200">{dept?.name || '-'}</td>
-                                                <td className="p-2 border-r border-slate-200 text-green-600 font-bold">Approved</td>
-                                                <td className="p-2 border-r border-slate-200">Self Pay</td>
-                                                <td className="p-2 border-r border-slate-200 font-mono">{order.id.slice(-8)}</td>
-                                                <td className="p-2">
-                                                    <button
-                                                        className="text-blue-600 hover:underline font-bold"
-                                                        onClick={() => {
-                                                            setNewBillPatient(patient?.id || '');
-                                                            setLinkedOrderIds([order.id]); // Link this specific order
-                                                            setNewBillAppointmentId(order.appointmentId || '');
-                                                            setBillItems([{
-                                                                description: order.serviceName,
-                                                                quantity: order.quantity,
-                                                                unitPrice: order.unitPrice,
-                                                                total: order.totalPrice
-                                                            }]);
-                                                            if (doctor?.id) {
-                                                                setSelectedDoctor(doctor.id);
-                                                            }
-                                                            if (dept?.id) {
-                                                                setSelectedDept(dept.id);
-                                                            }
-                                                            setShowCreateModal(true);
-                                                        }}
-                                                    >
-                                                        Invoice
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                    <Pagination
-                        currentPage={pendingPage}
-                        totalPages={Math.ceil(pendingInvoices.length / itemsPerPage)}
-                        totalItems={pendingInvoices.length}
-                        itemsPerPage={itemsPerPage}
-                        onPageChange={setPendingPage}
-                        colorTheme="blue"
-                    />
-                </div>
+                <PendingInvoiceList onBillOrder={handleBillOrders} />
             )}
+
+
+
+            {/* ── RECONCILIATION TAB ──────────────────────── */}
+            {activeTab === 'Reconciliation' && <CashierReconciliation />}
+
 
             {/* CANCEL CONFIRMATION MODAL */}
             {billToCancel && (
@@ -1808,10 +1541,18 @@ export const Billing = () => {
                             </button>
                             <button
                                 onClick={async () => {
-                                    // Perform standard create and then trigger printing!
+                                    // Synchronously open window to bypass browser popup blockers
+                                    const printWindow = window.open('', '_blank');
+                                    if (printWindow) {
+                                        printWindow.document.write('<html><head><title>Print Invoice</title></head><body><h3 style="font-family: sans-serif; text-align: center; margin-top: 50px; color: #64748b;">Preparing invoice for printing...</h3></body></html>');
+                                        printWindow.document.close();
+                                    }
+
                                     const createdBill = await handleCreateBill();
-                                    if (createdBill) {
-                                        handlePrint(createdBill);
+                                    if (createdBill && printWindow) {
+                                        handlePrint(createdBill, printWindow);
+                                    } else if (printWindow) {
+                                        printWindow.close();
                                     }
                                 }}
                                 disabled={isSaving || !newBillPatient}
@@ -1939,6 +1680,51 @@ export const Billing = () => {
                         )}
                     </div>
                 </div>
+            )}
+            {/* ── NEW MODALS FOR DETAILS, CREDIT MEMO & REFUND ── */}
+            {detailBill && (
+                <InvoiceDetail
+                    bill={detailBill}
+                    onClose={() => setDetailBill(null)}
+                    onRecordPayment={(b) => {
+                        setDetailBill(null);
+                        openPaymentModal(b);
+                    }}
+                    onIssueCreditMemo={(b) => {
+                        setDetailBill(null);
+                        setCreditMemoBill(b);
+                    }}
+                    onInitiateRefund={(b) => {
+                        setDetailBill(null);
+                        setRefundBill(b);
+                    }}
+                    onPrint={handlePrint}
+                    onPrintReceipt={handlePrintReceipt}
+                    onCancel={(id) => {
+                        setDetailBill(null);
+                        setBillToCancel(id);
+                    }}
+                />
+            )}
+
+            {creditMemoBill && (
+                <CreditMemoForm
+                    bill={creditMemoBill}
+                    onClose={() => setCreditMemoBill(null)}
+                    onSuccess={() => {
+                        setCreditMemoBill(null);
+                    }}
+                />
+            )}
+
+            {refundBill && (
+                <RefundScreen
+                    bill={refundBill}
+                    onClose={() => setRefundBill(null)}
+                    onSuccess={() => {
+                        setRefundBill(null);
+                    }}
+                />
             )}
 
         </div>

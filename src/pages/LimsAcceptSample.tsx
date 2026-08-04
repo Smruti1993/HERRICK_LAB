@@ -33,6 +33,11 @@ interface IncomingSample {
     status: string;
     lab_section: string | null;
     ordered_at: string;
+    service?: {
+      id: string;
+      name: string;
+      cpt_code: string | null;
+    } | null;
     service_order: {
       id: string;
       service_name: string;
@@ -166,6 +171,12 @@ export default function LimsAcceptSample() {
             status,
             lab_section,
             ordered_at,
+            service_id,
+            service:service_id (
+              id,
+              name,
+              cpt_code
+            ),
             service_order:service_order_id (
               id,
               service_name,
@@ -255,6 +266,7 @@ export default function LimsAcceptSample() {
           const specObj = resolveSingle(s.specimen);
           const contObj = resolveSingle(s.container);
           const labOrder = resolveSingle(s.lab_order);
+          const serviceObj = labOrder ? resolveSingle(labOrder.service) : null;
           const sOrder = labOrder ? resolveSingle(labOrder.service_order) : null;
           const appt = sOrder ? resolveSingle(sOrder.appointment) : null;
           const patientId = appt?.patient_id;
@@ -268,6 +280,7 @@ export default function LimsAcceptSample() {
             container: contObj,
             lab_order: labOrder ? {
               ...labOrder,
+              service: serviceObj || null,
               service_order: sOrder ? {
                 ...sOrder,
                 appointment: appt ? {
@@ -312,9 +325,12 @@ export default function LimsAcceptSample() {
         }
 
         if (searchService) {
-          filtered = filtered.filter(s => 
-            s.lab_order?.service_order?.service_name?.toLowerCase().includes(searchService.toLowerCase())
-          );
+          filtered = filtered.filter(s => {
+            const compName = s.lab_order?.service?.name || '';
+            const parentName = s.lab_order?.service_order?.service_name || '';
+            return compName.toLowerCase().includes(searchService.toLowerCase()) ||
+                   parentName.toLowerCase().includes(searchService.toLowerCase());
+          });
         }
 
         if (searchLab) {
@@ -1115,6 +1131,9 @@ export default function LimsAcceptSample() {
                           <span className="text-[9px] text-slate-450 font-normal flex items-center gap-1 mt-0.5">
                             <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                             {item.lab_order?.service_order?.appointment?.visit_type || 'Direct Billing'}
+                          </span>
+                          <span className="text-[10px] text-slate-700 font-extrabold mt-1 border-t border-slate-100 pt-1">
+                            {(item.lab_order?.service?.name || item.lab_order?.service_order?.service_name || 'Lab Service')}
                           </span>
                         </div>
                       </td>

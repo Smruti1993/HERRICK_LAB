@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { KeyRound, User, Loader2, HeartPulse, Settings, ArrowRight } from 'lucide-react';
 
 export const Login = () => {
-  const { login, loginDemo, isDbConnected } = useData();
+  const { login, loginDemo, isDbConnected, branches } = useData();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,10 +39,16 @@ export const Login = () => {
           <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-400 opacity-10 rounded-full translate-y-1/3 -translate-x-1/3 blur-2xl"></div>
           
           <div className="relative z-10 mt-4">
-            <div className="w-16 h-16 bg-white/10 backdrop-blur-xl rounded-2xl flex items-center justify-center mb-8 border border-white/20 shadow-xl">
-              <HeartPulse className="w-9 h-9 text-white" strokeWidth={1.5} />
-            </div>
-            <h1 className="text-4xl font-extrabold mb-3 tracking-tight">MediCore HMS</h1>
+            {branches[0]?.logoUrl ? (
+              <div className="w-36 h-36 bg-white rounded-[2rem] flex items-center justify-center mb-8 border border-white/20 shadow-2xl p-3.5 overflow-hidden">
+                <img src={branches[0].logoUrl} alt="Hospital Logo" className="w-full h-full object-contain" />
+              </div>
+            ) : (
+              <div className="w-16 h-16 bg-white/10 backdrop-blur-xl rounded-2xl flex items-center justify-center mb-8 border border-white/20 shadow-xl">
+                <HeartPulse className="w-9 h-9 text-white" strokeWidth={1.5} />
+              </div>
+            )}
+            <h1 className="text-4xl font-extrabold mb-3 tracking-tight">{branches[0]?.name || 'MediCore HMS'}</h1>
             <p className="text-blue-100 text-lg font-medium opacity-90">Next-Gen Healthcare Management</p>
           </div>
 

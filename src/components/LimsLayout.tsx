@@ -23,7 +23,16 @@ export default function LimsLayout() {
   const { user, logout } = useData();
   const [labCount, setLabCount] = useState(0);
   const [mastersCount, setMastersCount] = useState(0);
+  const [reportsExpanded, setReportsExpanded] = useState(
+    location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+  );
   const supabase = getSupabase();
+
+  useEffect(() => {
+    if (location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')) {
+      setReportsExpanded(true);
+    }
+  }, [location.pathname]);
 
   const isAdmin = user?.username.toLowerCase() === 'admin' || 
                   user?.role?.toLowerCase() === 'administrator' || 
@@ -177,28 +186,59 @@ export default function LimsLayout() {
               </NavLink>
             )}
 
-            {/* Reports Link */}
+            {/* Reports Link with Submenu */}
             {hasAccess('LIMS_ANALYTICS') && (
-              <NavLink
-                to="/lims/analytics"
-                className={({ isActive }) =>
-                  `flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group ${
-                    isActive 
-                      ? 'bg-[#EAF2FF] text-[#1C58D9] font-semibold' 
+              <div className="flex flex-col">
+                <button
+                  onClick={() => setReportsExpanded(!reportsExpanded)}
+                  className={`flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group w-full text-left ${
+                    location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+                      ? 'bg-slate-50 text-slate-900 font-semibold'
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                  }`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <FileText className={`w-5 h-5 ${isActive ? 'text-[#1C58D9]' : 'text-slate-400 group-hover:text-slate-650'}`} />
-                      <span>Report</span>
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 opacity-50 text-slate-400" />
-                  </>
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText className={`w-5 h-5 ${
+                      location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+                        ? 'text-[#1C58D9]'
+                        : 'text-slate-400 group-hover:text-slate-650'
+                    }`} />
+                    <span>Report</span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 opacity-60 ${reportsExpanded ? 'rotate-180' : ''}`} />
+                </button>
+                
+                {reportsExpanded && (
+                  <div className="pl-9 pr-2 py-1 space-y-1">
+                    <NavLink
+                      to="/lims/analytics"
+                      className={({ isActive }) =>
+                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                          isActive 
+                            ? 'text-[#1C58D9] font-bold bg-[#EAF2FF]' 
+                            : 'text-slate-500 hover:text-slate-950 hover:bg-slate-50'
+                        }`
+                      }
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span>TAT & Compliance</span>
+                    </NavLink>
+                    <NavLink
+                      to="/lims/reports-profiles"
+                      className={({ isActive }) =>
+                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                          isActive 
+                            ? 'text-[#1C58D9] font-bold bg-[#EAF2FF]' 
+                            : 'text-slate-500 hover:text-slate-950 hover:bg-slate-50'
+                        }`
+                      }
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span>Lab Report (Profiles)</span>
+                    </NavLink>
+                  </div>
                 )}
-              </NavLink>
+              </div>
             )}
 
             {/* Reagent Inventory Dashboard Link */}

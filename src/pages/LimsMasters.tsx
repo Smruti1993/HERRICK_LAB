@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getSupabase } from '../services/supabaseClient';
 import { ReagentsMappingSubtab } from '../components/lims/ReagentsMappingSubtab';
+import { ProfileComponentsSubtab } from '../components/lims/ProfileComponentsSubtab';
 import {
   LimsSpecimen,
   LimsContainer,
@@ -17,11 +18,11 @@ import {
 import {
   Beaker, Layers, Cpu, Microscope, Plus, Trash2,
   Save, X, Settings, Sliders, Info, Building, Search,
-  FlaskConical, Clock, AlertTriangle, ChevronDown, ChevronRight, Tag, Pencil
+  FlaskConical, Clock, AlertTriangle, ChevronDown, ChevronRight, Tag, Pencil, ChevronUp, Edit
 } from 'lucide-react';
 
 type MainTab = 'services' | 'specimens' | 'containers' | 'equipment' | 'microbiology' | 'outsource';
-type ServiceSubTab = 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat' | 'reagents';
+type ServiceSubTab = 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat' | 'reagents' | 'components';
 
 const RESULT_TYPES = ['Numeric', 'Alphanumeric', 'Template', 'Parameter', 'Form'] as const;
 
@@ -95,11 +96,26 @@ export default function LimsMasters() {
     shortName: '',
   });
 
+  const [selectedSpecimenId, setSelectedSpecimenId] = useState('');
+  const [selectedContainerId, setSelectedContainerId] = useState('');
+
   // Parameters
   const [parameters, setParameters] = useState<LimsServiceParameter[]>([]);
   const [selectedParameter, setSelectedParameter] = useState<LimsServiceParameter | null>(null);
   const [isAddingParam, setIsAddingParam] = useState(false);
-  const [newParam, setNewParam] = useState({ name: '', code: '', resultType: 'Numeric' as string, sortOrder: 1 });
+  const [editingParameterId, setEditingParameterId] = useState<string | null>(null);
+  const [newParam, setNewParam] = useState({
+    name: '',
+    code: '',
+    resultType: 'Numeric' as string,
+    sortOrder: 1,
+    parentId: '',
+    shortName: '',
+    isMandatory: true,
+    isDerived: false,
+    isParameterSum: false,
+    isActive: true
+  });
 
   // Reference Ranges
   const [ranges, setRanges] = useState<LimsReferenceRange[]>([]);
@@ -239,10 +255,22 @@ export default function LimsMasters() {
         isResultMandatory: config.is_result_mandatory !== false,
         isDerived: !!config.is_derived,
       });
+      setSelectedSpecimenId(config.specimen_id || '');
+      setSelectedContainerId(config.container_id || '');
     };
     load();
   }, [selectedService?.id]);
 
+  // Load appropriate ranges when Results tab is activated
+  useEffect(() => {
+    if (selectedService && serviceSubTab === 'results') {
+      if (labDetails.resultType === 'Parameter') {
+        fetchAllRangesForService(selectedService.id);
+      } else if (parameters.length > 0) {
+        fetchRanges(parameters[0].id);
+      }
+    }
+  }, [serviceSubTab, selectedService?.id, labDetails.resultType, parameters.length]);
 
   useEffect(() => {
     if (selectedParameter) {
@@ -283,13 +311,40 @@ export default function LimsMasters() {
 
   const fetchParameters = async (serviceId: string) => {
     const { data } = await supabase.from('lims_service_parameters').select('*').eq('service_id', serviceId).order('sort_order');
-    if (data) setParameters(data.map((p: any) => ({ ...p, resultType: p.result_type })));
+    if (data) {
+      const mapped = data.map((p: any) => ({
+        ...p,
+        resultType: p.result_type,
+        parentId: p.parent_id || undefined,
+        shortName: p.short_name || '',
+        isMandatory: p.is_mandatory ?? true,
+        isDerived: p.is_derived ?? false,
+        isParameterSum: p.is_parameter_sum ?? false,
+        isActive: p.is_active ?? true
+      }));
+
+      // Group hierarchically: Parent first, followed immediately by its children, sorted by sort_order
+      const roots = mapped.filter(p => !p.parentId);
+      const children = mapped.filter(p => p.parentId);
+      const sorted: any[] = [];
+      roots.forEach(root => {
+        sorted.push(root);
+        const rootChildren = children.filter(child => child.parentId === root.id);
+        sorted.push(...rootChildren);
+      });
+      // Append any orphans whose parent is not present
+      const orphans = children.filter(child => !roots.some(r => r.id === child.parentId));
+      sorted.push(...orphans);
+
+      setParameters(sorted);
+    }
   };
 
   const fetchRanges = async (parameterId: string) => {
     const { data } = await supabase.from('lims_reference_ranges').select('*').eq('parameter_id', parameterId).order('gender');
     if (data) setRanges(data.map((r: any) => ({
       ...r,
+      parameterId: r.parameter_id,
       ageMin: r.age_min, ageMax: r.age_max,
       refMin: r.ref_min, refMax: r.ref_max,
       borderlineLow: r.borderline_low, borderlineHigh: r.borderline_high,
@@ -305,6 +360,7 @@ export default function LimsMasters() {
       .order('gender');
     if (data) setRanges(data.map((r: any) => ({
       ...r,
+      parameterId: r.parameter_id,
       ageMin: r.age_min, ageMax: r.age_max,
       refMin: r.ref_min, refMax: r.ref_max,
       borderlineLow: r.borderline_low, borderlineHigh: r.borderline_high,
@@ -422,20 +478,64 @@ export default function LimsMasters() {
   };
 
   const handleAddParameter = async () => {
-    if (!selectedService || !newParam.name || !newParam.code) return;
-    const { error } = await supabase.from('lims_service_parameters').insert({
-      id: crypto.randomUUID(),
+    if (!selectedService) return;
+    if (!newParam.name) {
+      alert('Parameter Name is required.');
+      return;
+    }
+    if (!newParam.code) {
+      alert('Parameter Code is required.');
+      return;
+    }
+    
+    const payload = {
       service_id: selectedService.id,
       name: newParam.name,
       code: newParam.code.toUpperCase(),
       result_type: newParam.resultType,
       sort_order: newParam.sortOrder,
-      status: 'Active'
-    });
+      parent_id: newParam.parentId || null,
+      short_name: newParam.shortName || null,
+      is_mandatory: newParam.isMandatory,
+      is_derived: newParam.isDerived,
+      is_parameter_sum: newParam.isParameterSum,
+      is_active: newParam.isActive,
+      status: newParam.isActive ? 'Active' : 'Inactive'
+    };
+
+    let error;
+    if (editingParameterId) {
+      const res = await supabase
+        .from('lims_service_parameters')
+        .update(payload)
+        .eq('id', editingParameterId);
+      error = res.error;
+    } else {
+      const res = await supabase
+        .from('lims_service_parameters')
+        .insert({
+          id: crypto.randomUUID(),
+          ...payload
+        });
+      error = res.error;
+    }
+
     if (!error) {
       fetchParameters(selectedService.id);
-      setNewParam({ name: '', code: '', resultType: 'Numeric', sortOrder: parameters.length + 2 });
+      setNewParam({
+        name: '',
+        code: '',
+        resultType: 'Numeric',
+        sortOrder: parameters.length + 2,
+        parentId: '',
+        shortName: '',
+        isMandatory: true,
+        isDerived: false,
+        isParameterSum: false,
+        isActive: true
+      });
       setIsAddingParam(false);
+      setEditingParameterId(null);
     } else {
       alert('Error: ' + error.message);
     }
@@ -500,8 +600,8 @@ export default function LimsMasters() {
     });
     if (!error) {
       // Refresh the displayed ranges
-      if (isParameterType && selectedParameter) {
-        fetchRanges(selectedParameter.id);
+      if (isParameterType) {
+        fetchAllRangesForService(selectedService.id);
       } else {
         // For Numeric/Alphanumeric: fetch all ranges via paramId we just used
         fetchRanges(paramId);
@@ -515,9 +615,10 @@ export default function LimsMasters() {
 
 
   const handleDeleteRange = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this reference range?')) return;
     await supabase.from('lims_reference_ranges').delete().eq('id', id);
-    if (selectedParameter) {
-      fetchRanges(selectedParameter.id);
+    if (isParameterType) {
+      fetchAllRangesForService(selectedService.id);
     } else if (parameters.length > 0) {
       fetchRanges(parameters[0].id);
     }
@@ -548,6 +649,7 @@ export default function LimsMasters() {
   const handleUpdateReferenceRange = async () => {
     if (!editingRangeId) return;
     const { error } = await supabase.from('lims_reference_ranges').update({
+      parameter_id: newRange.parameterId || null,
       gender: newRange.gender,
       age_min: newRange.ageMin,
       age_max: newRange.ageMax,
@@ -564,8 +666,8 @@ export default function LimsMasters() {
       is_derived: newRange.isDerived,
     }).eq('id', editingRangeId);
     if (!error) {
-      if (isParameterType && selectedParameter) {
-        fetchRanges(selectedParameter.id);
+      if (isParameterType) {
+        fetchAllRangesForService(selectedService.id);
       } else if (parameters.length > 0) {
         fetchRanges(parameters[0].id);
       }
@@ -673,6 +775,31 @@ export default function LimsMasters() {
     }
   };
 
+  const handleSaveSpecimenConfig = async () => {
+    if (!selectedService) return;
+    const { error: configError } = await supabase.from('lims_service_configs').upsert({
+      service_id: selectedService.id,
+      result_type: labDetails.resultType,
+      clinical_significance: labDetails.clinicalSignificance || null,
+      patient_instruction: labDetails.patientInstruction || null,
+      phlebotomist_instruction: labDetails.phlebotomistInstruction || null,
+      technician_instruction: labDetails.technicianInstruction || null,
+      gender_wise: labDetails.genderWise,
+      age_range_wise: labDetails.ageRangeWise,
+      delta_check: labDetails.deltaCheck,
+      is_result_mandatory: labDetails.isResultMandatory,
+      is_derived: labDetails.isDerived,
+      specimen_id: selectedSpecimenId || null,
+      container_id: selectedContainerId || null
+    });
+
+    if (!configError) {
+      alert('Specimen configuration saved successfully!');
+    } else {
+      alert('Error saving specimen configuration: ' + configError.message);
+    }
+  };
+
   const handleSaveRefRemark = async () => {
     if (!selectedService) return;
     setRemarksSaving(true);
@@ -772,16 +899,25 @@ export default function LimsMasters() {
   // For Numeric/Alphanumeric service — use the auto-created "main" parameter
   const mainParameter = isParameterType ? null : parameters[0] || null;
 
-  const subTabs: { id: ServiceSubTab; label: string; disabled?: boolean }[] = [
-    { id: 'lab', label: 'Lab' },
-    { id: 'specimen', label: 'Specimen' },
-    { id: 'parameter', label: 'Parameter', disabled: !isParameterType },
-    { id: 'results', label: 'Results' },
-    { id: 'remarks', label: 'Reference Range Remarks' },
-    { id: 'alphanumeric', label: 'Alphanumeric Results', disabled: !isAlphanumericType && !(isParameterType) },
-    { id: 'tat', label: 'Turnaround Time' },
-    { id: 'reagents', label: 'Reagents Mapped' },
-  ];
+  const isProfile = serviceForm.serviceCategory === 'Profile/Package';
+
+  const subTabs: { id: ServiceSubTab; label: string; disabled?: boolean }[] = isProfile
+    ? [
+        { id: 'lab', label: 'Lab' },
+        { id: 'specimen', label: 'Specimen' },
+        { id: 'tat', label: 'Turnaround Time' },
+        { id: 'components', label: '⬡ Profile Components' },
+      ]
+    : [
+        { id: 'lab', label: 'Lab' },
+        { id: 'specimen', label: 'Specimen' },
+        { id: 'parameter', label: 'Parameter', disabled: !isParameterType },
+        { id: 'results', label: 'Results' },
+        { id: 'remarks', label: 'Reference Range Remarks' },
+        { id: 'alphanumeric', label: 'Alphanumeric Results', disabled: !isAlphanumericType && !(isParameterType) },
+        { id: 'tat', label: 'Turnaround Time' },
+        { id: 'reagents', label: 'Reagents Mapped' },
+      ];
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
@@ -1380,20 +1516,36 @@ export default function LimsMasters() {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className="text-xxs text-slate-500 font-semibold block mb-1">Specimen Type</label>
-                              <select className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400">
+                              <select
+                                value={selectedSpecimenId}
+                                onChange={e => setSelectedSpecimenId(e.target.value)}
+                                className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white"
+                              >
                                 <option value="">-- Select Specimen --</option>
                                 {specimens.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
                               </select>
                             </div>
                             <div>
                               <label className="text-xxs text-slate-500 font-semibold block mb-1">Container Type</label>
-                              <select className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400">
+                              <select
+                                value={selectedContainerId}
+                                onChange={e => setSelectedContainerId(e.target.value)}
+                                className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white"
+                              >
                                 <option value="">-- Select Container --</option>
                                 {containers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
                               </select>
                             </div>
                           </div>
-                          <p className="text-xxs text-slate-400 mt-3">Specimen-service mapping table coming soon.</p>
+                          <div className="flex justify-end mt-4 pt-3 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={handleSaveSpecimenConfig}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all active:scale-95"
+                            >
+                              <Save className="w-3.5 h-3.5" /> Save Specimen Config
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -1403,7 +1555,15 @@ export default function LimsMasters() {
                           <div className="flex items-center justify-between">
                             <h4 className="font-bold text-sm text-slate-900">Service Parameters</h4>
                             <button
-                              onClick={() => { setNewParam({ name: '', code: '', resultType: 'Numeric', sortOrder: parameters.length + 1 }); setIsAddingParam(true); }}
+                              onClick={() => {
+                                setNewParam({
+                                  name: '', code: '', resultType: 'Numeric', sortOrder: parameters.length + 1,
+                                  parentId: '', shortName: '', isMandatory: true, isDerived: false,
+                                  isParameterSum: false, isActive: true
+                                });
+                                setEditingParameterId(null);
+                                setIsAddingParam(true);
+                              }}
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-all"
                             >
                               <Plus className="w-3.5 h-3.5" /> Add Parameter
@@ -1411,23 +1571,144 @@ export default function LimsMasters() {
                           </div>
 
                           {isAddingParam && (
-                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
-                              <p className="text-xxs font-bold text-blue-700 uppercase tracking-wider">New Parameter</p>
-                              <div className="grid grid-cols-2 gap-3">
-                                <input placeholder="Parameter Name (e.g. Haemoglobin)" value={newParam.name} onChange={e => setNewParam({ ...newParam, name: e.target.value })} className="border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white" />
-                                <input placeholder="Code (e.g. HB)" value={newParam.code} onChange={e => setNewParam({ ...newParam, code: e.target.value.toUpperCase() })} className="border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 font-mono bg-white" />
+                            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-4">
+                              <p className="text-xxs font-bold text-blue-700 uppercase tracking-wider">
+                                {editingParameterId ? '✏ Edit Parameter' : '✨ New Parameter'}
+                              </p>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Parameter Name *</label>
+                                  <input 
+                                    placeholder="e.g. Haemoglobin" 
+                                    value={newParam.name} 
+                                    onChange={e => setNewParam({ ...newParam, name: e.target.value })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white" 
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Code *</label>
+                                  <input 
+                                    placeholder="e.g. HB" 
+                                    value={newParam.code} 
+                                    onChange={e => setNewParam({ ...newParam, code: e.target.value.toUpperCase() })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 font-mono bg-white" 
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Sub Type Of (Parent)</label>
+                                  <select 
+                                    value={newParam.parentId} 
+                                    onChange={e => setNewParam({ ...newParam, parentId: e.target.value })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white"
+                                  >
+                                    <option value="">-- None (Root) --</option>
+                                    {parameters
+                                      .filter(p => p.id !== editingParameterId)
+                                      .map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                                      ))
+                                    }
+                                  </select>
+                                </div>
                               </div>
-                              <div className="grid grid-cols-2 gap-3">
-                                <select value={newParam.resultType} onChange={e => setNewParam({ ...newParam, resultType: e.target.value })} className="border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white">
-                                  <option value="Numeric">Numeric</option>
-                                  <option value="Alphanumeric">Alphanumeric</option>
-                                  <option value="Template">Template</option>
-                                </select>
-                                <input type="number" placeholder="Sort Order" value={newParam.sortOrder} onChange={e => setNewParam({ ...newParam, sortOrder: Number(e.target.value) })} className="border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white" />
+
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Result Type *</label>
+                                  <select 
+                                    value={newParam.resultType} 
+                                    onChange={e => setNewParam({ ...newParam, resultType: e.target.value })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white"
+                                  >
+                                    <option value="Numeric">Numeric</option>
+                                    <option value="Alphanumeric">Alphanumeric</option>
+                                    <option value="Template">Template</option>
+                                    <option value="Heading">Heading (Label Only)</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Short Name</label>
+                                  <input 
+                                    placeholder="Alternate label" 
+                                    value={newParam.shortName} 
+                                    onChange={e => setNewParam({ ...newParam, shortName: e.target.value })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white" 
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Sort Order *</label>
+                                  <input 
+                                    type="number" 
+                                    placeholder="Sort Order" 
+                                    value={newParam.sortOrder} 
+                                    onChange={e => setNewParam({ ...newParam, sortOrder: Number(e.target.value) })} 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-blue-400 bg-white" 
+                                  />
+                                </div>
                               </div>
-                              <div className="flex justify-end gap-2">
-                                <button onClick={() => setIsAddingParam(false)} className="px-3 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-500 bg-white">Cancel</button>
-                                <button onClick={handleAddParameter} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold">Save Parameter</button>
+
+                              {/* Checkboxes Row */}
+                              <div className="flex flex-wrap gap-4 py-1.5 border-t border-blue-100 mt-2">
+                                <label className="flex items-center gap-1.5 text-xs text-slate-650 cursor-pointer select-none font-semibold">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={newParam.isMandatory} 
+                                    onChange={e => setNewParam({ ...newParam, isMandatory: e.target.checked })} 
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4" 
+                                  />
+                                  Is Result Mandatory
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-650 cursor-pointer select-none font-semibold">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={newParam.isDerived} 
+                                    onChange={e => setNewParam({ ...newParam, isDerived: e.target.checked })} 
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4" 
+                                  />
+                                  Derived Parameter
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-650 cursor-pointer select-none font-semibold">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={newParam.isParameterSum} 
+                                    onChange={e => setNewParam({ ...newParam, isParameterSum: e.target.checked })} 
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4" 
+                                  />
+                                  Is Parameter Sum
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs text-slate-650 cursor-pointer select-none font-semibold">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={newParam.isActive} 
+                                    onChange={e => setNewParam({ ...newParam, isActive: e.target.checked })} 
+                                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 w-4 h-4" 
+                                  />
+                                  Active
+                                </label>
+                              </div>
+
+                              <div className="flex justify-end gap-2 border-t border-blue-100 pt-3">
+                                <button 
+                                  onClick={() => {
+                                    setIsAddingParam(false);
+                                    setEditingParameterId(null);
+                                    setNewParam({
+                                      name: '', code: '', resultType: 'Numeric', sortOrder: parameters.length + 1,
+                                      parentId: '', shortName: '', isMandatory: true, isDerived: false,
+                                      isParameterSum: false, isActive: true
+                                    });
+                                  }} 
+                                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-xs text-slate-650 rounded-xl font-bold bg-white transition-all active:scale-95"
+                                >
+                                  Cancel
+                                </button>
+                                <button 
+                                  onClick={handleAddParameter} 
+                                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                                >
+                                  <Save className="w-4 h-4" /> Save Parameter
+                                </button>
                               </div>
                             </div>
                           )}
@@ -1438,24 +1719,83 @@ export default function LimsMasters() {
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              {parameters.map((p, idx) => (
-                                <div key={p.id} className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${selectedParameter?.id === p.id ? 'bg-blue-50 border-blue-300 shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-                                  onClick={() => setSelectedParameter(p === selectedParameter ? null : p)}>
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xxs text-slate-400 w-4">{idx + 1}</span>
-                                    <div>
-                                      <span className="text-xxs font-mono text-blue-600 font-bold">{p.code}</span>
-                                      <p className="text-xs font-semibold text-slate-900">{p.name}</p>
+                              {parameters.map((p, idx) => {
+                                const parentParam = parameters.find(parent => parent.id === p.parentId);
+                                const isChild = !!p.parentId;
+
+                                return (
+                                  <div 
+                                    key={p.id} 
+                                    className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                                      selectedParameter?.id === p.id 
+                                        ? 'bg-blue-50/50 border-blue-300 shadow-xs' 
+                                        : p.resultType === 'Heading'
+                                        ? 'bg-slate-50/70 border-slate-250 font-bold'
+                                        : 'bg-white border-slate-200 hover:border-slate-300'
+                                    } ${isChild ? 'ml-8 border-l-2 border-l-blue-400 pl-4' : ''}`}
+                                    onClick={() => setSelectedParameter(p === selectedParameter ? null : p)}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className="text-xxs text-slate-400 w-4 font-mono">{idx + 1}</span>
+                                      <div>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <span className="text-xxs font-mono text-blue-600 font-bold">{p.code}</span>
+                                          {p.resultType === 'Heading' && (
+                                            <span className="text-[8px] bg-slate-200 text-slate-700 font-extrabold uppercase px-1 rounded">Heading</span>
+                                          )}
+                                          {p.isMandatory && p.resultType !== 'Heading' && (
+                                            <span className="text-[8px] bg-amber-50 text-amber-700 font-extrabold border border-amber-250/50 px-1 rounded">Mandatory</span>
+                                          )}
+                                          {p.isDerived && (
+                                            <span className="text-[8px] bg-indigo-50 text-indigo-700 font-extrabold border border-indigo-250/50 px-1 rounded">Derived</span>
+                                          )}
+                                          {p.isParameterSum && (
+                                            <span className="text-[8px] bg-purple-50 text-purple-700 font-extrabold border border-purple-250/50 px-1 rounded">Sum</span>
+                                          )}
+                                          {!p.isActive && (
+                                            <span className="text-[8px] bg-slate-100 text-slate-500 font-bold border border-slate-200 px-1 rounded">Inactive</span>
+                                          )}
+                                        </div>
+                                        <p className={`text-xs font-semibold text-slate-900 ${p.resultType === 'Heading' ? 'text-slate-800' : ''}`}>{p.name}</p>
+                                        {parentParam && (
+                                          <p className="text-[10px] text-slate-400 font-medium mt-0.5">Subtype of: <span className="font-bold text-slate-500">{parentParam.name}</span></p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xxs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono font-bold mr-2">{p.resultType}</span>
+                                      
+                                      <button 
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setEditingParameterId(p.id);
+                                          setNewParam({
+                                            name: p.name,
+                                            code: p.code,
+                                            resultType: p.resultType,
+                                            sortOrder: p.sortOrder,
+                                            parentId: p.parentId || '',
+                                            shortName: p.shortName || '',
+                                            isMandatory: p.isMandatory ?? true,
+                                            isDerived: p.isDerived ?? false,
+                                            isParameterSum: p.isParameterSum ?? false,
+                                            isActive: p.isActive ?? true
+                                          });
+                                          setIsAddingParam(true);
+                                        }} 
+                                        className="text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors p-1.5 rounded-lg border border-transparent"
+                                        title="Edit Parameter"
+                                      >
+                                        <Edit className="w-3.5 h-3.5" />
+                                      </button>
+                                      
+                                      <button onClick={e => { e.stopPropagation(); handleDeleteParameter(p.id); }} className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors p-1.5 rounded-lg border border-transparent">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xxs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">{(p as any).result_type || p.resultType}</span>
-                                    <button onClick={e => { e.stopPropagation(); handleDeleteParameter(p.id); }} className="text-rose-400 hover:text-rose-600 transition-colors p-1 rounded">
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -1950,6 +2290,11 @@ export default function LimsMasters() {
 
                       {serviceSubTab === 'reagents' && (
                         <ReagentsMappingSubtab selectedService={selectedService} />
+                      )}
+
+                      {/* ── PROFILE COMPONENTS TAB ── */}
+                      {serviceSubTab === 'components' && selectedService && (
+                        <ProfileComponentsSubtab selectedService={selectedService} />
                       )}
                     </div>
                   </div>

@@ -35,9 +35,9 @@ let client: SupabaseClient | null = null;
 const resolvedEnvUrl = (import.meta.env.VITE_BACKEND_URL || '').trim();
 export const BACKEND_URL = resolvedEnvUrl 
     ? (resolvedEnvUrl.startsWith('http') ? resolvedEnvUrl : `https://${resolvedEnvUrl}`)
-    : (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-        ? 'http://localhost:5005'
-        : 'https://onrender.com');
+    : (typeof window !== 'undefined'
+        ? `${window.location.protocol}//${window.location.hostname}:5005`
+        : 'http://localhost:5005');
 
 export const getAuthToken = async (): Promise<string> => {
     try {

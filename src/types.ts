@@ -25,6 +25,7 @@ export interface ServiceCentre extends MasterEntity {
 }
 export interface Branch extends MasterEntity {
   vatRegNo?: string;
+  logoUrl?: string; // Base64 data URL of the organization logo
 }
 
 // New Interface for Master Diagnosis List
@@ -89,6 +90,15 @@ export interface ServiceDefinition {
   specialInstructions?: string;
   // Optional for frontend convenience to store nested tariffs
   tariffs?: ServiceTariff[];
+}
+
+export interface ServiceLocationMapping {
+  id: string;
+  serviceId: string;
+  branchId: string;
+  departmentId?: string;
+  serviceCentreId: string;
+  isPrimary: boolean;
 }
 
 // NEW: CPOE Service Order
@@ -308,11 +318,11 @@ export interface Payment {
 
 export interface Bill {
   id: string;
-  invoiceNo?: string; // e.g., INV-D-HUMC-26000208
+  invoiceNo?: string;
   patientId: string;
-  appointmentId?: string; // Optional link to an appointment
+  appointmentId?: string;
   date: string;
-  status: 'Unpaid' | 'Partial' | 'Paid' | 'Cancelled';
+  status: 'Unpaid' | 'Partial' | 'Paid' | 'Cancelled' | 'Partial_Return';
   totalAmount: number;
   paidAmount: number;
   discountAmount?: number;
@@ -332,21 +342,41 @@ export interface Bill {
   createdBy?: string;
   patientName?: string;
   receiptNo?: string;
-  refundStatus?: string; // 'Pending' | 'Refunded'
+  refundStatus?: string;
   refundId?: string;
   cancelledAt?: string;
+  // Payer-split & branch fields (from billing_migration_v4)
+  branchId?: string;
+  payerType?: 'Self' | 'Sponsor';
+  sponsorId?: string;
+  patientDueAmount?: number;
+  sponsorDueAmount?: number;
 }
 
 export interface PatientRefund {
   id: string;
   refundNo: string;
   patientId: string;
-  refundDate: string;
+  refundDate?: string;
   totalAmount: number;
-  paymentMethod: string;
+  paymentMethod?: string;
   remarks?: string;
   createdBy?: string;
   createdAt?: string;
+  status?: 'Pending' | 'Processed' | 'Rejected';
+}
+
+export interface CreditMemo {
+  id: string;
+  billId: string;
+  creditMemoNo: string;
+  amount: number;
+  reason: string;
+  createdBy: string;
+  approvedBy?: string;
+  status: 'Pending_Approval' | 'Approved' | 'Rejected';
+  refundId?: string;
+  createdAt: string;
 }
 
 
@@ -1324,7 +1354,7 @@ export interface LimsServiceParameter {
   serviceId: string;
   name: string;
   code: string;
-  resultType: 'Numeric' | 'Alphanumeric' | 'Template' | 'Form' | 'Parameter';
+  resultType: 'Numeric' | 'Alphanumeric' | 'Template' | 'Form' | 'Parameter' | 'Heading';
   sortOrder: number;
   status: 'Active' | 'Inactive';
   // extra lab detail fields
@@ -1334,6 +1364,12 @@ export interface LimsServiceParameter {
   isDerived?: boolean;
   deltaCheck?: boolean;
   shortName?: string;
+  
+  // Hierarchy & Calculation extensions
+  parentId?: string;
+  isMandatory?: boolean;
+  isParameterSum?: boolean;
+  isActive?: boolean;
 }
 
 export interface LimsParameterOption {

@@ -138,6 +138,12 @@ export default function LimsCollectSample() {
           collection_remarks,
           identity_verified,
           consent_obtained,
+          service_id,
+          service:service_id (
+            id,
+            name,
+            cpt_code
+          ),
           service_order:service_order_id (
             id,
             service_id,
@@ -314,6 +320,7 @@ export default function LimsCollectSample() {
         // Normalize nested relations from arrays to single objects if needed
         const normalizedOrders = (ordersData as any[]).map(o => {
           const serviceOrder = Array.isArray(o.service_order) ? o.service_order[0] : o.service_order;
+          const service = Array.isArray(o.service) ? o.service[0] : o.service;
           
           const appointment = serviceOrder && Array.isArray(serviceOrder.appointment) 
             ? serviceOrder.appointment[0] 
@@ -332,6 +339,7 @@ export default function LimsCollectSample() {
 
           return {
             ...o,
+            service: service || null,
             service_order: serviceOrder ? {
               ...serviceOrder,
               appointment: appointment ? {
@@ -355,7 +363,7 @@ export default function LimsCollectSample() {
           .in('lab_order_id', orderIds);
 
         // Fetch service parameters for mapping if DB samples don't exist
-        const serviceIds = Array.from(new Set(normalizedOrders.map(o => o.service_order?.service_id).filter(Boolean)));
+        const serviceIds = Array.from(new Set(normalizedOrders.map(o => o.service_id || o.service_order?.service_id).filter(Boolean)));
         let paramsData: any[] = [];
         if (serviceIds.length > 0) {
           const { data: pData } = await supabase
@@ -365,21 +373,37 @@ export default function LimsCollectSample() {
           if (pData) paramsData = pData;
         }
 
+        // Fetch service configurations for specimen and container mapping
+        let configsData: any[] = [];
+        if (serviceIds.length > 0) {
+          const { data: cData } = await supabase
+            .from('lims_service_configs')
+            .select('service_id, specimen_id, container_id')
+            .in('service_id', serviceIds);
+          if (cData) configsData = cData;
+        }
+
         for (const order of normalizedOrders) {
           const dbSamples = samplesData?.filter(s => s.lab_order_id === order.id) || [];
           let resolvedSpecimen = null;
           let resolvedContainer = null;
           let barcode = order.barcode_no;
 
+          const activeServiceId = order.service_id || order.service_order?.service_id;
+          const config = configsData.find(c => c.service_id === activeServiceId);
+
           if (dbSamples.length > 0) {
             const firstSample = dbSamples[0];
             resolvedSpecimen = specimens.find(s => s.id === firstSample.specimen_id);
             resolvedContainer = containers.find(c => c.id === firstSample.container_id);
             barcode = firstSample.sample_no;
+          } else if (config && (config.specimen_id || config.container_id)) {
+            resolvedSpecimen = specimens.find(s => s.id === config.specimen_id) || specimens[0];
+            resolvedContainer = containers.find(c => c.id === config.container_id) || containers[0];
           } else {
             // Dynamically fall back based on parameters or service name
-            const sParams = paramsData.filter(p => p.service_id === order.service_order?.service_id);
-            const nameLower = (order.service_order?.service_name || '').toLowerCase();
+            const sParams = paramsData.filter(p => p.service_id === activeServiceId);
+            const nameLower = (order.service?.name || order.service_order?.service_name || '').toLowerCase();
             const paramNamesLower = sParams.map(p => p.name.toLowerCase()).join(' ');
 
             let defSpec = specimens[0];
@@ -690,7 +714,7 @@ export default function LimsCollectSample() {
       const mrn = patient.id || '—';
       const specName = order.specimen?.name || 'Specimen';
       const contName = order.container?.name || 'Container';
-      const testName = order.service_order?.service_name || 'Lab Service';
+      const testName = order.service?.name || order.service_order?.service_name || 'Lab Service';
       const collTime = new Date().toLocaleString();
       const tech = getLoggedInUser();
 
@@ -1276,7 +1300,7 @@ export default function LimsCollectSample() {
                       <td className="py-4 px-4 text-slate-700">
                         <div className="flex flex-col gap-1">
                           <strong className="text-xs font-bold text-slate-800">
-                            {item.service_order?.cpt_code || 'EMR'} | {item.service_order?.service_name || 'Lab Service'}
+                            {(item.service?.cpt_code || item.service_order?.cpt_code) || 'EMR'} | {(item.service?.name || item.service_order?.service_name) || 'Lab Service'}
                           </strong>
                           <div className="flex items-center gap-2">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border ${statusColors}`}>

@@ -111,7 +111,7 @@ create table if not exists bills (
 create table if not exists bill_items (
   id uuid primary key default uuid_generate_v4(),
   bill_id uuid references bills(id) on delete cascade,
-  item_id uuid,
+  item_id text,
   batch_no text,
   description text not null,
   quantity numeric(10,2) default 1,

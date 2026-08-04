@@ -176,18 +176,29 @@ export const StockTransfer = () => {
       // Loop through items and post STOCKOUT and STOCKIN ledger records
       for (const t of transferItems) {
         // --- 1. POST STOCKOUT FOR SOURCE CENTRAL STORE ---
-        // Fetch current source stock balance & WAC
-        const { data: srcData } = await supabase
+        // 1a. Mathematically sum the ledger to get deterministic current stock balance
+        const { data: sumSrcData } = await supabase
           .from('inventory_stock_ledger')
-          .select('closing_stock, closing_stock_rate')
+          .select('stock_in_quantity, stock_out_quantity')
+          .eq('store_id', sourceStoreId)
+          .eq('item_id', t.item.id);
+
+        const currentSrcStock = (sumSrcData || []).reduce(
+          (acc, row) => acc + (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0)),
+          0
+        );
+
+        // 1b. Fetch last closing_stock_rate for WAC
+        const { data: srcRateData } = await supabase
+          .from('inventory_stock_ledger')
+          .select('closing_stock_rate')
           .eq('store_id', sourceStoreId)
           .eq('item_id', t.item.id)
           .order('ref_doc_date', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(1);
 
-        const currentSrcStock = srcData && srcData.length > 0 ? Number(srcData[0].closing_stock || 0) : 0;
-        const currentSrcRate = srcData && srcData.length > 0 ? Number(srcData[0].closing_stock_rate || 0) : t.rate;
+        const currentSrcRate = srcRateData && srcRateData.length > 0 ? Number(srcRateData[0].closing_stock_rate || 0) : t.rate;
         const newSrcStock = Math.max(0, currentSrcStock - t.transferQty);
 
         const { data: stockoutData, error: stockoutErr } = await supabase
@@ -215,18 +226,29 @@ export const StockTransfer = () => {
         const sourceLedgerId = stockoutData?.id;
 
         // --- 2. POST STOCKIN FOR DESTINATION SUB STORE ---
-        // Fetch current destination store stock balance & WAC rate
-        const { data: destData } = await supabase
+        // 2a. Mathematically sum the ledger to get deterministic current stock balance
+        const { data: sumDestData } = await supabase
           .from('inventory_stock_ledger')
-          .select('closing_stock, closing_stock_rate')
+          .select('stock_in_quantity, stock_out_quantity')
+          .eq('store_id', destStoreId)
+          .eq('item_id', t.item.id);
+
+        const currentDestStock = (sumDestData || []).reduce(
+          (acc, row) => acc + (Number(row.stock_in_quantity || 0) - Number(row.stock_out_quantity || 0)),
+          0
+        );
+
+        // 2b. Fetch last WAC rate for destination
+        const { data: destRateData } = await supabase
+          .from('inventory_stock_ledger')
+          .select('closing_stock_rate')
           .eq('store_id', destStoreId)
           .eq('item_id', t.item.id)
           .order('ref_doc_date', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(1);
 
-        const currentDestStock = destData && destData.length > 0 ? Number(destData[0].closing_stock || 0) : 0;
-        const currentDestRate = destData && destData.length > 0 ? Number(destData[0].closing_stock_rate || 0) : 0;
+        const currentDestRate = destRateData && destRateData.length > 0 ? Number(destRateData[0].closing_stock_rate || 0) : 0;
 
         const newDestStock = currentDestStock + t.transferQty;
 

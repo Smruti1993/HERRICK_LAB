@@ -5,7 +5,7 @@ import ws from 'ws';
 import express from 'express';
 import cors from 'cors';
 import adjudicateRoutes from './routes/adjudicate';
-import billingRoutes from './routes/billing';
+import billingRoutes from './modules/billing/billing.controller';
 import proxyRoutes from './routes/proxy';
 import limsRoutes from './routes/lims';
 import astmRoutes from './routes/astm';

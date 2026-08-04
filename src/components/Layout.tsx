@@ -158,9 +158,15 @@ export const Layout = () => {
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20">
         <div className="h-16 flex items-center px-6 border-b border-slate-100">
-          <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-blue-200">
-            <span className="text-white font-bold text-lg">M</span>
-          </div>
+          {branches[0]?.logoUrl ? (
+            <div className="h-8 w-8 bg-white border border-slate-200 rounded-lg flex items-center justify-center mr-3 overflow-hidden p-0.5 shadow-sm">
+              <img src={branches[0].logoUrl} alt="Hospital Logo" className="w-full h-full object-contain rounded-md" />
+            </div>
+          ) : (
+            <div className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-blue-200">
+              <span className="text-white font-bold text-lg">M</span>
+            </div>
+          )}
           <span className="text-xl font-bold text-slate-800 tracking-tight truncate">{branches[0]?.name || 'MediCore'}</span>
         </div>
 
@@ -334,7 +340,7 @@ export const Layout = () => {
         </main>
 
         {/* Toast Container */}
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+        <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2 pointer-events-none">
           {toasts.map(toast => (
             <div 
               key={toast.id}

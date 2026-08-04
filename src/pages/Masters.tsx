@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useData } from '../context/DataContext';
-import { MasterEntity, ServiceDefinition, ServiceTariff, VitalSignParameter, Currency } from '../types';
-import { Plus, Search, X, FileSpreadsheet, FileDown, Activity, DollarSign } from 'lucide-react';
+import { MasterEntity, ServiceDefinition, ServiceTariff, VitalSignParameter, Currency, Branch, ServiceLocationMapping } from '../types';
+import { Plus, Search, X, FileSpreadsheet, FileDown, Activity, DollarSign, Edit, Trash2, Building, Upload, Image } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Pagination } from '../components/Pagination';
 
@@ -167,6 +167,329 @@ const MasterList = <T extends MasterEntity>({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+};
+
+// --- Hospital Master Component ---
+const HospitalMaster = () => {
+  const { branches, saveBranch, deleteBranch } = useData();
+  const [showForm, setShowForm] = useState(false);
+  const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  
+  // Form State
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [vatRegNo, setVatRegNo] = useState('');
+  const [status, setStatus] = useState<'Active' | 'Inactive'>('Active');
+  const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const resetForm = () => {
+    setName('');
+    setCode('');
+    setVatRegNo('');
+    setStatus('Active');
+    setLogoUrl(undefined);
+    setLogoError(null);
+    setEditingBranch(null);
+  };
+
+  const handleEdit = (b: Branch) => {
+    setEditingBranch(b);
+    setName(b.name);
+    setCode(b.code);
+    setVatRegNo(b.vatRegNo || '');
+    setStatus(b.status);
+    setLogoUrl(b.logoUrl);
+    setLogoError(null);
+    setShowForm(true);
+  };
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate type: must be jpg/jpeg
+    const isValidJpg = file.type === 'image/jpeg' || file.type === 'image/jpg' || file.name.toLowerCase().endsWith('.jpg') || file.name.toLowerCase().endsWith('.jpeg');
+    if (!isValidJpg) {
+      setLogoError('Only JPG/JPEG files are accepted.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Recommended size check: 250KB limit
+    if (file.size > 250 * 1024) {
+      setLogoError('Recommended file size is under 250KB for optimal performance.');
+    } else {
+      setLogoError(null);
+    }
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      if (typeof evt.target?.result === 'string') {
+        setLogoUrl(evt.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoUrl(undefined);
+    setLogoError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name || !code) return;
+
+    const payload: Branch = {
+      id: editingBranch?.id || crypto.randomUUID(),
+      name,
+      code,
+      vatRegNo: vatRegNo || undefined,
+      status,
+      logoUrl
+    };
+
+    saveBranch(payload);
+    resetForm();
+    setShowForm(false);
+  };
+
+  const handleDelete = (id: string, name: string) => {
+    const confirmDelete = window.confirm(`Are you sure you want to delete hospital "${name}"?`);
+    if (confirmDelete) {
+      deleteBranch(id);
+      if (editingBranch?.id === id) {
+        resetForm();
+        setShowForm(false);
+      }
+    }
+  };
+
+  const toggleStatus = (b: Branch, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newStatus = b.status === 'Active' ? 'Inactive' : 'Active';
+    saveBranch({
+      ...b,
+      status: newStatus
+    });
+  };
+
+  return (
+    <div className="flex gap-4 h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
+      {/* List Section */}
+      <div className={`flex-1 bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col min-h-0 ${showForm ? 'hidden md:flex' : ''}`}>
+        {/* Header */}
+        <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-3 border-b border-blue-400 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md">
+              <Building className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-md tracking-tight">Hospitals</h3>
+              <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest mt-0.5 opacity-80">Hospital Master Registry</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => { resetForm(); setShowForm(true); }}
+            className="bg-white text-blue-700 hover:bg-blue-50 px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add New
+          </button>
+        </div>
+
+        {/* Table Content */}
+        <div className="flex-1 overflow-auto scrollbar-thin">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider sticky top-0 z-10">
+              <tr>
+                <th className="px-6 py-3 border-r border-slate-100 w-24 text-center">Logo</th>
+                <th className="px-6 py-3 border-r border-slate-100">Hospital Name</th>
+                <th className="px-6 py-3 border-r border-slate-100 w-36">Code</th>
+                <th className="px-6 py-3 border-r border-slate-100 w-44">VAT Reg No</th>
+                <th className="px-6 py-3 border-r border-slate-100 w-32 text-center">Status</th>
+                <th className="px-6 py-3 text-center w-40">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {branches.length === 0 ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-400 italic">No hospitals found.</td></tr>
+              ) : (
+                branches.map((b) => (
+                  <tr key={b.id} className="hover:bg-blue-50/40 transition-colors group h-14">
+                    <td className="px-6 py-2 border-r border-slate-50 text-center">
+                      {b.logoUrl ? (
+                        <img src={b.logoUrl} alt="Logo" className="w-10 h-10 object-contain rounded-lg border border-slate-200 bg-slate-50 mx-auto" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100/50 mx-auto">
+                          <Building className="w-5 h-5" />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-2 font-medium text-slate-800 border-r border-slate-50">{b.name}</td>
+                    <td className="px-6 py-2 font-mono font-bold text-blue-600 border-r border-slate-50 text-[12px]">{b.code}</td>
+                    <td className="px-6 py-2 font-mono text-slate-500 border-r border-slate-50 text-[12px]">{b.vatRegNo || '-'}</td>
+                    <td className="px-6 py-2 border-r border-slate-50 text-center">
+                      <button
+                        onClick={(e) => toggleStatus(b, e)}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-all active:scale-95 ${
+                          b.status === 'Active'
+                            ? 'bg-green-50 text-green-700 border-green-150 hover:bg-green-100/70'
+                            : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                        }`}
+                        title="Click to toggle status"
+                      >
+                        {b.status}
+                      </button>
+                    </td>
+                    <td className="px-6 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handleEdit(b)}
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all active:scale-90"
+                          title="Edit Hospital Details"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(b.id, b.name)}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all active:scale-90"
+                          title="Delete Hospital"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Form Section */}
+      {showForm && (
+        <div className="w-full md:w-[450px] bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col animate-in slide-in-from-right-10 duration-300">
+          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+            <h3 className="font-bold text-slate-800">
+              {editingBranch ? 'Edit Hospital' : 'New Hospital'}
+            </h3>
+            <button onClick={() => { resetForm(); setShowForm(false); }} className="text-slate-400 hover:text-slate-600 p-1 hover:bg-white rounded-lg transition-all">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Hospital Name *</label>
+              <input 
+                className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. MediCore - HIMS"
+                required
+              />
+            </div>
+            
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Hospital Code *</label>
+              <input 
+                className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono font-bold text-blue-600"
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                placeholder="e.g. HOSP-001"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">VAT Registration Number</label>
+              <input 
+                className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono"
+                value={vatRegNo}
+                onChange={e => setVatRegNo(e.target.value)}
+                placeholder="e.g. 300012345600003"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Status</label>
+              <select 
+                className="w-full h-10 border border-slate-200 rounded-xl px-4 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold appearance-none bg-slate-50/50 cursor-pointer"
+                value={status}
+                onChange={e => setStatus(e.target.value as any)}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            {/* Logo Upload Section */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60 space-y-3">
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Organization Logo (JPG)</label>
+              
+              {logoUrl ? (
+                <div className="relative w-24 h-24 border border-slate-200 rounded-xl bg-white p-1 shadow-inner group">
+                  <img src={logoUrl} alt="Preview" className="w-full h-full object-contain rounded-lg" />
+                  <button
+                    type="button"
+                    onClick={handleRemoveLogo}
+                    className="absolute -top-2 -right-2 bg-rose-500 hover:bg-rose-600 text-white p-1 rounded-full shadow-md transition-all active:scale-90"
+                    title="Remove Logo"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-6 text-center cursor-pointer bg-white transition-all hover:bg-blue-50/20 flex flex-col items-center justify-center gap-2"
+                >
+                  <Upload className="w-6 h-6 text-slate-400" />
+                  <div>
+                    <p className="text-xs font-bold text-slate-600">Click to upload organization logo</p>
+                    <p className="text-[10px] text-slate-450 mt-0.5">JPG / JPEG formats only</p>
+                  </div>
+                </div>
+              )}
+              
+              <input 
+                ref={fileInputRef}
+                type="file"
+                accept=".jpg,.jpeg"
+                onChange={handleLogoUpload}
+                className="hidden"
+              />
+
+              {logoError && (
+                <p className="text-[10px] font-bold text-rose-600 leading-normal">{logoError}</p>
+              )}
+            </div>
+            
+            <div className="pt-2 flex justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => { resetForm(); setShowForm(false); }} 
+                className="px-5 py-2 text-slate-650 text-xs font-bold hover:bg-slate-100 rounded-xl transition-all border border-transparent hover:border-slate-200"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2 rounded-xl text-xs font-bold shadow-md shadow-blue-200 transition-all active:scale-95"
+              >
+                Save Hospital
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
@@ -466,12 +789,27 @@ const DentalICDMaster = () => {
 
 // --- Service Master Component ---
 const ServiceMaster = () => {
-    const { serviceDefinitions, serviceTariffs, saveServiceDefinition, uploadServiceDefinitions, isLoading } = useData();
+    const { 
+        serviceDefinitions, 
+        serviceTariffs, 
+        saveServiceDefinition, 
+        uploadServiceDefinitions, 
+        isLoading,
+        branches,
+        departments,
+        serviceCentres,
+        serviceLocationMappings,
+        saveServiceLocationMappings
+    } = useData();
+
     const [showForm, setShowForm] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
+
+    // UI Tab State inside the Edit Form
+    const [activeFormTab, setActiveFormTab] = useState<'locations' | 'namespace' | 'mandatory' | 'report' | 'consumable' | 'tariff' | 'revenue' | 'parameters'>('locations');
 
     // Initial Form State
     const initialForm: ServiceDefinition = {
@@ -496,29 +834,57 @@ const ServiceMaster = () => {
         isToothMandatory: false,
         isAuthRequired: false,
         estDuration: 0,
+        reOrderDuration: 0,
+        autoCancellationDays: 0,
+        minTimeBilling: 0,
+        maxTimeBilling: 0,
+        maxOrderableQty: 0,
+        cptCode: '',
+        groupName: '',
+        billingGroupName: '',
+        financialGroup: '',
+        cptDescription: '',
+        specialInstructions: '',
         tariffs: []
     };
 
     const [form, setForm] = useState<ServiceDefinition>(initialForm);
     const [price, setPrice] = useState<string>('');
 
+    // Local Assigned Locations state
+    const [localMappings, setLocalMappings] = useState<ServiceLocationMapping[]>([]);
+    
+    // Assigned locations form inputs
+    const [locBranchId, setLocBranchId] = useState('');
+    const [locDeptId, setLocDeptId] = useState('');
+    const [locCentreId, setLocCentreId] = useState('');
+
+    useEffect(() => {
+        if (branches.length > 0) setLocBranchId(branches[0].id);
+        if (departments.length > 0) setLocDeptId(departments[0].id);
+        if (serviceCentres.length > 0) setLocCentreId(serviceCentres[0].id);
+    }, [branches, departments, serviceCentres]);
+
     const handleEdit = (s: ServiceDefinition) => {
         setForm(s);
-        // Extract price from separate tariff list
+        // Load price
         const tariff = serviceTariffs.find(t => t.serviceId === s.id);
-        if (tariff) {
-            setPrice(tariff.price.toString());
-        } else {
-            setPrice('');
-        }
+        setPrice(tariff ? tariff.price.toString() : '');
+
+        // Load location mappings
+        const mappings = serviceLocationMappings.filter(m => m.serviceId === s.id);
+        setLocalMappings(mappings);
+
         setShowForm(true);
     };
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
+        if (!form.code || !form.name) return;
+
         const newId = form.id || crypto.randomUUID();
         
-        // Handle basic tariff (Self Pay)
+        // Setup Self Pay Tariff
         const tariff: ServiceTariff = {
             id: crypto.randomUUID(),
             serviceId: newId,
@@ -534,10 +900,53 @@ const ServiceMaster = () => {
             tariffs: [tariff]
         };
 
+        // Save service definition
         saveServiceDefinition(payload);
+        
+        // Save location mappings (with correct service ID for new entries)
+        const updatedMappings = localMappings.map(m => ({
+            ...m,
+            serviceId: newId
+        }));
+        saveServiceLocationMappings(newId, updatedMappings);
+
         setShowForm(false);
         setForm(initialForm);
         setPrice('');
+        setLocalMappings([]);
+    };
+
+    const handleAddLocation = () => {
+        if (!locBranchId || !locCentreId) return;
+
+        // Check if mapping already exists locally
+        const exists = localMappings.some(m => m.branchId === locBranchId && m.serviceCentreId === locCentreId);
+        if (exists) {
+            alert('This location mapping is already assigned.');
+            return;
+        }
+
+        const newMapping: ServiceLocationMapping = {
+            id: crypto.randomUUID(),
+            serviceId: form.id || '',
+            branchId: locBranchId,
+            departmentId: locDeptId || undefined,
+            serviceCentreId: locCentreId,
+            isPrimary: localMappings.length === 0 // Default true for first location
+        };
+
+        setLocalMappings(prev => [...prev, newMapping]);
+    };
+
+    const handleRemoveLocation = (id: string) => {
+        setLocalMappings(prev => prev.filter(m => m.id !== id));
+    };
+
+    const handleTogglePrimary = (id: string) => {
+        setLocalMappings(prev => prev.map(m => ({
+            ...m,
+            isPrimary: m.id === id
+        })));
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -590,180 +999,343 @@ const ServiceMaster = () => {
     };
 
     const filtered = serviceDefinitions.filter(s => 
-        s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        s.code.toLowerCase().includes(searchTerm.toLowerCase())
+        s.serviceType?.toLowerCase() !== 'laboratory' && (
+            s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            s.code.toLowerCase().includes(searchTerm.toLowerCase())
+        )
     );
 
     const paginatedServices = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
     return (
-        <div className="flex gap-4 h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
-            {/* List Section */}
-            <div className={`flex-1 bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col min-h-0 ${showForm ? 'hidden md:flex' : ''}`}>
-                {/* Compact Header */}
-                <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-3 border-b border-blue-400 flex flex-col lg:flex-row justify-between items-center gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md">
-                            <Activity className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-white text-md tracking-tight">Service Master</h3>
-                            <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest mt-0.5 opacity-80">Inventory & Tariffs</p>
-                        </div>
-                    </div>
-                    
-                    <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-                        <div className="relative flex-1 lg:w-48">
-                            <Search className="w-3.5 h-3.5 text-blue-200 absolute left-3 top-1/2 -translate-y-1/2" />
-                            <input 
-                                placeholder="Search..." 
-                                className="w-full h-8 pl-9 pr-3 bg-white/10 text-white placeholder:text-blue-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
-                                value={searchTerm}
-                                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                            />
-                        </div>
-                        
-                        <button 
-                            onClick={() => downloadTemplate('service')}
-                            className="bg-white/10 hover:bg-white/20 text-white px-2.5 py-1.5 rounded-lg border border-white/20 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1.5"
-                            title="Download Template"
-                        >
-                            <FileDown className="w-3.5 h-3.5" /> Template
-                        </button>
-                        
-                        <button 
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isLoading}
-                            className="bg-white text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md transition-all active:scale-95 flex items-center gap-1.5"
-                        >
-                            <Plus className="w-3.5 h-3.5" /> {isLoading ? '...' : 'Import'}
-                        </button>
-                        <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileUpload} />
-                        
-                        <button 
-                            onClick={() => { setForm(initialForm); setPrice(''); setShowForm(true); }}
-                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold shadow-md shadow-green-900/20 transition-all active:scale-95 flex items-center gap-1.5"
-                        >
-                            <Plus className="w-3.5 h-3.5" /> New Service
-                        </button>
-                    </div>
-                </div>
-
-                {/* Compact Table Content */}
-                <div className="flex-1 overflow-auto scrollbar-thin">
-                    <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider sticky top-0 z-10">
-                            <tr>
-                                <th className="px-6 py-3 border-r border-slate-100">Code</th>
-                                <th className="px-6 py-3 border-r border-slate-100">Service Name</th>
-                                <th className="px-6 py-3 border-r border-slate-100">Category</th>
-                                <th className="px-6 py-3 border-r border-slate-100">Type</th>
-                                <th className="px-6 py-3 text-right">Price (Est.)</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {filtered.length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">No services found.</td></tr>
-                            ) : (
-                                paginatedServices.map((s, i) => {
-                                    const tariff = serviceTariffs.find(t => t.serviceId === s.id);
-                                    const displayPrice = tariff ? tariff.price.toFixed(2) : '-';
-
-                                    return (
-                                    <tr key={i} onClick={() => handleEdit(s)} className="hover:bg-blue-50/40 cursor-pointer transition-colors group h-10">
-                                        <td className="px-6 py-2 font-mono font-bold text-blue-600 border-r border-slate-50">{s.code}</td>
-                                        <td className="px-6 py-2 font-medium text-slate-800 border-r border-slate-50">{s.name}</td>
-                                        <td className="px-6 py-2 text-slate-500 text-[11px] font-bold uppercase border-r border-slate-50">{s.serviceCategory}</td>
-                                        <td className="px-6 py-2 text-slate-400 text-[11px] border-r border-slate-50">{s.serviceType}</td>
-                                        <td className="px-6 py-2 text-right font-mono font-bold text-green-600">
-                                            {displayPrice}
-                                        </td>
-                                    </tr>
-                                )})
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                <Pagination
-                    currentPage={currentPage}
-                    totalPages={Math.ceil(filtered.length / itemsPerPage)}
-                    totalItems={filtered.length}
-                    itemsPerPage={itemsPerPage}
-                    onPageChange={setCurrentPage}
-                    colorTheme="blue"
-                />
-            </div>
-
-            {/* Form Section */}
-            {showForm && (
-                <div className="w-full md:w-[450px] bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col animate-in slide-in-from-right-10 duration-300">
-                    <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-                        <h3 className="font-bold text-slate-800">
-                            {form.id ? 'Edit Service' : 'New Service'}
-                        </h3>
-                        <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600">
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                        <div>
-                            <label className="form-label">Service Code</label>
-                            <input 
-                                className="form-input font-mono" 
-                                value={form.code}
-                                onChange={e => setForm({...form, code: e.target.value})}
-                            />
-                        </div>
-                        <div>
-                            <label className="form-label">Service Name</label>
-                            <input 
-                                className="form-input" 
-                                value={form.name}
-                                onChange={e => setForm({...form, name: e.target.value})}
-                            />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="form-label">Category</label>
-                                <select 
-                                    className="form-input"
-                                    value={form.serviceCategory}
-                                    onChange={e => setForm({...form, serviceCategory: e.target.value})}
-                                >
-                                    <option>General</option>
-                                    <option>Consultation</option>
-                                    <option>Laboratory</option>
-                                    <option>Radiology</option>
-                                    <option>Procedure</option>
-                                </select>
+        <div className="flex flex-col h-[calc(100vh-180px)] animate-in fade-in slide-in-from-bottom-2 duration-500 overflow-hidden">
+            {!showForm ? (
+                /* List Section */
+                <div className="bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col flex-1 min-h-0">
+                    {/* Compact Header */}
+                    <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-3 border-b border-blue-400 flex flex-col lg:flex-row justify-between items-center gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md">
+                                <Activity className="w-5 h-5 text-white" />
                             </div>
                             <div>
-                                <label className="form-label">Type</label>
+                                <h3 className="font-bold text-white text-md tracking-tight">Service Master</h3>
+                                <p className="text-blue-100 text-[10px] font-bold uppercase tracking-widest mt-0.5 opacity-80">Inventory & Tariffs</p>
+                            </div>
+                        </div>
+                        
+                        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                            <div className="relative flex-1 lg:w-48">
+                                <Search className="w-3.5 h-3.5 text-blue-200 absolute left-3 top-1/2 -translate-y-1/2" />
+                                <input 
+                                    placeholder="Search..." 
+                                    className="w-full h-8 pl-9 pr-3 bg-white/10 text-white placeholder:text-blue-100/50 text-xs rounded-lg border border-white/20 focus:ring-2 focus:ring-white/20 outline-none transition-all"
+                                    value={searchTerm}
+                                    onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                                />
+                            </div>
+                            
+                            <button 
+                                onClick={() => downloadTemplate('service')}
+                                className="bg-white/10 hover:bg-white/20 text-white px-2.5 py-1.5 rounded-lg border border-white/20 transition-all active:scale-95 text-[10px] font-bold flex items-center gap-1.5"
+                                title="Download Template"
+                            >
+                                <FileDown className="w-3.5 h-3.5" /> Template
+                            </button>
+                            
+                            <button 
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isLoading}
+                                className="bg-white text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> {isLoading ? '...' : 'Import'}
+                            </button>
+                            <input ref={fileInputRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileUpload} />
+                            
+                            <button 
+                                onClick={() => { setForm(initialForm); setPrice(''); setLocalMappings([]); setShowForm(true); }}
+                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold shadow-md shadow-green-900/20 transition-all active:scale-95 flex items-center gap-1.5"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> New Service
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Table Content */}
+                    <div className="flex-1 overflow-auto scrollbar-thin">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-[10px] font-bold tracking-wider sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-6 py-3 border-r border-slate-100">Code</th>
+                                    <th className="px-6 py-3 border-r border-slate-100">Service Name</th>
+                                    <th className="px-6 py-3 border-r border-slate-100">Category</th>
+                                    <th className="px-6 py-3 border-r border-slate-100">Type</th>
+                                    <th className="px-6 py-3 text-right">Price (Est.)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filtered.length === 0 ? (
+                                    <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">No services found.</td></tr>
+                                ) : (
+                                    paginatedServices.map((s, i) => {
+                                        const tariff = serviceTariffs.find(t => t.serviceId === s.id);
+                                        const displayPrice = tariff ? tariff.price.toFixed(2) : '-';
+
+                                        return (
+                                        <tr key={i} onClick={() => handleEdit(s)} className="hover:bg-blue-50/40 cursor-pointer transition-colors group h-10">
+                                            <td className="px-6 py-2 font-mono font-bold text-blue-600 border-r border-slate-50">{s.code}</td>
+                                            <td className="px-6 py-2 font-medium text-slate-800 border-r border-slate-50">{s.name}</td>
+                                            <td className="px-6 py-2 text-slate-500 text-[11px] font-bold uppercase border-r border-slate-50">{s.serviceCategory}</td>
+                                            <td className="px-6 py-2 text-slate-400 text-[11px] border-r border-slate-50">{s.serviceType}</td>
+                                            <td className="px-6 py-2 text-right font-mono font-bold text-green-600">
+                                                {displayPrice}
+                                            </td>
+                                        </tr>
+                                    )})
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={Math.ceil(filtered.length / itemsPerPage)}
+                        totalItems={filtered.length}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setCurrentPage}
+                        colorTheme="blue"
+                    />
+                </div>
+            ) : (
+                /* Full-Screen Advanced Form Panel */
+                <form onSubmit={handleSave} className="flex-1 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col min-h-0 animate-in fade-in duration-300">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-700 to-blue-600 px-6 py-3 border-b border-blue-400 flex justify-between items-center">
+                        <div className="flex items-center gap-2 text-white">
+                            <Activity className="w-5 h-5" />
+                            <h3 className="font-bold text-md">{form.id ? 'Edit Service Definition' : 'New Service Definition'}</h3>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button 
+                                type="submit" 
+                                className="bg-green-600 hover:bg-green-700 text-white px-5 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-95"
+                            >
+                                Save
+                            </button>
+                            <button 
+                                type="button" 
+                                onClick={() => { setShowForm(false); setForm(initialForm); setLocalMappings([]); }}
+                                className="bg-white/10 hover:bg-white/20 text-white px-5 py-1.5 rounded-lg text-xs font-bold border border-white/20 transition-all active:scale-95"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Scrollable Form Body */}
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
+                        
+                        {/* 1. Core Fields Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Service Code *</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono font-bold text-blue-600"
+                                    value={form.code}
+                                    onChange={e => setForm({...form, code: e.target.value})}
+                                    placeholder="e.g. TMC-101"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Service Name *</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-medium"
+                                    value={form.name}
+                                    onChange={e => setForm({...form, name: e.target.value})}
+                                    placeholder="e.g. Filler 1 ML - Pluryal"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Service Type *</label>
                                 <select 
-                                    className="form-input"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold appearance-none bg-slate-50/50 cursor-pointer"
                                     value={form.serviceType}
                                     onChange={e => setForm({...form, serviceType: e.target.value})}
+                                    required
                                 >
-                                    <option>Single service</option>
-                                    <option>Package</option>
+                                    <option value="Single service">Single service</option>
+                                    <option value="Package">Package</option>
                                 </select>
                             </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Service Category *</label>
+                                <select 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold appearance-none bg-slate-50/50 cursor-pointer"
+                                    value={form.serviceCategory}
+                                    onChange={e => setForm({...form, serviceCategory: e.target.value})}
+                                    required
+                                >
+                                    <option value="General">General</option>
+                                    <option value="Consultation">Consultation</option>
+                                    <option value="Laboratory">Laboratory</option>
+                                    <option value="Radiology">Radiology</option>
+                                    <option value="Procedure">Procedure</option>
+                                    <option value="Dermatology">Dermatology</option>
+                                    <option value="Dental">Dental</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Base Price (Self Pay) *</label>
+                                <input 
+                                    type="number"
+                                    step="0.01"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono font-bold text-green-600 text-right"
+                                    value={price}
+                                    onChange={e => setPrice(e.target.value)}
+                                    placeholder="0.00"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Est. Duration (Minutes)</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.estDuration || 0}
+                                    onChange={e => setForm({...form, estDuration: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Re-Order Duration</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.reOrderDuration || 0}
+                                    onChange={e => setForm({...form, reOrderDuration: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Auto Cancellation (Days)</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.autoCancellationDays || 0}
+                                    onChange={e => setForm({...form, autoCancellationDays: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Min Time For Billing (Mins)</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.minTimeBilling || 0}
+                                    onChange={e => setForm({...form, minTimeBilling: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Max Time For Hourly Billing (Hrs)</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.maxTimeBilling || 0}
+                                    onChange={e => setForm({...form, maxTimeBilling: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Max Orderable Qty</label>
+                                <input 
+                                    type="number"
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.maxOrderableQty || 0}
+                                    onChange={e => setForm({...form, maxOrderableQty: parseInt(e.target.value) || 0})}
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Mnemonics</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.alternateName || ''}
+                                    onChange={e => setForm({...form, alternateName: e.target.value})}
+                                    placeholder="Mnemonics"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Applicable Gender</label>
+                                <select 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold bg-slate-50/50 cursor-pointer"
+                                    value={form.applicableGender}
+                                    onChange={e => setForm({...form, applicableGender: e.target.value as any})}
+                                >
+                                    <option value="Both">Both</option>
+                                    <option value="Male">Male</option>
+                                    <option value="Female">Female</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Applicable Visit Type</label>
+                                <select 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-bold bg-slate-50/50 cursor-pointer"
+                                    value={form.applicableVisitType}
+                                    onChange={e => setForm({...form, applicableVisitType: e.target.value as any})}
+                                >
+                                    <option value="Both">Both</option>
+                                    <option value="New">New</option>
+                                    <option value="Follow-up">Follow-up</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">CPT Code</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all font-mono font-bold"
+                                    value={form.cptCode || ''}
+                                    onChange={e => setForm({...form, cptCode: e.target.value})}
+                                    placeholder="CPT Code"
+                                />
+                            </div>
+
+                            <div className="flex items-center gap-6 h-9 pt-4">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={form.status === 'Active'} 
+                                        onChange={e => setForm({...form, status: e.target.checked ? 'Active' : 'Inactive'})}
+                                        className="rounded text-blue-600 w-4 h-4 focus:ring-0"
+                                    /> 
+                                    <span className="text-xs text-slate-700 font-bold uppercase tracking-wider">Active</span>
+                                </label>
+
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={form.chargeable} 
+                                        onChange={e => setForm({...form, chargeable: e.target.checked})}
+                                        className="rounded text-blue-600 w-4 h-4 focus:ring-0"
+                                    /> 
+                                    <span className="text-xs text-slate-700 font-bold uppercase tracking-wider">Chargeable</span>
+                                </label>
+                            </div>
                         </div>
-                        <div>
-                            <label className="form-label">Base Price (Self Pay)</label>
-                            <input 
-                                type="number"
-                                className="form-input text-right font-mono" 
-                                placeholder="0.00"
-                                value={price}
-                                onChange={e => setPrice(e.target.value)}
-                            />
-                        </div>
-                        
-                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                            <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Settings</h4>
-                            <div className="grid grid-cols-2 gap-y-2">
+
+                        {/* 2. Checkboxes Grid Section */}
+                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Service Settings</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-y-3 gap-x-4">
                                 {[
                                     { k: 'schedulable', l: 'Schedulable' },
                                     { k: 'surgicalService', l: 'Surgical Service' },
@@ -773,27 +1345,234 @@ const ServiceMaster = () => {
                                     { k: 'isRestricted', l: 'Is Restricted' },
                                     { k: 'isExternal', l: 'Is External Service' },
                                     { k: 'isPercentageTariff', l: 'Is Percentage Tariff' },
-                                    { k: 'isToothMandatory', l: 'Is Tooth Mandatory' },
-                                    { k: 'isAuthRequired', l: 'Is Auth Required' },
+                                    { k: 'isToothMandatory', l: 'Is Tooth No Mandatory' },
+                                    { k: 'isAuthRequired', l: 'Is Authorization Required' },
                                 ].map(c => (
-                                    <label key={c.k} className="flex items-center gap-2 cursor-pointer">
+                                    <label key={c.k} className="flex items-center gap-2 cursor-pointer select-none">
                                         <input 
                                             type="checkbox" 
                                             checked={(form as any)[c.k]} 
                                             onChange={e => setForm({...form, [c.k]: e.target.checked})}
-                                            className="rounded text-blue-600"
+                                            className="rounded text-blue-600 w-3.5 h-3.5 focus:ring-0"
                                         /> 
-                                        <span className="text-xs text-slate-600 font-medium">{c.l}</span>
+                                        <span className="text-xs text-slate-650 font-medium">{c.l}</span>
                                     </label>
                                 ))}
                             </div>
                         </div>
+
+                        {/* 3. Group and Billing Fields */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider font-semibold">Group Name</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.groupName || ''}
+                                    onChange={e => setForm({...form, groupName: e.target.value})}
+                                    placeholder="e.g. SERVICE_GROUPS/Dermatology/Filler"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider font-semibold">Billing Group Name</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.billingGroupName || ''}
+                                    onChange={e => setForm({...form, billingGroupName: e.target.value})}
+                                    placeholder="e.g. Services/Dermatology"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider font-semibold">Financial Group</label>
+                                <input 
+                                    className="w-full h-9 border border-slate-250 rounded-lg px-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                    value={form.financialGroup || ''}
+                                    onChange={e => setForm({...form, financialGroup: e.target.value})}
+                                    placeholder="e.g. ERP Finance1"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">CPT Description</label>
+                                <textarea 
+                                    className="w-full h-16 border border-slate-250 rounded-lg p-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none"
+                                    value={form.cptDescription || ''}
+                                    onChange={e => setForm({...form, cptDescription: e.target.value})}
+                                    placeholder="Enter CPT Description details..."
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Special Instruction</label>
+                                <textarea 
+                                    className="w-full h-16 border border-slate-250 rounded-lg p-3 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all resize-none"
+                                    value={form.specialInstructions || ''}
+                                    onChange={e => setForm({...form, specialInstructions: e.target.value})}
+                                    placeholder="Enter Special Instructions..."
+                                />
+                            </div>
+                        </div>
+
+                        {/* 4. Tabbed Sub-panel Section */}
+                        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col bg-white">
+                            
+                            {/* Horizontal Tabs List */}
+                            <div className="flex border-b border-slate-200 bg-slate-50 overflow-x-auto scrollbar-none">
+                                {[
+                                    { id: 'locations', label: 'Location Specific Details' },
+                                    { id: 'namespace', label: 'Namespace Mapping' },
+                                    { id: 'mandatory', label: 'Mandatory Information' },
+                                    { id: 'report', label: 'Report Form' },
+                                    { id: 'consumable', label: 'Item Consumable Service Map' },
+                                    { id: 'tariff', label: 'Service Tariff' },
+                                    { id: 'revenue', label: 'Revenue Details' },
+                                    { id: 'parameters', label: 'Service Parameter Config' }
+                                ].map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        type="button"
+                                        onClick={() => setActiveFormTab(tab.id as any)}
+                                        className={`px-5 py-2.5 text-xs font-bold tracking-wide border-r border-slate-200 transition-colors whitespace-nowrap outline-none ${
+                                            activeFormTab === tab.id 
+                                                ? 'bg-blue-600 text-white border-b-2 border-b-blue-700' 
+                                                : 'text-slate-650 hover:bg-slate-100 hover:text-slate-900 bg-white'
+                                        }`}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Active Tab Panel Body */}
+                            <div className="p-5 min-h-[220px]">
+                                {activeFormTab === 'locations' && (
+                                    <div className="space-y-4">
+                                        
+                                        {/* Input fields to add location mapping */}
+                                        <div className="flex flex-wrap items-end gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                            <div className="flex-1 min-w-[200px]">
+                                                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Hospital *</label>
+                                                <select
+                                                    className="w-full h-8 border border-slate-250 rounded-lg px-2 text-xs focus:outline-none focus:border-blue-500 bg-white cursor-pointer"
+                                                    value={locBranchId}
+                                                    onChange={e => setLocBranchId(e.target.value)}
+                                                >
+                                                    {branches.map(b => (
+                                                        <option key={b.id} value={b.id}>{b.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="flex-1 min-w-[200px]">
+                                                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Department</label>
+                                                <select
+                                                    className="w-full h-8 border border-slate-250 rounded-lg px-2 text-xs focus:outline-none focus:border-blue-500 bg-white cursor-pointer"
+                                                    value={locDeptId}
+                                                    onChange={e => setLocDeptId(e.target.value)}
+                                                >
+                                                    <option value="">-- Select --</option>
+                                                    {departments.map(d => (
+                                                        <option key={d.id} value={d.id}>{d.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="flex-1 min-w-[200px]">
+                                                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Service Center *</label>
+                                                <select
+                                                    className="w-full h-8 border border-slate-250 rounded-lg px-2 text-xs focus:outline-none focus:border-blue-500 bg-white cursor-pointer"
+                                                    value={locCentreId}
+                                                    onChange={e => setLocCentreId(e.target.value)}
+                                                >
+                                                    {serviceCentres.map(sc => (
+                                                        <option key={sc.id} value={sc.id}>{sc.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={handleAddLocation}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 h-8 rounded-lg text-xs transition-all active:scale-95 shadow-sm shadow-blue-200"
+                                            >
+                                                Add Location
+                                            </button>
+                                        </div>
+
+                                        {/* Grid Table of Assigned Locations */}
+                                        <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-inner">
+                                            <table className="w-full text-xs text-left">
+                                                <thead className="bg-slate-55 border-b border-slate-200 font-bold uppercase text-[9px] text-slate-600 tracking-wider">
+                                                    <tr>
+                                                        <th className="px-5 py-2.5 border-r border-slate-100">Hospital</th>
+                                                        <th className="px-5 py-2.5 border-r border-slate-100">Department</th>
+                                                        <th className="px-5 py-2.5 border-r border-slate-100">Service Center Name</th>
+                                                        <th className="px-5 py-2.5 border-r border-slate-100 text-center w-36">Primary Location</th>
+                                                        <th className="px-5 py-2.5 text-center w-24">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {localMappings.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan={5} className="px-5 py-6 text-center text-slate-400 italic">No locations assigned yet. Click Add Location to map.</td>
+                                                        </tr>
+                                                    ) : (
+                                                        localMappings.map((m) => {
+                                                            const hName = branches.find(b => b.id === m.branchId)?.name || 'Unknown';
+                                                            const dName = departments.find(d => d.id === m.departmentId)?.name || '-';
+                                                            const cName = serviceCentres.find(c => c.id === m.serviceCentreId)?.name || 'Unknown';
+
+                                                            return (
+                                                                <tr key={m.id} className="hover:bg-slate-50/50 transition-colors h-10">
+                                                                    <td className="px-5 py-2 font-medium text-slate-700 border-r border-slate-50">{hName}</td>
+                                                                    <td className="px-5 py-2 text-slate-600 border-r border-slate-50">{dName}</td>
+                                                                    <td className="px-5 py-2 font-mono text-[11px] text-blue-650 border-r border-slate-50">{cName}</td>
+                                                                    <td className="px-5 py-2 border-r border-slate-50 text-center">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={m.isPrimary}
+                                                                            onChange={() => handleTogglePrimary(m.id)}
+                                                                            className="rounded text-blue-650 w-3.5 h-3.5 focus:ring-0 cursor-pointer"
+                                                                            title="Mark as primary location"
+                                                                        />
+                                                                    </td>
+                                                                    <td className="px-5 py-2 text-center">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleRemoveLocation(m.id)}
+                                                                            className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded-md transition-colors"
+                                                                            title="Delete assigned location"
+                                                                        >
+                                                                            <Trash2 className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeFormTab !== 'locations' && (
+                                    <div className="flex flex-col items-center justify-center p-8 text-center bg-slate-50/40 border border-dashed border-slate-200 rounded-xl min-h-[160px]">
+                                        <Image className="w-8 h-8 text-slate-300 mb-2" />
+                                        <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">{activeFormTab} CONFIGURATION PANEL</p>
+                                        <p className="text-[10px] text-slate-450 mt-1 max-w-sm leading-normal">
+                                            This panel handles the configuration parameters for {activeFormTab.replace(/^\w/, c => c.toUpperCase())}. Mappings configured here are bound to the service record.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                     </div>
-                    <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
-                        <button onClick={() => setShowForm(false)} className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
-                        <button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-colors">Save</button>
-                    </div>
-                </div>
+                </form>
             )}
         </div>
     );
@@ -1269,7 +2048,7 @@ export const Masters = () => {
 
       <div className="animate-in fade-in duration-500">
         {activeTab === 'hospitals' && (
-          <MasterList title="Hospital" data={branches} onAdd={saveBranch} />
+          <HospitalMaster />
         )}
         {activeTab === 'departments' && (
           <MasterList title="Department" data={departments} onAdd={addDepartment} />

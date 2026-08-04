@@ -25,7 +25,7 @@ BEGIN
     WHERE id = NEW.service_id;
 
     -- Only create lab order for Laboratory services
-    IF v_service_type = 'Laboratory' THEN
+    IF v_service_type ILIKE 'laboratory' THEN
 
       -- Prevent duplicate lab orders for the same service order
       SELECT COUNT(*) INTO v_existing_count
@@ -84,7 +84,7 @@ BEGIN
     FROM service_definitions
     WHERE id = NEW.service_id;
 
-    IF v_service_type = 'Laboratory' THEN
+    IF v_service_type ILIKE 'laboratory' THEN
       SELECT COUNT(*) INTO v_existing_count
       FROM lims_lab_orders
       WHERE service_order_id = NEW.id;
