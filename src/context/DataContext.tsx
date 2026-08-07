@@ -4516,11 +4516,99 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     else showToast('success', 'Appointment cancelled.');
   };
 
-  const createBill = async (bill: Bill, linkedOrderIds?: string[]): Promise<boolean> => {
+  const createBill = async (bill: Bill, linkedOrderIdsRaw?: string[]): Promise<boolean> => {
+      const linkedOrderIds = (linkedOrderIdsRaw || []).filter(id => id && id.trim());
       if (!requireDb()) return false;
       
       // Optimistic update
       setBills(prev => [{ ...bill, refundStatus: bill.refundStatus || 'Pending' }, ...prev]);
+
+      const triggerDirectLabOrders = async () => {
+          const supabase = getSupabase();
+          const labItems = bill.items?.filter((i: any) => {
+              const t = (i.itemType || '').toLowerCase();
+              return t === 'lab test' || t === 'laboratory' || t === 'lab_test';
+          }) || [];
+
+          if (labItems.length > 0 && (!linkedOrderIds || linkedOrderIds.length === 0)) {
+              let appointmentId = bill.appointmentId || null;
+              if (!appointmentId && bill.patientId) {
+                  try {
+                      const todayStr = new Date().toISOString().split('T')[0];
+                      const { data: existingApp } = await supabase
+                          .from('appointments')
+                          .select('id')
+                          .eq('patient_id', bill.patientId)
+                          .eq('date', todayStr)
+                          .limit(1);
+
+                      if (existingApp && existingApp.length > 0) {
+                          appointmentId = existingApp[0].id;
+                      } else {
+                          const newAppId = crypto.randomUUID();
+                          const { error: appErr } = await supabase.from('appointments').insert({
+                              id: newAppId,
+                              patient_id: bill.patientId,
+                              date: todayStr,
+                              time: new Date().toTimeString().slice(0, 5),
+                              status: 'Completed',
+                              visit_type: 'Direct Billing',
+                              doctor_id: bill.doctorId || null,
+                              department_id: bill.departmentId || null
+                          });
+                          if (!appErr) {
+                              appointmentId = newAppId;
+                          }
+                      }
+                  } catch (appQueryErr) {
+                      console.error('Direct fallback: Failed to resolve/create stub appointment:', appQueryErr);
+                  }
+              }
+
+              for (const labItem of labItems) {
+                  let resolvedServiceId = labItem.itemId || null;
+                  let resolvedCptCode: string | null = null;
+                  
+                  const matchedSvc = serviceDefinitions.find(s => 
+                      (resolvedServiceId && s.id === resolvedServiceId) || 
+                      s.name.toLowerCase() === (labItem.description || '').toLowerCase()
+                  );
+                  
+                  if (matchedSvc) {
+                      resolvedServiceId = matchedSvc.id;
+                      resolvedCptCode = matchedSvc.cptCode || null;
+                  } else if (!resolvedServiceId && labItem.description) {
+                      const { data: svcMatch } = await supabase
+                          .from('service_definitions')
+                          .select('id, cpt_code')
+                          .ilike('name', labItem.description)
+                          .limit(1);
+                      if (svcMatch && svcMatch.length > 0) {
+                          resolvedServiceId = svcMatch[0].id;
+                          resolvedCptCode = svcMatch[0].cpt_code || null;
+                      }
+                  }
+
+                  const serviceOrderId = crypto.randomUUID();
+                  await supabase.from('service_orders').insert({
+                      id: serviceOrderId,
+                      appointment_id: appointmentId,
+                      service_id: resolvedServiceId,
+                      service_name: labItem.description,
+                      cpt_code: resolvedCptCode,
+                      quantity: labItem.quantity || 1,
+                      unit_price: labItem.unitPrice || 0,
+                      total_price: labItem.total || 0,
+                      status: 'Billed',
+                      billing_status: 'Billed',
+                      priority: 'Routine',
+                      order_date: new Date().toISOString(),
+                      ordering_doctor_id: bill.doctorId || null,
+                      service_center: bill.departmentId || null
+                  });
+              }
+          }
+      };
 
       try {
           const token = await getAuthToken();
@@ -4544,6 +4632,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   linkedOrderIds.includes(o.id) ? { ...o, billingStatus: 'Invoiced' } : o
               ));
           }
+
+          // Trigger direct lab orders registration on success
+          await triggerDirectLabOrders();
 
           showToast('success', 'Invoice generated successfully.');
           return true;
@@ -4634,88 +4725,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               }
 
               // 5. Direct Billing Path for Lab Tests
-              const labItems = bill.items?.filter((i: any) => 
-                  i.itemType === 'Lab Test' || i.itemType === 'Laboratory' || i.itemType === 'lab_test'
-              ) || [];
-
-              if (labItems.length > 0 && (!linkedOrderIds || linkedOrderIds.length === 0)) {
-                  let appointmentId = bill.appointmentId || null;
-                  if (!appointmentId && bill.patientId) {
-                      try {
-                          const todayStr = new Date().toISOString().split('T')[0];
-                          const { data: existingApp } = await supabase
-                              .from('appointments')
-                              .select('id')
-                              .eq('patient_id', bill.patientId)
-                              .eq('date', todayStr)
-                              .limit(1);
-
-                          if (existingApp && existingApp.length > 0) {
-                              appointmentId = existingApp[0].id;
-                          } else {
-                              const newAppId = crypto.randomUUID();
-                              const { error: appErr } = await supabase.from('appointments').insert({
-                                  id: newAppId,
-                                  patient_id: bill.patientId,
-                                  date: todayStr,
-                                  time: new Date().toTimeString().slice(0, 5),
-                                  status: 'Completed',
-                                  visit_type: 'Direct Billing',
-                                  doctor_id: bill.doctorId || null,
-                                  department_id: bill.departmentId || null
-                              });
-                              if (!appErr) {
-                                  appointmentId = newAppId;
-                              }
-                          }
-                      } catch (appQueryErr) {
-                          console.error('Direct fallback: Failed to resolve/create stub appointment:', appQueryErr);
-                      }
-                  }
-
-                  for (const labItem of labItems) {
-                      let resolvedServiceId = labItem.itemId || null;
-                      let resolvedCptCode: string | null = null;
-                      
-                      const matchedSvc = serviceDefinitions.find(s => 
-                          (resolvedServiceId && s.id === resolvedServiceId) || 
-                          s.name.toLowerCase() === (labItem.description || '').toLowerCase()
-                      );
-                      
-                      if (matchedSvc) {
-                          resolvedServiceId = matchedSvc.id;
-                          resolvedCptCode = matchedSvc.cptCode || null;
-                      } else if (!resolvedServiceId && labItem.description) {
-                          const { data: svcMatch } = await supabase
-                              .from('service_definitions')
-                              .select('id, cpt_code')
-                              .ilike('name', labItem.description)
-                              .limit(1);
-                          if (svcMatch && svcMatch.length > 0) {
-                              resolvedServiceId = svcMatch[0].id;
-                              resolvedCptCode = svcMatch[0].cpt_code || null;
-                          }
-                      }
-
-                      const serviceOrderId = crypto.randomUUID();
-                      await supabase.from('service_orders').insert({
-                          id: serviceOrderId,
-                          appointment_id: appointmentId,
-                          service_id: resolvedServiceId,
-                          service_name: labItem.description,
-                          cpt_code: resolvedCptCode,
-                          quantity: labItem.quantity || 1,
-                          unit_price: labItem.unitPrice || 0,
-                          total_price: labItem.total || 0,
-                          status: 'Billed',
-                          billing_status: 'Billed',
-                          priority: 'Routine',
-                          order_date: new Date().toISOString(),
-                          ordering_doctor_id: bill.doctorId || null,
-                          service_center: bill.departmentId || null
-                      });
-                  }
-              }
+              await triggerDirectLabOrders();
 
               showToast('success', 'Invoice generated successfully (via direct database fallback).');
               return true;

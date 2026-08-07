@@ -46,6 +46,7 @@ import { ChartOfAccounts } from './pages/ChartOfAccounts';
 import { JournalVouchers } from './pages/JournalVouchers';
 import { VendorCompliance } from './pages/VendorCompliance';
 import { Refund } from './pages/Refund';
+import { NewInvoice } from './pages/NewInvoice';
 
 import LimsMasters from './pages/LimsMasters';
 import LimsDashboard from './pages/LimsDashboard';
@@ -186,6 +187,8 @@ const AppRoutes = () => {
             <Route path="finance">
               <Route index element={<Navigate to="masters/organization" replace />} />
               <Route path="billing" element={<ScreenGuard screenCode="FIN_BILLING"><Billing /></ScreenGuard>} />
+              <Route path="billing/new" element={<ScreenGuard screenCode="FIN_BILLING"><NewInvoice /></ScreenGuard>} />
+              <Route path="billing/:id/edit" element={<ScreenGuard screenCode="FIN_BILLING"><NewInvoice /></ScreenGuard>} />
               <Route path="masters/organization" element={<ScreenGuard screenCode="FIN_ORG"><OrganizationMaster /></ScreenGuard>} />
               <Route path="masters/plan-definition" element={<ScreenGuard screenCode="FIN_PLAN"><PlanDefinition /></ScreenGuard>} />
               <Route path="masters/sponsor-tariff" element={<ScreenGuard screenCode="FIN_TARIFF"><SponsorTariff /></ScreenGuard>} />

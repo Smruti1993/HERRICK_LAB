@@ -77,7 +77,8 @@ export default function LimsMasters() {
     isExternal: false,
     isPercentageTariff: false,
     isToothMandatory: false,
-    isAuthRequired: false
+    isAuthRequired: false,
+    price: ''
   });
 
   // Lab Details tab state (per-service)
@@ -171,12 +172,23 @@ export default function LimsMasters() {
       setParamOptions([]);
       setIsAddingService(false);
 
-      // Fetch LIMS service config details
+       // Fetch LIMS service config details
       const { data: configData } = await supabase
         .from('lims_service_configs')
         .select('*')
         .eq('service_id', selectedService.id)
         .maybeSingle();
+
+      // Fetch standard tariff price
+      const { data: tariffData } = await supabase
+        .from('service_tariffs')
+        .select('price')
+        .eq('service_id', selectedService.id)
+        .eq('status', 'Active')
+        .eq('tariff_name', 'Self Pay')
+        .maybeSingle();
+
+      const priceVal = tariffData ? tariffData.price.toString() : '';
 
       const config = configData || {
         result_type: 'Numeric',
@@ -225,7 +237,8 @@ export default function LimsMasters() {
         isExternal: !!selectedService.is_external,
         isPercentageTariff: !!selectedService.is_percentage_tariff,
         isToothMandatory: !!selectedService.is_tooth_mandatory,
-        isAuthRequired: !!selectedService.is_auth_required
+        isAuthRequired: !!selectedService.is_auth_required,
+        price: priceVal
       });
 
       // Fetch parameters; if non-Parameter type also load their ranges immediately
@@ -418,6 +431,17 @@ export default function LimsMasters() {
         service_id: payload.id,
         result_type: serviceForm.resultType
       });
+      // Insert standard Self Pay tariff
+      if (serviceForm.price) {
+        await supabase.from('service_tariffs').insert({
+          id: crypto.randomUUID(),
+          service_id: payload.id,
+          tariff_name: 'Self Pay',
+          price: parseFloat(serviceForm.price) || 0,
+          effective_date: new Date().toISOString(),
+          status: 'Active'
+        });
+      }
       alert('Service master created successfully!');
       fetchServices();
       // Select the newly created service immediately
@@ -470,6 +494,31 @@ export default function LimsMasters() {
         service_id: selectedService.id,
         result_type: serviceForm.resultType
       });
+      // Upsert standard Self Pay tariff
+      if (serviceForm.price) {
+        const { data: tariff } = await supabase
+          .from('service_tariffs')
+          .select('id')
+          .eq('service_id', selectedService.id)
+          .eq('tariff_name', 'Self Pay')
+          .maybeSingle();
+
+        if (tariff) {
+          await supabase.from('service_tariffs').update({
+            price: parseFloat(serviceForm.price) || 0,
+            status: 'Active'
+          }).eq('id', tariff.id);
+        } else {
+          await supabase.from('service_tariffs').insert({
+            id: crypto.randomUUID(),
+            service_id: selectedService.id,
+            tariff_name: 'Self Pay',
+            price: parseFloat(serviceForm.price) || 0,
+            effective_date: new Date().toISOString(),
+            status: 'Active'
+          });
+        }
+      }
       alert('Service master details updated successfully!');
       fetchServices();
     } else {
@@ -1012,7 +1061,8 @@ export default function LimsMasters() {
                           isExternal: false,
                           isPercentageTariff: false,
                           isToothMandatory: false,
-                          isAuthRequired: false
+                          isAuthRequired: false,
+                          price: ''
                         });
                         setIsAddingService(true);
                       }}
@@ -1188,6 +1238,18 @@ export default function LimsMasters() {
                               placeholder="CPT standard code" 
                               value={serviceForm.cptCode} 
                               onChange={e => setServiceForm({ ...serviceForm, cptCode: e.target.value })} 
+                              className="w-full border border-slate-200 rounded-lg py-1 px-2.5 text-xs outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all font-semibold font-mono bg-slate-50/50"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Standard Price (Self Pay)</label>
+                            <input 
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00" 
+                              value={serviceForm.price} 
+                              onChange={e => setServiceForm({ ...serviceForm, price: e.target.value })} 
                               className="w-full border border-slate-200 rounded-lg py-1 px-2.5 text-xs outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10 transition-all font-semibold font-mono bg-slate-50/50"
                             />
                           </div>
