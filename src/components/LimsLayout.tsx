@@ -24,12 +24,18 @@ export default function LimsLayout() {
   const [labCount, setLabCount] = useState(0);
   const [mastersCount, setMastersCount] = useState(0);
   const [reportsExpanded, setReportsExpanded] = useState(
-    location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+    location.pathname.includes('/lims/analytics') ||
+    location.pathname.includes('/lims/reports-profiles') ||
+    location.pathname.includes('/lims/lab-register')
   );
   const supabase = getSupabase();
 
   useEffect(() => {
-    if (location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')) {
+    if (
+      location.pathname.includes('/lims/analytics') ||
+      location.pathname.includes('/lims/reports-profiles') ||
+      location.pathname.includes('/lims/lab-register')
+    ) {
       setReportsExpanded(true);
     }
   }, [location.pathname]);
@@ -192,14 +198,14 @@ export default function LimsLayout() {
                 <button
                   onClick={() => setReportsExpanded(!reportsExpanded)}
                   className={`flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all group w-full text-left ${
-                    location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+                    location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles') || location.pathname.includes('/lims/lab-register')
                       ? 'bg-slate-50 text-slate-900 font-semibold'
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <FileText className={`w-5 h-5 ${
-                      location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles')
+                      location.pathname.includes('/lims/analytics') || location.pathname.includes('/lims/reports-profiles') || location.pathname.includes('/lims/lab-register')
                         ? 'text-[#1C58D9]'
                         : 'text-slate-400 group-hover:text-slate-650'
                     }`} />
@@ -235,6 +241,19 @@ export default function LimsLayout() {
                     >
                       <div className="w-1.5 h-1.5 rounded-full bg-current" />
                       <span>Lab Report (Profiles)</span>
+                    </NavLink>
+                    <NavLink
+                      to="/lims/lab-register"
+                      className={({ isActive }) =>
+                        `flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                          isActive 
+                            ? 'text-[#1C58D9] font-bold bg-[#EAF2FF]' 
+                            : 'text-slate-500 hover:text-slate-950 hover:bg-slate-50'
+                        }`
+                      }
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-current" />
+                      <span>Lab Register</span>
                     </NavLink>
                   </div>
                 )}

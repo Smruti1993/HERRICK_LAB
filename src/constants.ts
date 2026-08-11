@@ -156,6 +156,13 @@ export const NAV_ITEMS: NavItem[] = [
           { label: 'Journal Voucher', path: '/finance/transactions/journal-vouchers' },
           { label: 'Process Refund', path: '/finance/transactions/refund' }
         ]
+      },
+      {
+        label: 'Reports',
+        path: '/finance/reports',
+        subItems: [
+          { label: 'Service Analysis', path: '/finance/reports/service-analysis' }
+        ]
       }
     ]
   },

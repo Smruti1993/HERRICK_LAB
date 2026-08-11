@@ -47,6 +47,7 @@ import { JournalVouchers } from './pages/JournalVouchers';
 import { VendorCompliance } from './pages/VendorCompliance';
 import { Refund } from './pages/Refund';
 import { NewInvoice } from './pages/NewInvoice';
+import { FinanceServiceAnalysis } from './pages/FinanceServiceAnalysis';
 
 import LimsMasters from './pages/LimsMasters';
 import LimsDashboard from './pages/LimsDashboard';
@@ -54,6 +55,7 @@ import LimsAmendments from './pages/LimsAmendments';
 import LimsAnalytics from './pages/LimsAnalytics';
 import LimsReagentsDashboard from './pages/LimsReagentsDashboard';
 import LimsProfileReports from './pages/LimsProfileReports';
+import LimsLabRegister from './pages/LimsLabRegister';
 import LimsLayout from './components/LimsLayout';
 import LimsCollectSample from './pages/LimsCollectSample';
 import LimsAcceptSample from './pages/LimsAcceptSample';
@@ -195,6 +197,7 @@ const AppRoutes = () => {
               <Route path="masters/chart-of-accounts" element={<ScreenGuard screenCode="FIN_COA"><ChartOfAccounts /></ScreenGuard>} />
               <Route path="transactions/journal-vouchers" element={<ScreenGuard screenCode="FIN_JV"><JournalVouchers /></ScreenGuard>} />
               <Route path="transactions/refund" element={<ScreenGuard screenCode="FIN_REFUND"><Refund /></ScreenGuard>} />
+              <Route path="reports/service-analysis" element={<ScreenGuard screenCode="FIN_REPORT_SERVICE_ANALYSIS"><FinanceServiceAnalysis /></ScreenGuard>} />
             </Route>
 
             <Route path="rbac" element={<ScreenGuard screenCode="RBAC_CONFIG"><RbacConfig /></ScreenGuard>} />
@@ -211,6 +214,7 @@ const AppRoutes = () => {
             <Route path="analytics" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsAnalytics /></ScreenGuard>} />
             <Route path="reagents-dashboard" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsReagentsDashboard /></ScreenGuard>} />
             <Route path="reports-profiles" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsProfileReports /></ScreenGuard>} />
+            <Route path="lab-register" element={<ScreenGuard screenCode="LIMS_ANALYTICS"><LimsLabRegister /></ScreenGuard>} />
             <Route path="collect" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="collect/:orderId" element={<ScreenGuard screenCode="LIMS_COLLECT"><LimsCollectSample /></ScreenGuard>} />
             <Route path="accept" element={<ScreenGuard screenCode="LIMS_ACCEPT"><LimsAcceptSample /></ScreenGuard>} />

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { getSupabase } from '../services/supabaseClient';
+import React, { useState, useEffect, useRef } from 'react';
+import { getSupabase, getAuthToken, BACKEND_URL } from '../services/supabaseClient';
+import ExcelJS from 'exceljs';
 import { ReagentsMappingSubtab } from '../components/lims/ReagentsMappingSubtab';
 import { ProfileComponentsSubtab } from '../components/lims/ProfileComponentsSubtab';
 import {
@@ -18,11 +19,11 @@ import {
 import {
   Beaker, Layers, Cpu, Microscope, Plus, Trash2,
   Save, X, Settings, Sliders, Info, Building, Search,
-  FlaskConical, Clock, AlertTriangle, ChevronDown, ChevronRight, Tag, Pencil, ChevronUp, Edit
+  FlaskConical, Clock, AlertTriangle, ChevronDown, ChevronRight, Tag, Pencil, ChevronUp, Edit,
+  Download, Upload, FileSpreadsheet, CheckCircle, XCircle, AlertCircle
 } from 'lucide-react';
-
 type MainTab = 'services' | 'specimens' | 'containers' | 'equipment' | 'microbiology' | 'outsource';
-type ServiceSubTab = 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat' | 'reagents' | 'components';
+type ServiceSubTab = 'details' | 'lab' | 'specimen' | 'parameter' | 'results' | 'remarks' | 'alphanumeric' | 'tat' | 'reagents' | 'components';
 
 const RESULT_TYPES = ['Numeric', 'Alphanumeric', 'Template', 'Parameter', 'Form'] as const;
 
@@ -43,8 +44,43 @@ export default function LimsMasters() {
 
   // Service Selection
   const [selectedService, setSelectedService] = useState<any | null>(null);
-  const [serviceSubTab, setServiceSubTab] = useState<ServiceSubTab>('lab');
+  const [serviceSubTab, setServiceSubTab] = useState<ServiceSubTab>('details');
   const [isAddingService, setIsAddingService] = useState(false);
+  const [showServiceModal, setShowServiceModal] = useState(false);
+
+  // Excel Import state
+  type ImportRowResult = {
+    rowNumber: number;
+    serviceCode: string;
+    serviceName: string;
+    action: 'create' | 'update' | 'blocked' | 'error';
+    reason?: string;
+  };
+  const [showImportPreview, setShowImportPreview] = useState(false);
+  const [showImportResults, setShowImportResults] = useState(false);
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportRowResult[]>([]);
+  const [importResultRows, setImportResultRows] = useState<ImportRowResult[]>([]);
+  const [importSummary, setImportSummary] = useState<any>(null);
+  const [importResultSummary, setImportResultSummary] = useState<any>(null);
+  const [importPendingFile, setImportPendingFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importCommitting, setImportCommitting] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Role check for import/export controls
+  const getLoggedInUserRole = () => {
+    try {
+      const localUser = localStorage.getItem('medicore_user');
+      if (localUser) {
+        const parsed = JSON.parse(localUser);
+        return parsed.role || '';
+      }
+    } catch { }
+    return '';
+  };
+  const userRole = getLoggedInUserRole();
+  const canImportExport = ['administrator', 'admin', 'lab manager'].includes(userRole.toLowerCase().trim());
+
   const [serviceForm, setServiceForm] = useState({
     code: '',
     name: '',
@@ -968,6 +1004,140 @@ export default function LimsMasters() {
         { id: 'reagents', label: 'Reagents Mapped' },
       ];
 
+  // ─── Excel Template Download ────────────────────────────────────────────────
+  const handleDownloadTemplate = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('Lab Services');
+
+    const headers = [
+      'Service Code', 'Service Name', 'Service Type', 'Service Category',
+      'Result Type', 'Alternate Name', 'Applicable Visit', 'Applicable Gender',
+      'Standard Price', 'CPT Code', 'Group Name', 'Billing Group Name',
+      'Financial Group', 'Est Duration (Min)', 'Max Orderable Qty',
+      'CPT Description', 'Special Instructions',
+      'Is Active', 'Chargeable', 'Schedulable', 'Individually Orderable',
+      'Consent Required', 'Is External', 'Is Auth Required'
+    ];
+
+    ws.addRow(headers);
+    const headerRow = ws.getRow(1);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+    headerRow.height = 20;
+    headerRow.eachCell(cell => {
+      cell.border = { bottom: { style: 'medium', color: { argb: 'FF93C5FD' } } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+
+    ws.columns = headers.map((h, i) => ({ header: h, key: `col${i}`, width: i < 4 ? 20 : 18 }));
+
+    const enumLists = {
+      'Service Type': '"LABORATORY,RADIOLOGY,CARDIOLOGY,PROCEDURE,CONSULTATION"',
+      'Service Category': '"Single service,Profile/Package,Outsourced service,Special test"',
+      'Result Type': '"Numeric,Alphanumeric,Template,Parameter,Form"',
+      'Applicable Visit': '"IP,OP,Both"',
+      'Applicable Gender': '"Both,Male,Female"',
+    };
+    const boolCols = ['Is Active', 'Chargeable', 'Schedulable', 'Individually Orderable', 'Consent Required', 'Is External', 'Is Auth Required'];
+
+    // Set sample row data on Row 2 (directly below headers)
+    const sampleRow = ws.getRow(2);
+    sampleRow.values = [
+      'LAB001', 'Complete Blood Count', 'LABORATORY', 'Single service',
+      'Numeric', 'CBC', 'Both', 'Both',
+      '100', 'LAB001', 'SERVICE_GROUPS/Lab', 'Services/Lab',
+      'ERP Finance1', '30', '1', '', '',
+      'Yes', 'Yes', 'No', 'Yes', 'No', 'No', 'No'
+    ];
+    sampleRow.font = { italic: true, color: { argb: 'FF64748B' } };
+
+    // Apply data validations to rows 2 to 1001
+    for (let rowIdx = 2; rowIdx <= 1001; rowIdx++) {
+      headers.forEach((header, colIdx) => {
+        const col = colIdx + 1;
+        if (enumLists[header as keyof typeof enumLists]) {
+          ws.getCell(rowIdx, col).dataValidation = {
+            type: 'list', allowBlank: true, showErrorMessage: true,
+            formulae: [enumLists[header as keyof typeof enumLists]]
+          };
+        } else if (boolCols.includes(header)) {
+          ws.getCell(rowIdx, col).dataValidation = {
+            type: 'list', allowBlank: true, showErrorMessage: true,
+            formulae: ['"Yes,No"']
+          };
+        }
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'lab_services_template.xlsx'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ─── Excel Upload / Validate / Commit ────────────────────────────────────────
+  const handleUploadExcel = async (file: File) => {
+    setImportLoading(true);
+    setImportPendingFile(file);
+    try {
+      const token = await getAuthToken();
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await fetch(`${BACKEND_URL}/api/lims/service-import/validate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(data.fileError || data.error || 'Validation failed');
+        return;
+      }
+      setImportPreviewRows(data.rows || []);
+      setImportSummary(data.summary || {});
+      setShowImportPreview(true);
+    } catch (err: any) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setImportLoading(false);
+      if (importFileInputRef.current) importFileInputRef.current.value = '';
+    }
+  };
+
+  const handleCommitImport = async () => {
+    if (!importPendingFile) return;
+    setImportCommitting(true);
+    try {
+      const token = await getAuthToken();
+      const formData = new FormData();
+      formData.append('file', importPendingFile);
+      const resp = await fetch(`${BACKEND_URL}/api/lims/service-import/commit`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        alert(data.fileError || data.error || 'Commit failed');
+        return;
+      }
+      setImportResultRows(data.rows || []);
+      setImportResultSummary(data.summary || {});
+      setShowImportPreview(false);
+      setShowImportResults(true);
+      setImportPendingFile(null);
+      const supabase = getSupabase();
+      const { data: refreshed } = await supabase.from('service_definitions').select('*').order('name');
+      if (refreshed) setServices(refreshed);
+    } catch (err: any) {
+      alert('Commit failed: ' + err.message);
+    } finally {
+      setImportCommitting(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {/* ── Sidebar ── */}
@@ -1021,12 +1191,58 @@ export default function LimsMasters() {
           {/* ─ SERVICES TAB ─ */}
           {activeTab === 'services' && (
             <div className="flex h-full">
-
-              {/* Left: Service List */}
-              <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
-                <div className="p-3 border-b border-slate-100 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xxs font-bold text-slate-400 uppercase tracking-wider">Active Services</span>
+              {/* Left: Service List (Redesigned as full width grid table) */}
+              <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+                {/* Toolbar */}
+                <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        value={serviceSearch}
+                        onChange={e => setServiceSearch(e.target.value)}
+                        placeholder="Search services..."
+                        className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-400 bg-slate-50 w-64 font-medium"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    {/* Excel Import/Export — gated to Admin / Lab Manager */}
+                    {canImportExport && (
+                      <>
+                        <button
+                          onClick={handleDownloadTemplate}
+                          className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          title="Download Excel template with dropdown validations"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Template
+                        </button>
+                        <button
+                          onClick={() => importFileInputRef.current?.click()}
+                          disabled={importLoading}
+                          className="flex items-center gap-1.5 px-3.5 py-2 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 rounded-lg text-xs font-bold transition-all cursor-pointer disabled:opacity-60"
+                          title="Upload Excel file to bulk import/update services"
+                        >
+                          {importLoading ? (
+                            <span className="w-3.5 h-3.5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin inline-block" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5" />
+                          )}
+                          Import Excel
+                        </button>
+                        <input
+                          ref={importFileInputRef}
+                          type="file"
+                          accept=".xlsx"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadExcel(file);
+                          }}
+                        />
+                      </>
+                    )}
                     <button
                       onClick={() => {
                         setServiceForm({
@@ -1065,93 +1281,167 @@ export default function LimsMasters() {
                           price: ''
                         });
                         setIsAddingService(true);
+                        setServiceSubTab('details');
+                        setShowServiceModal(true);
                       }}
-                      className="text-xxs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded font-bold transition-all animate-pulse"
-                    >+ New Service</button>
-                  </div>
-                  <div className="relative">
-                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                    <input
-                      value={serviceSearch}
-                      onChange={e => setServiceSearch(e.target.value)}
-                      placeholder="Search services..."
-                      className="w-full pl-6 pr-2 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-blue-400 bg-slate-50"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                  {filteredServices.map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSelectedService(s)}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all border ${
-                        selectedService?.id === s.id
-                          ? 'bg-blue-50 text-blue-700 font-bold border-blue-200 shadow-sm'
-                          : 'bg-white border-slate-100 text-slate-700 hover:bg-slate-50 hover:border-slate-200'
-                      }`}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-md shadow-blue-100"
                     >
-                      <div className="font-semibold truncate">{s.name}</div>
-                      <div className={`text-xxs font-mono mt-0.5 ${selectedService?.id === s.id ? 'text-blue-500' : 'text-slate-400'}`}>{s.code}</div>
+                      <Plus className="w-3.5 h-3.5" />
+                      Create Service
                     </button>
-                  ))}
-                  {filteredServices.length === 0 && (
-                    <div className="text-center py-8 text-slate-400 text-xs">No services found</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right: Config Panel */}
-              <div className="flex-1 flex flex-col overflow-y-auto bg-slate-50">
-                {(!selectedService && !isAddingService) ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3 py-20">
-                    <FlaskConical className="w-12 h-12 text-blue-200" />
-                    <p className="text-sm font-semibold">Select a lab service from the active services list or click "+ New Service" to start.</p>
                   </div>
-                ) : (
-                  <div className="flex-1 p-6 space-y-6">
-                    {/* Top Section: Complete Service Definition Form */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                      <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <Sliders className="w-4 h-4 text-blue-600" />
-                            {isAddingService ? 'New Lab Service Registration' : 'Lab Service Master Configuration'}
-                          </h3>
-                          <p className="text-xxs text-slate-500 mt-0.5 font-semibold">
-                            {isAddingService ? 'Register a new clinical service with custom billing, operations, and parameters.' : `Modify properties for service code: ${selectedService?.code}`}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {isAddingService ? (
-                            <>
-                              <button 
-                                onClick={() => setIsAddingService(false)} 
-                                className="px-3 py-1.5 border border-slate-300 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-600 bg-white transition-all cursor-pointer"
-                              >
-                                Cancel
-                              </button>
-                              <button 
-                                onClick={handleAddService} 
-                                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
-                              >
-                                Save Service
-                              </button>
-                            </>
-                          ) : (
-                            <button 
-                              onClick={handleUpdateService} 
-                              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
-                            >
-                              Save Changes
-                            </button>
-                          )}
-                        </div>
-                      </div>
+                </div>
 
-                      {/* Unified Form Body */}
-                      <div className="p-4 space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-x-4 gap-y-3">
+                {/* Table Grid View */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          <th className="px-6 py-4">Service Code</th>
+                          <th className="px-6 py-4">Service Name</th>
+                          <th className="px-6 py-4">Service Type</th>
+                          <th className="px-6 py-4 text-center">Modify</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 text-xs font-medium text-slate-700">
+                        {filteredServices.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="text-center py-12 text-slate-400 font-semibold bg-white">
+                              No services found. Click "Create Service" to add one.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredServices.map(s => (
+                            <tr key={s.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-4 font-mono font-bold text-blue-600">{s.code}</td>
+                              <td className="px-6 py-4 font-bold text-slate-900">{s.name}</td>
+                              <td className="px-6 py-4">
+                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full font-bold text-[10px] uppercase tracking-wider border border-slate-200">
+                                  {s.service_type || 'LABORATORY'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <button
+                                  onClick={() => {
+                                    setSelectedService(s);
+                                    setIsAddingService(false);
+                                    setServiceSubTab('details');
+                                    setShowServiceModal(true);
+                                  }}
+                                  className="p-1.5 text-blue-600 hover:bg-blue-50 hover:text-blue-700 rounded-lg transition-all"
+                                  title="Modify Service"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>              {/* Right: Config Panel (Redesigned as Modal overlay) */}
+              {showServiceModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl shadow-xl flex flex-col w-full max-w-5xl max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-250">
+                    
+                    {/* Modal Header */}
+                    <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <Sliders className="w-4 h-4 text-blue-600" />
+                          {isAddingService ? 'New Lab Service Registration' : 'Lab Service Master Configuration'}
+                        </h3>
+                        <p className="text-xxs text-slate-500 mt-0.5 font-semibold">
+                          {isAddingService ? 'Register a new clinical service with custom billing, operations, and parameters.' : `Modify properties for service code: ${selectedService?.code}`}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        {isAddingService ? (
+                          <>
+                            <button 
+                              onClick={() => {
+                                setShowServiceModal(false);
+                                setIsAddingService(false);
+                                setSelectedService(null);
+                              }} 
+                              className="px-3 py-1.5 border border-slate-350 hover:bg-slate-100 rounded-lg text-xs font-bold text-slate-600 bg-white transition-all cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                            <button 
+                              onClick={async () => {
+                                await handleAddService();
+                              }} 
+                              className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                            >
+                              Save Service
+                            </button>
+                          </>
+                        ) : (
+                          <button 
+                            onClick={async () => {
+                              await handleUpdateService();
+                            }} 
+                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                          >
+                            Save Changes
+                          </button>
+                        )}
+                        
+                        <button 
+                          onClick={() => {
+                            setShowServiceModal(false);
+                            setIsAddingService(false);
+                            setSelectedService(null);
+                          }}
+                          className="p-1.5 hover:bg-slate-200 text-slate-500 hover:text-slate-700 rounded-lg transition-all shrink-0 cursor-pointer"
+                        >
+                          <X className="w-4.5 h-4.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Modal Sub-tabs (only visible when editing an existing service) */}
+                    {!isAddingService && (
+                      <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex gap-1.5 overflow-x-auto shrink-0">
+                        <button
+                          onClick={() => setServiceSubTab('details')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                            serviceSubTab === 'details'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm font-bold'
+                              : 'bg-white border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                          }`}
+                        >
+                          Service Details
+                        </button>
+                        {subTabs.map(tab => (
+                          <button
+                            key={tab.id}
+                            disabled={tab.disabled}
+                            onClick={() => setServiceSubTab(tab.id)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                              serviceSubTab === tab.id
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm font-bold'
+                                : 'bg-white border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-40'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Modal Scrollable Body */}
+                    <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+                      
+                      {/* 1. Core Service Details Form Tab */}
+                      {(isAddingService || serviceSubTab === 'details') && (
+                        <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-6 shadow-sm">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-x-4 gap-y-3">
                           
                           {/* --- CLINICAL SPECS --- */}
                           <div className="col-span-full border-b border-slate-100/70 pb-1 flex items-center gap-1.5">
@@ -1464,37 +1754,11 @@ export default function LimsMasters() {
                           </div>
                         </div>
                       </div>
-                    </div>
+                    )}
 
-                    {/* Bottom Section: Sub-tabs and Config Lists */}
-                    {isAddingService ? (
-                      <div className="bg-blue-50 border border-dashed border-blue-200 rounded-2xl p-8 text-center text-blue-600 text-xs font-semibold animate-pulse">
-                        Please save this service definition first to open sub-tab configuration settings (Lab, Specimen, Parameters, Results, TAT, etc.).
-                      </div>
-                    ) : (
-                      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col space-y-6">
-                        {/* Sub-tabs header */}
-                        <div className="flex gap-1 border-b border-slate-200 pb-3 overflow-x-auto">
-                          {subTabs.map(tab => (
-                            <button
-                              key={tab.id}
-                              onClick={() => !tab.disabled && setServiceSubTab(tab.id)}
-                              disabled={tab.disabled}
-                              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                                serviceSubTab === tab.id
-                                  ? 'bg-blue-600 text-white shadow-md shadow-blue-100'
-                                  : tab.disabled
-                                  ? 'text-slate-300 cursor-not-allowed bg-slate-50'
-                                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                              }`}
-                            >
-                              {tab.label}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Sub-tab Content body */}
-                        <div className="space-y-4">
+                      {/* 2. Sub-tab Content Body (only when editing an existing service and a sub-tab is active) */}
+                      {!isAddingService && serviceSubTab !== 'details' && (
+                        <div className="space-y-6 animate-in fade-in duration-150">
 
                       {/* ── LAB DETAILS TAB ── */}
                       {serviceSubTab === 'lab' && (
@@ -2359,10 +2623,164 @@ export default function LimsMasters() {
                         <ProfileComponentsSubtab selectedService={selectedService} />
                       )}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── IMPORT PREVIEW MODAL (validate step) ── */}
+      {showImportPreview && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="w-5 h-5 text-violet-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Import Preview</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Review before committing. Valid rows will be written; blocked/error rows are skipped.</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowImportPreview(false); setImportPendingFile(null); }} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+
+            {/* Summary pills */}
+            {importSummary && (
+              <div className="px-6 py-3 flex items-center gap-3 bg-slate-50 border-b border-slate-100 shrink-0 flex-wrap">
+                <span className="px-3 py-1 bg-slate-200 text-slate-700 rounded-full text-xs font-bold">Total: {importSummary.total}</span>
+                <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Create: {importSummary.toCreate}</span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Update: {importSummary.toUpdate}</span>
+                <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">Blocked: {importSummary.blocked}</span>
+                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">Errors: {importSummary.errors}</span>
               </div>
             )}
+
+            {/* Row table */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="px-3 py-2.5">Row</th>
+                    <th className="px-3 py-2.5">Code</th>
+                    <th className="px-3 py-2.5">Name</th>
+                    <th className="px-3 py-2.5">Action</th>
+                    <th className="px-3 py-2.5">Note / Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {importPreviewRows.map(row => (
+                    <tr key={row.rowNumber} className={`${row.action === 'error' ? 'bg-red-50' : row.action === 'blocked' ? 'bg-amber-50' : ''}`}>
+                      <td className="px-3 py-2.5 font-mono text-slate-500">{row.rowNumber}</td>
+                      <td className="px-3 py-2.5 font-mono font-bold text-blue-600">{row.serviceCode || '—'}</td>
+                      <td className="px-3 py-2.5 font-medium text-slate-800">{row.serviceName || '—'}</td>
+                      <td className="px-3 py-2.5">
+                        {row.action === 'create' && <span className="flex items-center gap-1 text-emerald-600 font-bold"><CheckCircle className="w-3.5 h-3.5" />Create</span>}
+                        {row.action === 'update' && <span className="flex items-center gap-1 text-blue-600 font-bold"><CheckCircle className="w-3.5 h-3.5" />Update</span>}
+                        {row.action === 'blocked' && <span className="flex items-center gap-1 text-amber-600 font-bold"><AlertCircle className="w-3.5 h-3.5" />Blocked</span>}
+                        {row.action === 'error' && <span className="flex items-center gap-1 text-red-600 font-bold"><XCircle className="w-3.5 h-3.5" />Error</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600 italic max-w-xs truncate" title={row.reason}>{row.reason || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between shrink-0 bg-slate-50 rounded-b-2xl">
+              <button
+                onClick={() => { setShowImportPreview(false); setImportPendingFile(null); }}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCommitImport}
+                disabled={importCommitting || (importSummary?.toCreate === 0 && importSummary?.toUpdate === 0)}
+                className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-60"
+              >
+                {importCommitting && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" />}
+                Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── IMPORT RESULTS MODAL (commit step) ── */}
+      {showImportResults && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Import Complete</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Import has been processed. Review final outcomes below.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowImportResults(false)} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="w-4 h-4 text-slate-500" />
+              </button>
+            </div>
+
+            {/* Result summary pills */}
+            {importResultSummary && (
+              <div className="px-6 py-3 flex items-center gap-3 bg-slate-50 border-b border-slate-100 shrink-0 flex-wrap">
+                <span className="px-3 py-1 bg-slate-200 text-slate-700 rounded-full text-xs font-bold">Total: {importResultSummary.total}</span>
+                <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Created: {importResultSummary.created}</span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">Updated: {importResultSummary.updated}</span>
+                <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">Skipped: {importResultSummary.skipped}</span>
+                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">Errors: {importResultSummary.errors}</span>
+              </div>
+            )}
+
+            {/* Row result table */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="px-3 py-2.5">Row</th>
+                    <th className="px-3 py-2.5">Code</th>
+                    <th className="px-3 py-2.5">Name</th>
+                    <th className="px-3 py-2.5">Outcome</th>
+                    <th className="px-3 py-2.5">Note / Reason</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {importResultRows.map(row => (
+                    <tr key={row.rowNumber} className={`${row.action === 'error' ? 'bg-red-50' : row.action === 'blocked' ? 'bg-amber-50' : ''}`}>
+                      <td className="px-3 py-2.5 font-mono text-slate-500">{row.rowNumber}</td>
+                      <td className="px-3 py-2.5 font-mono font-bold text-blue-600">{row.serviceCode || '—'}</td>
+                      <td className="px-3 py-2.5 font-medium text-slate-800">{row.serviceName || '—'}</td>
+                      <td className="px-3 py-2.5">
+                        {row.action === 'create' && <span className="flex items-center gap-1 text-emerald-600 font-bold"><CheckCircle className="w-3.5 h-3.5" />Created</span>}
+                        {row.action === 'update' && <span className="flex items-center gap-1 text-blue-600 font-bold"><CheckCircle className="w-3.5 h-3.5" />Updated</span>}
+                        {row.action === 'blocked' && <span className="flex items-center gap-1 text-amber-600 font-bold"><AlertCircle className="w-3.5 h-3.5" />Blocked</span>}
+                        {row.action === 'error' && <span className="flex items-center gap-1 text-red-600 font-bold"><XCircle className="w-3.5 h-3.5" />Failed</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600 italic max-w-xs truncate" title={row.reason}>{row.reason || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Close action */}
+            <div className="px-6 py-4 border-t border-slate-200 flex justify-end shrink-0 bg-slate-50 rounded-b-2xl">
+              <button
+                onClick={() => setShowImportResults(false)}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

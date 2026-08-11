@@ -1,4 +1,6 @@
 import { Router, Response } from 'express';
+import multer from 'multer';
+import ExcelJS from 'exceljs';
 import { createClient } from '@supabase/supabase-js';
 import { AuthenticatedRequest } from '../middleware/auth';
 import dotenv from 'dotenv';
@@ -10,7 +12,217 @@ const router = Router();
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+// Multer in-memory storage for Excel file uploads (max 15MB)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        file.originalname.endsWith('.xlsx')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .xlsx files are accepted'));
+    }
+  }
+});
+
+// Allowed enum values for import validation
+const ALLOWED_SERVICE_TYPES = ['LABORATORY', 'RADIOLOGY', 'CARDIOLOGY', 'PROCEDURE', 'CONSULTATION'];
+const ALLOWED_SERVICE_CATEGORIES = ['Single service', 'Profile/Package', 'Outsourced service', 'Special test'];
+const ALLOWED_RESULT_TYPES = ['Numeric', 'Alphanumeric', 'Template', 'Parameter', 'Form'];
+const ALLOWED_VISIT_TYPES = ['IP', 'OP', 'Both'];
+const ALLOWED_GENDERS = ['Both', 'Male', 'Female'];
+
+// Required headers for a valid import file
+const REQUIRED_HEADERS = ['Service Code', 'Service Name', 'Service Type'];
+
+// Map of Excel header names to internal payload field names
+const HEADER_MAP: Record<string, string> = {
+  'Service Code': 'code',
+  'Service Name': 'name',
+  'Service Type': 'serviceType',
+  'Service Category': 'serviceCategory',
+  'Result Type': 'resultType',
+  'Alternate Name': 'alternateName',
+  'Applicable Visit': 'applicableVisitType',
+  'Applicable Gender': 'applicableGender',
+  'Standard Price': 'price',
+  'CPT Code': 'cptCode',
+  'Group Name': 'groupName',
+  'Billing Group Name': 'billingGroupName',
+  'Financial Group': 'financialGroup',
+  'Est Duration (Min)': 'estDuration',
+  'Max Orderable Qty': 'maxOrderableQty',
+  'CPT Description': 'cptDescription',
+  'Special Instructions': 'specialInstructions',
+  'Is Active': 'isActive',
+  'Chargeable': 'chargeable',
+  'Schedulable': 'schedulable',
+  'Individually Orderable': 'individuallyOrderable',
+  'Consent Required': 'consentRequired',
+  'Is External': 'isExternal',
+  'Is Auth Required': 'isAuthRequired'
+};
+
+type RowResult = {
+  rowNumber: number;
+  serviceCode: string;
+  serviceName: string;
+  action: 'create' | 'update' | 'blocked' | 'error';
+  reason?: string;
+};
+
+// Converts "Yes"/"No" to boolean - strict, rejects anything else
+function parseBool(val: any): boolean | null {
+  if (val === 'Yes' || val === 'YES' || val === 'yes') return true;
+  if (val === 'No' || val === 'NO' || val === 'no') return false;
+  return null;
+}
+
+// Validates a single Excel row and returns parsed payload or error
+function validateExcelRow(row: Record<string, any>, rowNumber: number): { valid: true; payload: any } | { valid: false; reason: string } {
+  const code = (row['code'] || '').toString().trim().toUpperCase();
+  const name = (row['name'] || '').toString().trim();
+  const serviceType = (row['serviceType'] || '').toString().trim().toUpperCase();
+  const serviceCategory = (row['serviceCategory'] || 'Single service').toString().trim();
+  const resultType = (row['resultType'] || 'Numeric').toString().trim();
+  const applicableVisit = (row['applicableVisitType'] || 'Both').toString().trim();
+  const applicableGender = (row['applicableGender'] || 'Both').toString().trim();
+
+  if (!code) return { valid: false, reason: 'Service Code is required' };
+  if (!name) return { valid: false, reason: 'Service Name is required' };
+  if (!ALLOWED_SERVICE_TYPES.includes(serviceType)) return { valid: false, reason: `Invalid Service Type "${serviceType}". Allowed: ${ALLOWED_SERVICE_TYPES.join(', ')}` };
+  if (!ALLOWED_SERVICE_CATEGORIES.includes(serviceCategory)) return { valid: false, reason: `Invalid Service Category "${serviceCategory}"` };
+  if (!ALLOWED_RESULT_TYPES.includes(resultType)) return { valid: false, reason: `Invalid Result Type "${resultType}"` };
+  if (!ALLOWED_VISIT_TYPES.includes(applicableVisit)) return { valid: false, reason: `Invalid Applicable Visit "${applicableVisit}"` };
+  if (!ALLOWED_GENDERS.includes(applicableGender)) return { valid: false, reason: `Invalid Applicable Gender "${applicableGender}"` };
+
+  const priceRaw = row['price'];
+  let price: number | null = null;
+  if (priceRaw !== undefined && priceRaw !== null && priceRaw !== '') {
+    price = parseFloat(priceRaw);
+    if (isNaN(price)) return { valid: false, reason: `Invalid price value "${priceRaw}" - must be a number` };
+  }
+
+  // Parse boolean fields - must be strict Yes/No only
+  const boolFields = ['isActive', 'chargeable', 'schedulable', 'individuallyOrderable', 'consentRequired', 'isExternal', 'isAuthRequired'];
+  const boolValues: Record<string, boolean> = {};
+  const boolDefaults: Record<string, boolean> = {
+    isActive: true, chargeable: true, schedulable: false,
+    individuallyOrderable: true, consentRequired: false, isExternal: false, isAuthRequired: false
+  };
+  for (const field of boolFields) {
+    const rawVal = row[field];
+    if (rawVal === undefined || rawVal === null || rawVal === '') {
+      boolValues[field] = boolDefaults[field];
+    } else {
+      const parsed = parseBool(rawVal);
+      if (parsed === null) return { valid: false, reason: `Invalid value "${rawVal}" for "${field}" - must be exactly "Yes" or "No"` };
+      boolValues[field] = parsed;
+    }
+  }
+
+  return {
+    valid: true,
+    payload: {
+      code,
+      name,
+      serviceType: serviceType,
+      serviceCategory,
+      resultType,
+      alternateName: (row['alternateName'] || '').toString().trim() || null,
+      applicableVisitType: applicableVisit,
+      applicableGender,
+      price,
+      cptCode: (row['cptCode'] || '').toString().trim() || null,
+      groupName: (row['groupName'] || 'SERVICE_GROUPS/Lab').toString().trim(),
+      billingGroupName: (row['billingGroupName'] || 'Services/Lab').toString().trim(),
+      financialGroup: (row['financialGroup'] || 'ERP Finance1').toString().trim(),
+      estDuration: parseInt(row['estDuration'] || '0') || 0,
+      maxOrderableQty: parseInt(row['maxOrderableQty'] || '1') || 1,
+      cptDescription: (row['cptDescription'] || '').toString().trim() || null,
+      specialInstructions: (row['specialInstructions'] || '').toString().trim() || null,
+      ...boolValues
+    }
+  };
+}
+
+// Checks if a category change would break existing dependencies
+async function checkCategoryConflict(code: string, existingRecord: any, newCategory: string): Promise<string | null> {
+  if (!existingRecord || existingRecord.service_category === newCategory) return null;
+
+  // Check reagent mappings
+  const { data: reagents } = await supabase
+    .from('lims_service_reagents')
+    .select('id')
+    .eq('service_id', existingRecord.id)
+    .limit(1);
+
+  if (reagents && reagents.length > 0) {
+    return `Cannot change category: service has ${reagents.length} active reagent mapping(s). Remove reagents first.`;
+  }
+
+  // Check profile component links (service is a component of a profile, or is a profile with components)
+  const { data: components } = await supabase
+    .from('lims_service_profile_components')
+    .select('id')
+    .or(`profile_service_id.eq.${existingRecord.id},component_service_id.eq.${existingRecord.id}`)
+    .limit(1);
+
+  if (components && components.length > 0) {
+    return `Cannot change category: service is linked to ${components.length} profile component(s). Remove profile links first.`;
+  }
+
+  return null;
+}
+
+// Parses an uploaded Excel buffer into an array of row objects keyed by header names
+async function parseExcelBuffer(buffer: Buffer): Promise<{ headers: string[]; rows: Record<string, any>[] } | { error: string }> {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buffer as any);
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) return { error: 'No worksheets found in the uploaded file' };
+
+    // Read headers from row 1
+    const headerRow = worksheet.getRow(1);
+    const headers: string[] = [];
+    headerRow.eachCell({ includeEmpty: false }, (cell) => {
+      headers.push(cell.value?.toString().trim() || '');
+    });
+
+    // Check all required headers are present
+    const missingHeaders = REQUIRED_HEADERS.filter(h => !headers.includes(h));
+    if (missingHeaders.length > 0) {
+      return { error: `Missing required column(s): ${missingHeaders.join(', ')}` };
+    }
+
+    // Parse data rows
+    const rows: Record<string, any>[] = [];
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return; // skip header
+      const rowData: Record<string, any> = {};
+      let hasData = false;
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const header = headers[colNumber - 1];
+        if (header && HEADER_MAP[header]) {
+          const fieldKey = HEADER_MAP[header];
+          rowData[fieldKey] = cell.value !== null && cell.value !== undefined ? String(cell.value).trim() : '';
+          if (rowData[fieldKey]) hasData = true;
+        }
+      });
+      if (hasData) rows.push({ ...rowData, _rowNumber: rowNumber });
+    });
+
+    return { headers, rows };
+  } catch (err: any) {
+    return { error: `Failed to parse Excel file: ${err.message}` };
+  }
+}
 
 // Helper to write audit trail entries
 async function logAuditTrail(
@@ -808,4 +1020,273 @@ router.post('/orders/accept', async (req: AuthenticatedRequest, res: Response) =
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Lab Service Bulk Import — Validate & Commit endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helper to run full file validation (shared by both validate and commit)
+async function runFullValidation(buffer: Buffer): Promise<
+  | { ok: false; fileError: string }
+  | { ok: true; rowResults: RowResult[]; parsedRows: Array<{ rowData: Record<string, any>; payload: any }> }
+> {
+  const parsed = await parseExcelBuffer(buffer);
+  if ('error' in parsed) return { ok: false, fileError: parsed.error };
+
+  const { rows } = parsed;
+  const rowResults: RowResult[] = [];
+  const parsedRows: Array<{ rowData: Record<string, any>; payload: any }> = [];
+  const seenCodes = new Set<string>();
+
+  for (const rowData of rows) {
+    const rowNumber = rowData._rowNumber as number;
+    const validation = validateExcelRow(rowData, rowNumber);
+    const rawCode = (rowData['code'] || '').toString().trim().toUpperCase();
+    const rawName = (rowData['name'] || '').toString().trim();
+
+    if (!validation.valid) {
+      rowResults.push({ rowNumber, serviceCode: rawCode, serviceName: rawName, action: 'error', reason: validation.reason });
+      parsedRows.push({ rowData, payload: null });
+      continue;
+    }
+
+    const { payload } = validation;
+
+    // Duplicate within file check
+    if (seenCodes.has(payload.code)) {
+      rowResults.push({ rowNumber, serviceCode: payload.code, serviceName: payload.name, action: 'error', reason: `Duplicate Service Code "${payload.code}" within this file — only the first occurrence is processed` });
+      parsedRows.push({ rowData, payload: null });
+      continue;
+    }
+    seenCodes.add(payload.code);
+
+    // Check if service already exists
+    const { data: existing } = await supabase
+      .from('service_definitions')
+      .select('id, service_category, code, name')
+      .eq('code', payload.code)
+      .maybeSingle();
+
+    const action: 'create' | 'update' = existing ? 'update' : 'create';
+
+    // Category conflict check on existing services
+    if (existing) {
+      const conflict = await checkCategoryConflict(payload.code, existing, payload.serviceCategory);
+      if (conflict) {
+        rowResults.push({ rowNumber, serviceCode: payload.code, serviceName: payload.name, action: 'blocked', reason: conflict });
+        parsedRows.push({ rowData, payload: null });
+        continue;
+      }
+    }
+
+    let reason: string | undefined;
+    if (action === 'create' && payload.serviceCategory === 'Profile/Package') {
+      reason = 'Will be created as Profile/Package shell — map components manually in the Components tab';
+    }
+
+    rowResults.push({ rowNumber, serviceCode: payload.code, serviceName: payload.name, action, reason });
+    parsedRows.push({ rowData, payload: { ...payload, existingId: existing?.id || null } });
+  }
+
+  return { ok: true, rowResults, parsedRows };
+}
+
+// POST /service-import/validate — dry-run preview, no writes
+router.post('/service-import/validate', upload.single('file'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ fileError: 'No file uploaded. Send the Excel file as multipart/form-data with field name "file".' });
+      return;
+    }
+
+    const result = await runFullValidation(req.file.buffer);
+    if (!result.ok) {
+      res.status(422).json({ fileError: result.fileError });
+      return;
+    }
+
+    const { rowResults } = result;
+    const summary = {
+      total: rowResults.length,
+      toCreate: rowResults.filter(r => r.action === 'create').length,
+      toUpdate: rowResults.filter(r => r.action === 'update').length,
+      blocked: rowResults.filter(r => r.action === 'blocked').length,
+      errors: rowResults.filter(r => r.action === 'error').length,
+    };
+
+    res.json({ rows: rowResults, summary });
+  } catch (err: any) {
+    console.error('Service import validate error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /service-import/commit — writes valid rows per-row transactionally
+router.post('/service-import/commit', upload.single('file'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ fileError: 'No file uploaded.' });
+      return;
+    }
+
+    const fileName = req.file.originalname;
+    
+    // Resolve performedBy to a valid app_users.id to prevent FK violations
+    let performedBy = (req as any).user?.id || null;
+    if (performedBy) {
+      const { data: userExists } = await supabaseAdmin
+        .from('app_users')
+        .select('id')
+        .eq('id', performedBy)
+        .maybeSingle();
+      if (!userExists) {
+        // Try fallback search by username (in case of demo token where req.user.email is the username)
+        const username = (req as any).user?.email || '';
+        const { data: userByUsername } = await supabaseAdmin
+          .from('app_users')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+        if (userByUsername) {
+          performedBy = userByUsername.id;
+        } else {
+          performedBy = null;
+        }
+      }
+    }
+
+    // Re-run full validation server-side — never trust a stale client preview
+    const validation = await runFullValidation(req.file.buffer);
+    if (!validation.ok) {
+      res.status(422).json({ fileError: validation.fileError });
+      return;
+    }
+
+    const { rowResults, parsedRows } = validation;
+    const finalResults: RowResult[] = [];
+    let createdCount = 0, updatedCount = 0, skippedCount = 0, errorCount = 0;
+
+    for (let i = 0; i < rowResults.length; i++) {
+      const preResult = rowResults[i];
+      const { payload } = parsedRows[i];
+
+      // Blocked or validation-error rows — skip, don't attempt writes
+      if (preResult.action === 'blocked' || preResult.action === 'error') {
+        finalResults.push(preResult);
+        preResult.action === 'blocked' ? skippedCount++ : errorCount++;
+        continue;
+      }
+
+      if (!payload) {
+        finalResults.push({ ...preResult, action: 'error', reason: 'Internal: parsed payload missing' });
+        errorCount++;
+        continue;
+      }
+
+      // Per-row write attempt (simulated transaction via sequential upserts)
+      try {
+        const serviceId = payload.existingId || Date.now().toString() + '_' + Math.random().toString(36).slice(2, 7);
+
+        const dbPayload = {
+          id: serviceId,
+          code: payload.code,
+          name: payload.name,
+          alternate_name: payload.alternateName,
+          service_type: payload.serviceType,
+          service_category: payload.serviceCategory,
+          status: payload.isActive ? 'Active' : 'Inactive',
+          chargeable: payload.chargeable,
+          applicable_visit_type: payload.applicableVisitType === 'IP' ? 'New' : payload.applicableVisitType === 'OP' ? 'Follow-up' : 'Both',
+          applicable_gender: payload.applicableGender,
+          est_duration: payload.estDuration,
+          max_orderable_qty: payload.maxOrderableQty,
+          cpt_code: payload.cptCode,
+          schedulable: payload.schedulable,
+          individually_orderable: payload.individuallyOrderable,
+          consent_required: payload.consentRequired,
+          is_external: payload.isExternal,
+          is_auth_required: payload.isAuthRequired,
+          group_name: payload.groupName,
+          billing_group_name: payload.billingGroupName,
+          financial_group: payload.financialGroup,
+          cpt_description: payload.cptDescription,
+          special_instructions: payload.specialInstructions
+        };
+
+        // Upsert service_definitions
+        const { error: sdError } = payload.existingId
+          ? await supabaseAdmin.from('service_definitions').update(dbPayload).eq('id', serviceId)
+          : await supabaseAdmin.from('service_definitions').insert(dbPayload);
+
+        if (sdError) throw new Error(`service_definitions: ${sdError.message}`);
+
+        // Upsert lims_service_configs
+        const { error: configError } = await supabaseAdmin.from('lims_service_configs').upsert({
+          service_id: serviceId,
+          result_type: payload.resultType
+        }, { onConflict: 'service_id' });
+        if (configError) throw new Error(`lims_service_configs: ${configError.message}`);
+
+        // Upsert Self Pay tariff if price is provided
+        if (payload.price !== null) {
+          const { data: existingTariff } = await supabaseAdmin
+            .from('service_tariffs')
+            .select('id')
+            .eq('service_id', serviceId)
+            .eq('tariff_name', 'Self Pay')
+            .maybeSingle();
+
+          if (existingTariff) {
+            await supabaseAdmin.from('service_tariffs').update({ price: payload.price }).eq('id', existingTariff.id);
+          } else {
+            await supabaseAdmin.from('service_tariffs').insert({
+              id: crypto.randomUUID(),
+              service_id: serviceId,
+              tariff_name: 'Self Pay',
+              price: payload.price,
+              effective_date: new Date().toISOString(),
+              status: 'Active'
+            });
+          }
+        }
+
+        const outcome = payload.existingId ? 'update' : 'create';
+        let rowNote = preResult.reason;
+        finalResults.push({ ...preResult, action: outcome as 'create' | 'update', reason: rowNote });
+        outcome === 'create' ? createdCount++ : updatedCount++;
+
+      } catch (rowErr: any) {
+        console.error(`Import row ${preResult.rowNumber} failed:`, rowErr.message);
+        finalResults.push({ ...preResult, action: 'error', reason: rowErr.message });
+        errorCount++;
+      }
+    }
+
+    // Write audit log (service role — bypasses RLS)
+    try {
+      await supabaseAdmin.from('lab_service_import_log').insert({
+        performed_by: performedBy,
+        file_name: fileName,
+        total_rows: finalResults.length,
+        created_count: createdCount,
+        updated_count: updatedCount,
+        skipped_count: skippedCount,
+        error_count: errorCount,
+        row_results: finalResults
+      });
+    } catch (logErr: any) {
+      console.error('Import audit log write failed:', logErr.message);
+    }
+
+    res.json({
+      summary: { total: finalResults.length, created: createdCount, updated: updatedCount, skipped: skippedCount, errors: errorCount },
+      rows: finalResults
+    });
+
+  } catch (err: any) {
+    console.error('Service import commit error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
+
