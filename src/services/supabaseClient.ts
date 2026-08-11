@@ -2,8 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // --- CONFIGURATION START ---
 // FIXED: Hardcoded directly to your explicit, live production Supabase instance
-const HARDCODED_URL = 'https://wbjtdhtvzlefzjvwhkui.supabase.co'; 
-const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndianRkaHR2emxlZnpqdndoa3VpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODYwMzUsImV4cCI6MjA5NzQ2MjAzNX0.-ju4dC10xPXNaVMUSVQnB7UoucakJKdepxRcUgEfeis';
+const HARDCODED_URL = 'https://uehbrvyftfuuhfwkzxfx.supabase.co'; 
+const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlaGJydnlmdGZ1dWhmd2t6eGZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNzgwMTcsImV4cCI6MjEwMTk1NDAxN30._MQu3-DkjEjdMQWzmN_poyRrAaqhLlQ08FjcqFeoCeM';
 // --- CONFIGURATION END ---
 
 const STORAGE_KEY_URL = 'medicore_sb_url';
