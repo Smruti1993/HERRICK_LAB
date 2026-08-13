@@ -2446,8 +2446,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .select('closing_stock, closing_stock_rate')
       .eq('store_id', storeId)
       .eq('item_id', itemId)
-      .order('ref_doc_date', { ascending: false })
       .order('created_at', { ascending: false })
+      .order('ref_doc_date', { ascending: false })
       .limit(1);
 
     if (error || !data || data.length === 0) {

@@ -297,6 +297,10 @@ export default function LimsAcceptSample() {
         // Apply filters client-side
         let filtered = normalized;
 
+        if (orderId) {
+          filtered = filtered.filter(s => s.lab_order_id === orderId || s.lab_order?.id === orderId);
+        }
+
         if (searchMrn) {
           filtered = filtered.filter(s => 
             s.lab_order?.service_order?.appointment?.patient?.id?.toLowerCase().includes(searchMrn.toLowerCase())
@@ -386,7 +390,6 @@ export default function LimsAcceptSample() {
   // Handle routing navigation parameter if any
   useEffect(() => {
     if (orderId) {
-      setSearchPsNo(orderId);
       setSearchStatus('Sample Send');
     }
   }, [orderId]);

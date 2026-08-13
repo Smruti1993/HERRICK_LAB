@@ -194,8 +194,8 @@ export const StockTransfer = () => {
           .select('closing_stock_rate')
           .eq('store_id', sourceStoreId)
           .eq('item_id', t.item.id)
-          .order('ref_doc_date', { ascending: false })
           .order('created_at', { ascending: false })
+          .order('ref_doc_date', { ascending: false })
           .limit(1);
 
         const currentSrcRate = srcRateData && srcRateData.length > 0 ? Number(srcRateData[0].closing_stock_rate || 0) : t.rate;
@@ -244,8 +244,8 @@ export const StockTransfer = () => {
           .select('closing_stock_rate')
           .eq('store_id', destStoreId)
           .eq('item_id', t.item.id)
-          .order('ref_doc_date', { ascending: false })
           .order('created_at', { ascending: false })
+          .order('ref_doc_date', { ascending: false })
           .limit(1);
 
         const currentDestRate = destRateData && destRateData.length > 0 ? Number(destRateData[0].closing_stock_rate || 0) : 0;
