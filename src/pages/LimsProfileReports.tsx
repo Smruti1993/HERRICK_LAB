@@ -302,13 +302,18 @@ export default function LimsProfileReports() {
         );
       }
 
-      // Filter by Status if selected
-      if (filterStatus !== 'All') {
-        filteredOrders = filteredOrders.filter(o => o.status === filterStatus);
-      }
+      // Restrict to certified profile tests only:
+      // - status must be 'Certified' (result entered & signed off in Perform Test screen)
+      // - source_profile_service_id must be set (test is a child component of a profile service)
+      filteredOrders = filteredOrders.filter(o =>
+        o.status === 'Certified' &&
+        o.source_profile_service_id !== null &&
+        o.source_profile_service_id !== undefined &&
+        o.source_profile_service_id !== ''
+      );
 
       if (filteredOrders.length === 0) {
-        showToast('info', 'No orders matched the selected status or visit filters.');
+        showToast('info', 'No certified profile reports found for this visit.');
         setPatient(null);
         setProfiles([]);
         setLoading(false);
@@ -910,16 +915,10 @@ export default function LimsProfileReports() {
 
           <div className="flex flex-col">
             <label className="text-xxs font-bold text-slate-450 uppercase mb-1.5 tracking-wider">Report Status</label>
-            <select
-              value={filterStatus}
-              onChange={e => setFilterStatus(e.target.value)}
-              className="border border-slate-250 rounded-xl py-2 px-3 text-xs w-36 focus:outline-none bg-white"
-            >
-              <option value="All">All</option>
-              <option value="Certified">Certified</option>
-              <option value="Result">Result Entered</option>
-              <option value="Accepted">Accepted</option>
-            </select>
+            <div className="border border-emerald-200 bg-emerald-50 rounded-xl py-2 px-3 text-xs w-36 text-emerald-700 font-bold flex items-center gap-1.5 select-none">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
+              Certified Only
+            </div>
           </div>
 
           <div className="flex gap-2">
