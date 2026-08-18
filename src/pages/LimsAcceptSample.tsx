@@ -298,7 +298,7 @@ export default function LimsAcceptSample() {
         let filtered = normalized;
 
         if (orderId) {
-          filtered = filtered.filter(s => s.lab_order_id === orderId || s.lab_order?.id === orderId);
+          filtered = filtered.filter(s => s.lab_order?.id === orderId);
         }
 
         if (searchMrn) {
