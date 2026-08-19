@@ -561,8 +561,29 @@ export const NewInvoice: React.FC = () => {
       showToast('error', 'First name, last name, and phone are required.');
       return;
     }
+
+    const resetForm = () => setNewPatientForm({ firstName: '', lastName: '', dob: '', gender: 'Male', phone: '', email: '', address: '' });
+
+    // Check if a patient with the same phone number already exists in the patients table
+    // (exclude ABDM demographic-only entries which are not in the patients table)
+    const existingPatient = patients.find(
+      p => !((p as any)._isAbdmDemographic) && p.phone.trim() === newPatientForm.phone.trim()
+    );
+
+    if (existingPatient) {
+      // Patient already registered — select them without creating a duplicate
+      setSelectedPatientId(existingPatient.id);
+      setPatientSearch(`${existingPatient.firstName} ${existingPatient.lastName}`);
+      setShowNewPatientModal(false);
+      resetForm();
+      showToast('info', `Already registered: ${existingPatient.firstName} ${existingPatient.lastName} selected.`);
+      return;
+    }
+
+    // No existing patient found — register as new patient in the patients table
+    // Using Date.now().toString() for safe ID generation (works on HTTP and HTTPS)
     const newPat: Patient = {
-      id: crypto.randomUUID(),
+      id: Date.now().toString(),
       firstName: newPatientForm.firstName,
       lastName: newPatientForm.lastName,
       dob: newPatientForm.dob || new Date().toISOString().split('T')[0],
@@ -576,15 +597,7 @@ export const NewInvoice: React.FC = () => {
     setSelectedPatientId(newPat.id);
     setPatientSearch(`${newPat.firstName} ${newPat.lastName}`);
     setShowNewPatientModal(false);
-    setNewPatientForm({
-      firstName: '',
-      lastName: '',
-      dob: '',
-      gender: 'Male',
-      phone: '',
-      email: '',
-      address: ''
-    });
+    resetForm();
   };
 
   // --- Filtered Services for Autocomplete ---

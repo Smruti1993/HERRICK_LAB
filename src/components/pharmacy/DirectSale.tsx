@@ -101,6 +101,176 @@ export const DirectSale: React.FC = () => {
   // Location display for each row
   const [rowLocations, setRowLocations] = useState<Record<number, string | null>>({});
 
+  // A-Z and Card Grid states
+  const [selectedLetter, setSelectedLetter] = useState('All');
+  const [visibleStocks, setVisibleStocks] = useState<Record<string, { stock: number; mrp: number }>>({});
+  const [visibleStocksLoading, setVisibleStocksLoading] = useState(false);
+  const [visibleQuantities, setVisibleQuantities] = useState<Record<string, number>>({});
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [isPatientInfoCollapsed, setIsPatientInfoCollapsed] = useState(false);
+
+  const mappedItemIds = new Set(storeItemMappings.filter(m => m.storeId === selectedStore).map(m => m.itemId));
+  
+  const gridFilteredItems = inventoryItems.filter(i => {
+    if (i.isActive === false) return false;
+    if (!mappedItemIds.has(i.id)) return false;
+    if (selectedLetter !== 'All') {
+      return i.itemName.trim().toUpperCase().startsWith(selectedLetter);
+    }
+    return true;
+  }).sort((a, b) => a.itemName.localeCompare(b.itemName));
+
+  const visibleGridItems = gridFilteredItems.slice(0, 12);
+
+  // Load stocks and prices for visible cards in parallel
+  useEffect(() => {
+    if (!selectedStore || visibleGridItems.length === 0) {
+      setVisibleStocks({});
+      return;
+    }
+
+    let isCurrent = true;
+    setVisibleStocksLoading(true);
+
+    const loadStocks = async () => {
+      try {
+        const promises = visibleGridItems.map(async (item) => {
+          const batches = await fetchBatchDetails(selectedStore, item.id);
+          const totalStock = batches.reduce((sum, b) => sum + (b.currentStock || 0), 0);
+          const sorted = [...batches].sort((a, b) => {
+            if (!a.expiryDate) return 1;
+            if (!b.expiryDate) return -1;
+            return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+          });
+          const activeBatch = sorted.find(b => b.currentStock > 0) || sorted[0];
+          const mrp = activeBatch ? activeBatch.mrp : 0;
+          return { itemId: item.id, stock: totalStock, mrp };
+        });
+
+        const results = await Promise.all(promises);
+        if (!isCurrent) return;
+
+        const stockMap: Record<string, { stock: number; mrp: number }> = {};
+        results.forEach(res => {
+          stockMap[res.itemId] = { stock: res.stock, mrp: res.mrp };
+        });
+        setVisibleStocks(stockMap);
+      } catch (err) {
+        console.error("Failed to load grid stocks", err);
+      } finally {
+        if (isCurrent) {
+          setVisibleStocksLoading(false);
+        }
+      }
+    };
+
+    loadStocks();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [selectedStore, selectedLetter, inventoryItems.length]);
+
+  const handleAddFromCard = async (item: any) => {
+    try {
+      if (!selectedStore) {
+        showToast('error', 'Please select a store first.');
+        return;
+      }
+      // Default to 1 if display qty is 0 or less
+      const qty = Math.max(1, visibleQuantities[item.id] || 0);
+      
+      // Check if item is already present in current list
+      const existingIndex = items.findIndex(itm => itm.itemId === item.id);
+      if (existingIndex > -1) {
+        updateItemQty(existingIndex, items[existingIndex].quantity + qty);
+        showToast('success', `Updated quantity for ${item.itemName}`);
+        return;
+      }
+
+      // Fetch batches
+      const batches = await fetchBatchDetails(selectedStore, item.id);
+      if (batches.length === 0) {
+        showToast('error', `No stock/batches found for ${item.itemName}`);
+        return;
+      }
+
+      // Select FIFO batch
+      const sortedBatches = [...batches].sort((a, b) => {
+        if (!a.expiryDate) return 1;
+        if (!b.expiryDate) return -1;
+        return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+      });
+      const activeBatch = sortedBatches.find(b => b.currentStock > 0) || sortedBatches[0];
+      const batchNo = activeBatch ? activeBatch.batchNo : '';
+
+      const emptyRowIndex = items.findIndex(itm => !itm.itemId);
+      const targetIndex = emptyRowIndex > -1 ? emptyRowIndex : items.length;
+
+      const newItem: DirectSaleItem = {
+        itemId: item.id,
+        itemCode: item.itemCode,
+        itemName: item.itemName,
+        batchNo: batchNo,
+        quantity: qty,
+        unit: item.salesUom || item.baseUom || 'EACH',
+        unitPrice: 0,
+        totalPrice: 0
+      };
+
+      let updatedItems = [...items];
+      if (emptyRowIndex > -1) {
+        updatedItems[emptyRowIndex] = newItem;
+      } else {
+        updatedItems.push(newItem);
+      }
+
+      setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
+
+      if (activeBatch) {
+        const isSalesUom = newItem.unit?.toUpperCase() === item.salesUom?.toUpperCase();
+        const salesCF = isSalesUom ? Number(item.salesConversionFactor || 1) : 1;
+        const unitPrice = activeBatch.mrp * salesCF;
+        const totalPrice = Number((unitPrice * qty).toFixed(2));
+
+        updatedItems[targetIndex] = {
+          ...newItem,
+          batchNo: batchNo,
+          batchDate: activeBatch.batchDate,
+          unitPrice: unitPrice,
+          costRate: activeBatch.rate,
+          expiryDate: activeBatch.expiryDate,
+          totalPrice: totalPrice
+        };
+      }
+
+      setItems(updatedItems);
+      showToast('success', `Added ${item.itemName} to dispense list.`);
+      
+      // Reset quantity count for that card to 0
+      setVisibleQuantities(prev => ({ ...prev, [item.id]: 0 }));
+    } catch (err: any) {
+      console.error("Error in handleAddFromCard:", err);
+      showToast('error', `Failed to add item: ${err.message || err}`);
+    }
+  };
+
+  const adjustCardQuantity = (itemId: string, diff: number) => {
+    const current = visibleQuantities[itemId] || 0;
+    const next = Math.max(0, current + diff);
+    setVisibleQuantities(prev => ({ ...prev, [itemId]: next }));
+  };
+
+  const toggleFavorite = (itemId: string) => {
+    setFavorites(prev => {
+      if (prev.includes(itemId)) {
+        return prev.filter(id => id !== itemId);
+      } else {
+        return [...prev, itemId];
+      }
+    });
+  };
+
   // Close dropdowns on click outside
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -929,7 +1099,6 @@ export const DirectSale: React.FC = () => {
     }
     setLoading(false);
   };  // Filter items by store mapping and query
-  const mappedItemIds = new Set(storeItemMappings.filter(m => m.storeId === selectedStore).map(m => m.itemId));
   const itemOptions = inventoryItems.filter(i => 
     i.isActive !== false && 
     mappedItemIds.has(i.id) &&
@@ -965,186 +1134,209 @@ export const DirectSale: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {/* Patient Details Selection */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+        {/* Patient Details Selection */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-300">
+          <div 
+            onClick={() => setIsPatientInfoCollapsed(!isPatientInfoCollapsed)}
+            className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between cursor-pointer hover:bg-slate-100/50 transition-colors"
+          >
             <div className="flex items-center gap-2">
               <User className="w-4 h-4 text-violet-500" />
               <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Patient Information</h2>
+              {isPatientInfoCollapsed && (
+                <span className="text-[11px] text-slate-500 font-semibold ml-2 border-l border-slate-200 pl-2">
+                  {patient.firstName ? `${patient.firstName} ${patient.lastName || ''}`.trim() : 'Walk-in (CASH)'}
+                  {patient.phoneNo ? ` • Phone: ${patient.phoneNo}` : ''}
+                  {patient.age ? ` • Age: ${patient.age} ${patient.ageUnit}` : ''}
+                  {patient.gender ? ` • ${patient.gender}` : ''}
+                </span>
+              )}
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input 
-                type="checkbox" 
-                className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                checked={patient.isNewExternalPatient}
-                onChange={e => setPatient({...patient, isNewExternalPatient: e.target.checked})}
-              />
-              <span className="text-[11px] font-semibold text-slate-600">New External Patient</span>
-            </label>
-          </div>
-          
-          <div className="p-4 grid grid-cols-4 gap-x-4 gap-y-3">
-            {/* Row 1 */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">First Name <span className="text-red-500">*</span></label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                placeholder="Required"
-                value={patient.firstName}
-                onChange={e => setPatient({...patient, firstName: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Middle Name</label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.middleName}
-                onChange={e => setPatient({...patient, middleName: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Last Name</label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.lastName}
-                onChange={e => setPatient({...patient, lastName: e.target.value})}
-              />
-            </div>
-             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase flex justify-between items-center">
-                <span>Phone No.</span>
-                {patient.phoneNo && (
-                  <button
-                    type="button"
-                    onClick={handleLoyaltyLookup}
-                    disabled={loyaltyLoading}
-                    className="text-[9px] font-black text-violet-600 hover:text-violet-800 uppercase tracking-wider transition-colors outline-none"
-                  >
-                    {loyaltyLoading ? 'Checking...' : loyaltyAccount ? 'Refetch Wallet' : 'Check Loyalty'}
-                  </button>
-                )}
-              </label>
-              <div className="relative">
-                <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                <input 
-                  type="text" 
-                  className="w-full pl-7 pr-16 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                  value={patient.phoneNo}
-                  onChange={e => {
-                    setPatient({...patient, phoneNo: e.target.value});
-                    setLoyaltyAccount(null);
-                    setRedemptionCalc(null);
-                    setPointsToRedeem(0);
-                    setRedeemChecked(false);
-                  }}
-                />
-                {loyaltyAccount && (
-                  <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-violet-200">
-                    {loyaltyAccount.currentTier}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Row 2 */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">External No. (ID)</label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.externalNo}
-                onChange={e => setPatient({...patient, externalNo: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">DOB (dd-MM-YYYY)</label>
-              <div className="relative">
-                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                <input 
-                  type="date" 
-                  className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none italic text-slate-500"
-                  value={patient.dob}
-                  onChange={e => setPatient({...patient, dob: e.target.value})}
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Age</label>
-              <div className="flex gap-1">
-                <input 
-                  type="number" 
-                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                  value={patient.age || ''}
-                  onChange={e => setPatient({...patient, age: Number(e.target.value)})}
-                />
-                <select 
-                  className="w-24 px-1 py-1.5 text-[11px] border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-violet-500 outline-none"
-                  value={patient.ageUnit}
-                  onChange={e => setPatient({...patient, ageUnit: e.target.value})}
-                >
-                  <option>Years</option>
-                  <option>Months</option>
-                  <option>Days</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Gender</label>
-              <select 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.gender}
-                onChange={e => setPatient({...patient, gender: e.target.value})}
-              >
-                <option value="">-- Select --</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            {/* Row 3 */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Referred Doctor</label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.referredDoctor}
-                onChange={e => setPatient({...patient, referredDoctor: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">License No</label>
-              <input 
-                type="text" 
-                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                value={patient.licenseNo}
-                onChange={e => setPatient({...patient, licenseNo: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase text-slate-500">Nationality</label>
-              <div className="relative">
-                <Globe className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-                <input 
-                  type="text" 
-                  className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
-                  value={patient.nationality}
-                  onChange={e => setPatient({...patient, nationality: e.target.value})}
-                />
-              </div>
-            </div>
-            <div className="flex items-end pb-1.5">
+            <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input 
                   type="checkbox" 
-                  className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
-                  checked={patient.isInsured}
-                  onChange={e => setPatient({...patient, isInsured: e.target.checked})}
+                  className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                  checked={patient.isNewExternalPatient}
+                  onChange={e => setPatient({...patient, isNewExternalPatient: e.target.checked})}
                 />
-                <span className="text-xs font-semibold text-slate-700">Insured Patent?</span>
+                <span className="text-[11px] font-semibold text-slate-600">New External Patient</span>
               </label>
+              <button 
+                type="button" 
+                onClick={(e) => { e.stopPropagation(); setIsPatientInfoCollapsed(!isPatientInfoCollapsed); }}
+                className="text-violet-600 hover:text-violet-800 transition-colors text-xs font-bold px-1"
+              >
+                {isPatientInfoCollapsed ? 'Show ▾' : 'Hide ▴'}
+              </button>
+            </div>
+          </div>
+          
+          <div className={`transition-all duration-300 ${isPatientInfoCollapsed ? 'max-h-0 overflow-hidden' : 'p-4 border-t border-slate-100'}`}>
+            <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+              {/* Row 1 */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">First Name <span className="text-red-500">*</span></label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  placeholder="Required"
+                  value={patient.firstName}
+                  onChange={e => setPatient({...patient, firstName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Middle Name</label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.middleName}
+                  onChange={e => setPatient({...patient, middleName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Last Name</label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.lastName}
+                  onChange={e => setPatient({...patient, lastName: e.target.value})}
+                />
+              </div>
+               <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase flex justify-between items-center">
+                  <span>Phone No.</span>
+                  {patient.phoneNo && (
+                    <button
+                      type="button"
+                      onClick={handleLoyaltyLookup}
+                      disabled={loyaltyLoading}
+                      className="text-[9px] font-black text-violet-600 hover:text-violet-800 uppercase tracking-wider transition-colors outline-none"
+                    >
+                      {loyaltyLoading ? 'Checking...' : loyaltyAccount ? 'Refetch Wallet' : 'Check Loyalty'}
+                    </button>
+                  )}
+                </label>
+                <div className="relative">
+                  <Hash className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                  <input 
+                    type="text" 
+                    className="w-full pl-7 pr-16 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                    value={patient.phoneNo}
+                    onChange={e => {
+                      setPatient({...patient, phoneNo: e.target.value});
+                      setLoyaltyAccount(null);
+                      setRedemptionCalc(null);
+                      setPointsToRedeem(0);
+                      setRedeemChecked(false);
+                    }}
+                  />
+                  {loyaltyAccount && (
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 bg-violet-100 text-violet-700 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-violet-200">
+                      {loyaltyAccount.currentTier}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 2 */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">External No. (ID)</label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.externalNo}
+                  onChange={e => setPatient({...patient, externalNo: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">DOB (dd-MM-YYYY)</label>
+                <div className="relative">
+                  <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                  <input 
+                    type="date" 
+                    className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none italic text-slate-500"
+                    value={patient.dob}
+                    onChange={e => setPatient({...patient, dob: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Age</label>
+                <div className="flex gap-1">
+                  <input 
+                    type="number" 
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                    value={patient.age || ''}
+                    onChange={e => setPatient({...patient, age: Number(e.target.value)})}
+                  />
+                  <select 
+                    className="w-24 px-1 py-1.5 text-[11px] border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-violet-500 outline-none"
+                    value={patient.ageUnit}
+                    onChange={e => setPatient({...patient, ageUnit: e.target.value})}
+                  >
+                    <option>Years</option>
+                    <option>Months</option>
+                    <option>Days</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Gender</label>
+                <select 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.gender}
+                  onChange={e => setPatient({...patient, gender: e.target.value})}
+                >
+                  <option value="">-- Select --</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              {/* Row 3 */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Referred Doctor</label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.referredDoctor}
+                  onChange={e => setPatient({...patient, referredDoctor: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">License No</label>
+                <input 
+                  type="text" 
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                  value={patient.licenseNo}
+                  onChange={e => setPatient({...patient, licenseNo: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase text-slate-500">Nationality</label>
+                <div className="relative">
+                  <Globe className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                  <input 
+                    type="text" 
+                    className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-1 focus:ring-violet-500 outline-none"
+                    value={patient.nationality}
+                    onChange={e => setPatient({...patient, nationality: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="flex items-end pb-1.5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                    checked={patient.isInsured}
+                    onChange={e => setPatient({...patient, isInsured: e.target.checked})}
+                  />
+                  <span className="text-xs font-semibold text-slate-700">Insured Patent?</span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -1380,33 +1572,25 @@ export const DirectSale: React.FC = () => {
             </div>
           )}
 
-          <div className="flex-1 overflow-auto">
-             <table className="w-full text-xs">
-                <thead className="bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
-                   <tr>
-                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">#</th>
-                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px] w-1/3">Drug / Description</th>
-                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">UOM</th>
-                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">Batch No.</th>
-                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
-                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Unit MRP</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Tax</th>
-                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Subtotal</th>
-                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]"></th>
-                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                   {items.length === 0 ? (
+          {items.length > 0 && (
+            <div className="flex-1 max-h-[300px] overflow-y-auto border-t border-slate-100">
+               <table className="w-full text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
                      <tr>
-                        <td colSpan={10} className="py-20 text-center">
-                           <div className="flex flex-col items-center gap-2 text-slate-300">
-                             <Pill className="w-10 h-10 opacity-20" />
-                             <p className="font-medium text-xs">No drugs added. Select a store and click "Add Drug Row".</p>
-                           </div>
-                        </td>
+                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">#</th>
+                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px] w-1/3">Drug / Description</th>
+                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">UOM</th>
+                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">Batch No.</th>
+                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
+                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
+                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Unit MRP</th>
+                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Tax</th>
+                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Subtotal</th>
+                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]"></th>
                      </tr>
-                   ) : items.map((item, idx) => (
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                     {items.map((item, idx) => (
                      <tr key={idx} className="hover:bg-violet-50/10 transition-colors">
                         <td className="px-4 py-3 font-bold text-slate-400">{idx + 1}</td>
                         <td className="px-4 py-3">
@@ -1571,7 +1755,172 @@ export const DirectSale: React.FC = () => {
                 </tbody>
              </table>
           </div>
+          )}
         </div>
+
+        {/* Available Medicines Card */}
+        {selectedStore && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col gap-4">
+            
+            {/* Alphabetical (A - Z) Strip */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Pill className="w-4 h-4 text-violet-500" />
+                  <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Available Medicines (A - Z)</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 font-semibold">
+                    Showing {visibleGridItems.length} of {gridFilteredItems.length}
+                  </span>
+                  {gridFilteredItems.length > 12 && (
+                    <button 
+                      type="button"
+                      onClick={() => setSelectedLetter('All')}
+                      className="px-2 py-1 text-[10px] font-black text-violet-600 bg-violet-50 border border-violet-100 hover:bg-violet-100 rounded-md transition-colors uppercase"
+                    >
+                      View All
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* A-Z buttons */}
+              <div className="flex flex-wrap items-center gap-1.5 py-1 border-t border-b border-slate-100">
+                {['All', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(letter => {
+                  const isActive = selectedLetter === letter;
+                  return (
+                    <button
+                      key={letter}
+                      type="button"
+                      onClick={() => setSelectedLetter(letter)}
+                      className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                        isActive 
+                          ? 'bg-violet-600 text-white shadow-sm scale-105' 
+                          : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {letter}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Medicine Grid */}
+            {visibleStocksLoading ? (
+              <div className="py-20 text-center flex flex-col items-center gap-2 text-slate-400">
+                <div className="w-6 h-6 border-2 border-violet-600 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs font-semibold">Loading store inventory...</p>
+              </div>
+            ) : visibleGridItems.length === 0 ? (
+              <div className="py-16 text-center flex flex-col items-center gap-2 text-slate-300">
+                <Pill className="w-10 h-10 opacity-20" />
+                <p className="font-semibold text-xs text-slate-400">No medicines available starting with letter "{selectedLetter}"</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {visibleGridItems.map((item) => {
+                  const stockInfo = visibleStocks[item.id] || { stock: 0, mrp: 0 };
+                  const qty = visibleQuantities[item.id] || 0;
+                  const isFav = favorites.includes(item.id);
+                  const isOutOfStock = stockInfo.stock <= 0;
+
+                  return (
+                    <div 
+                      key={item.id} 
+                      className={`bg-white border rounded-2xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group ${
+                        isOutOfStock ? 'border-slate-100 bg-slate-50/30' : 'border-slate-200'
+                      }`}
+                    >
+                      {/* Star and Code */}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
+                          {item.itemCode}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleFavorite(item.id)}
+                          className="text-slate-300 hover:text-amber-500 transition-colors p-0.5"
+                        >
+                          <span className={`text-base ${isFav ? 'text-amber-500' : 'text-slate-300'}`}>
+                            ★
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Info */}
+                      <div className="mb-4">
+                        <h3 className="text-sm font-bold text-violet-600 leading-tight transition-colors">
+                          {item.itemName}
+                        </h3>
+                        <p className="text-[11px] text-slate-500 font-semibold mt-0.5 truncate" title={item.itemDescription}>
+                          {item.itemDescription || item.itemCategory}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Unit: <span className="font-bold text-slate-500">{item.salesUom || item.baseUom || 'EACH'}</span>
+                        </p>
+                      </div>
+
+                      {/* Pricing and Stock Row */}
+                      <div className="flex items-center justify-between border-t border-slate-50 pt-3 mt-auto">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                          isOutOfStock 
+                            ? 'bg-rose-50 text-rose-600 border border-rose-100' 
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                        }`}>
+                          Stock: {stockInfo.stock}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase">MRP:</span>
+                          <span className="text-xs font-bold text-slate-700">
+                            {formatCurrency(stockInfo.mrp)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Add controls */}
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-50">
+                        <div className="flex items-center bg-slate-50 rounded-lg border border-slate-200 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => adjustCardQuantity(item.id, -1)}
+                            disabled={qty <= 0 || isOutOfStock}
+                            className="w-6 h-6 flex items-center justify-center text-xs font-bold text-slate-500 hover:text-violet-600 disabled:opacity-30 outline-none bg-transparent border-0"
+                          >
+                            -
+                          </button>
+                          <span className="w-8 text-center text-xs font-bold text-slate-700">
+                            {qty}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => adjustCardQuantity(item.id, 1)}
+                            disabled={isOutOfStock}
+                            className="w-6 h-6 flex items-center justify-center text-xs font-bold text-slate-500 hover:text-violet-600 disabled:opacity-30 outline-none bg-transparent border-0"
+                          >
+                            +
+                          </button>
+                        </div>
+                        
+                        <button
+                          type="button"
+                          onClick={() => handleAddFromCard(item)}
+                          disabled={isOutOfStock}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg text-xs font-bold shadow-sm transition-all active:scale-[0.98] border-0"
+                        >
+                          <ShoppingCart className="w-3.5 h-3.5" />
+                          Add
+                        </button>
+                      </div>
+
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {error && (
