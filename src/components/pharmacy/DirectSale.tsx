@@ -235,7 +235,7 @@ export const DirectSale: React.FC = () => {
       setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
 
       // Fetch alternates (non-blocking)
-      fetchAlternates(item.id, selectedStore).then(res => {
+      fetchAlternates(item.id, selectedStore).then((res: any) => {
         if (res && res.alternates && res.alternates.length > 0) {
           setRowAlternates(prev => ({ ...prev, [targetIndex]: res.alternates }));
           setExpandedRows(prev => ({ ...prev, [targetIndex]: false }));
@@ -249,7 +249,7 @@ export const DirectSale: React.FC = () => {
             }
           }));
         }
-      }).catch(err => {
+      }).catch((err: any) => {
         console.error("Error in fetchAlternates inside handleAddFromCard:", err);
       });
 
@@ -549,7 +549,7 @@ export const DirectSale: React.FC = () => {
       setRowBatches(prev => ({ ...prev, [index]: batches }));
 
       // Fetch alternates in parallel to UOM and batch loading
-      fetchAlternates(item.id, selectedStore).then(res => {
+      fetchAlternates(item.id, selectedStore).then((res: any) => {
         if (res && res.alternates && res.alternates.length > 0) {
           setRowAlternates(prev => ({ ...prev, [index]: res.alternates }));
           setExpandedRows(prev => ({ ...prev, [index]: false }));
@@ -689,7 +689,7 @@ export const DirectSale: React.FC = () => {
     setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
 
     // Fetch alternates for scanner/GS1 auto-added item
-    fetchAlternates(matchedItem.id, selectedStore).then(res => {
+    fetchAlternates(matchedItem.id, selectedStore).then((res: any) => {
       if (res && res.alternates && res.alternates.length > 0) {
         setRowAlternates(prev => ({ ...prev, [targetIndex]: res.alternates }));
         setExpandedRows(prev => ({ ...prev, [targetIndex]: false }));

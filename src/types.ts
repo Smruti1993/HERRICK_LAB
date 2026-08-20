@@ -758,6 +758,15 @@ export interface DrugMaster {
   isActive: boolean;
 }
 
+export interface SubstitutionLogInput {
+  saleId: string;
+  lineNo: number;
+  originalDrugId: string;
+  suggestedDrugIds: string[];
+  switchedToDrugId?: string;
+  action: 'kept' | 'switched' | 'dismissed';
+}
+
 export interface TaxMaster {
   id: string;
   taxName: string;
