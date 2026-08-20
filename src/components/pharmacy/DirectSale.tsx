@@ -34,7 +34,8 @@ export const DirectSale: React.FC = () => {
     stores, inventoryItems, storeItemMappings, saveDirectSale, completeDirectSalePayment, fetchBatchDetails,
     fetchBatchLocation,
     itemTaxMappings, taxMasters, formatCurrency, selectedCurrency, saveInventoryItem, showToast,
-    enrollOrFetchLoyaltyAccount, calculateLoyaltyRedemption, processLoyaltyTransaction
+    enrollOrFetchLoyaltyAccount, calculateLoyaltyRedemption, processLoyaltyTransaction,
+    fetchAlternates, logSubstitutions
   } = useData();
 
   const decimals = selectedCurrency === 'BHD' ? 3 : 2;
@@ -100,6 +101,12 @@ export const DirectSale: React.FC = () => {
   const [rowBatches, setRowBatches] = useState<Record<number, any[]>>({});
   // Location display for each row
   const [rowLocations, setRowLocations] = useState<Record<number, string | null>>({});
+
+  const SALE_TABLE_COLUMN_COUNT = 10;
+  const [rowAlternates, setRowAlternates] = useState<Record<number, any[]>>({});
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
+  const [everExpandedRows, setEverExpandedRows] = useState<Record<number, boolean>>({});
+  const [substitutionAudit, setSubstitutionAudit] = useState<Record<number, { originalDrugId: string, suggestedDrugIds: string[], action: 'kept' | 'switched' | 'dismissed', switchedToDrugId?: string }>>({});
 
   // A-Z and Card Grid states
   const [selectedLetter, setSelectedLetter] = useState('All');
@@ -226,6 +233,25 @@ export const DirectSale: React.FC = () => {
       }
 
       setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
+
+      // Fetch alternates (non-blocking)
+      fetchAlternates(item.id, selectedStore).then(res => {
+        if (res && res.alternates && res.alternates.length > 0) {
+          setRowAlternates(prev => ({ ...prev, [targetIndex]: res.alternates }));
+          setExpandedRows(prev => ({ ...prev, [targetIndex]: false }));
+          setEverExpandedRows(prev => ({ ...prev, [targetIndex]: false }));
+          setSubstitutionAudit(prev => ({
+            ...prev,
+            [targetIndex]: {
+              originalDrugId: item.id,
+              suggestedDrugIds: res.alternates.map((alt: any) => alt.itemId),
+              action: 'kept'
+            }
+          }));
+        }
+      }).catch(err => {
+        console.error("Error in fetchAlternates inside handleAddFromCard:", err);
+      });
 
       if (activeBatch) {
         const isSalesUom = newItem.unit?.toUpperCase() === item.salesUom?.toUpperCase();
@@ -406,6 +432,7 @@ export const DirectSale: React.FC = () => {
       setShowUpiModal(false);
       setPendingSale(null);
       setPendingSaleNo('');
+      submitSubstitutionLogs(mappedSale.id || data.id);
     }
   };
 
@@ -499,7 +526,7 @@ export const DirectSale: React.FC = () => {
     setRowBatches(newRowBatches);
   };
 
-  const handleSelectItem = async (index: number, item: any) => {
+  const handleSelectItem = async (index: number, item: any, isSwap = false) => {
     const newItems = [...items];
     newItems[index] = {
       ...newItems[index],
@@ -520,6 +547,31 @@ export const DirectSale: React.FC = () => {
     if (selectedStore) {
       const batches = await fetchBatchDetails(selectedStore, item.id);
       setRowBatches(prev => ({ ...prev, [index]: batches }));
+
+      // Fetch alternates in parallel to UOM and batch loading
+      fetchAlternates(item.id, selectedStore).then(res => {
+        if (res && res.alternates && res.alternates.length > 0) {
+          setRowAlternates(prev => ({ ...prev, [index]: res.alternates }));
+          setExpandedRows(prev => ({ ...prev, [index]: false }));
+          setEverExpandedRows(prev => ({ ...prev, [index]: false }));
+          if (!isSwap) {
+            setSubstitutionAudit(prev => ({
+              ...prev,
+              [index]: {
+                originalDrugId: item.id,
+                suggestedDrugIds: res.alternates.map((alt: any) => alt.itemId),
+                action: 'kept'
+              }
+            }));
+          }
+        } else {
+          setRowAlternates(prev => {
+            const next = { ...prev };
+            delete next[index];
+            return next;
+          });
+        }
+      });
     }
   };
 
@@ -635,6 +687,29 @@ export const DirectSale: React.FC = () => {
     }
 
     setRowBatches(prev => ({ ...prev, [targetIndex]: batches }));
+
+    // Fetch alternates for scanner/GS1 auto-added item
+    fetchAlternates(matchedItem.id, selectedStore).then(res => {
+      if (res && res.alternates && res.alternates.length > 0) {
+        setRowAlternates(prev => ({ ...prev, [targetIndex]: res.alternates }));
+        setExpandedRows(prev => ({ ...prev, [targetIndex]: false }));
+        setEverExpandedRows(prev => ({ ...prev, [targetIndex]: false }));
+        setSubstitutionAudit(prev => ({
+          ...prev,
+          [targetIndex]: {
+            originalDrugId: matchedItem.id,
+            suggestedDrugIds: res.alternates.map((alt: any) => alt.itemId),
+            action: 'kept'
+          }
+        }));
+      } else {
+        setRowAlternates(prev => {
+          const next = { ...prev };
+          delete next[targetIndex];
+          return next;
+        });
+      }
+    });
 
     if (activeBatch) {
       const isSalesUom = newItem.unit?.toUpperCase() === matchedItem.salesUom?.toUpperCase();
@@ -903,6 +978,26 @@ export const DirectSale: React.FC = () => {
     }
   }, [loyaltyAccount, totalBeforeDiscount, discountAmount]);
 
+  const submitSubstitutionLogs = async (saleId: string) => {
+    const logsToSave = Object.entries(substitutionAudit).map(([index, audit]) => ({
+      saleId,
+      lineNo: Number(index) + 1,
+      originalDrugId: audit.originalDrugId,
+      suggestedDrugIds: audit.suggestedDrugIds,
+      switchedToDrugId: audit.switchedToDrugId,
+      action: audit.action
+    }));
+
+    if (logsToSave.length > 0) {
+      await logSubstitutions(logsToSave);
+    }
+
+    setRowAlternates({});
+    setExpandedRows({});
+    setEverExpandedRows({});
+    setSubstitutionAudit({});
+  };
+
   const handleCloseInvoice = () => {
     setLastDispensedSale(null);
     setPatient(INITIAL_PATIENT);
@@ -922,6 +1017,10 @@ export const DirectSale: React.FC = () => {
     setRedemptionCalc(null);
     setPointsToRedeem(0);
     setRedeemChecked(false);
+    setRowAlternates({});
+    setExpandedRows({});
+    setEverExpandedRows({});
+    setSubstitutionAudit({});
   };
 
   const loadRazorpayScript = () => {
@@ -1086,6 +1185,7 @@ export const DirectSale: React.FC = () => {
         );
       }
       setLastDispensedSale(result.savedSale);
+      if (result.savedSale.id) submitSubstitutionLogs(result.savedSale.id);
     }
     setLoading(false);
   };
@@ -1334,7 +1434,7 @@ export const DirectSale: React.FC = () => {
                     checked={patient.isInsured}
                     onChange={e => setPatient({...patient, isInsured: e.target.checked})}
                   />
-                  <span className="text-xs font-semibold text-slate-700">Insured Patent?</span>
+                  <span className="text-xs font-semibold text-slate-700">Insured Patient?</span>
                 </label>
               </div>
             </div>
@@ -1342,7 +1442,7 @@ export const DirectSale: React.FC = () => {
         </div>
 
         {/* Store & Items Section */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[400px]">
+        <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col transition-all duration-300 ${items.length > 0 ? 'min-h-[300px]' : ''}`}>
           <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-4">
                <div className="flex items-center gap-2">
@@ -1573,184 +1673,277 @@ export const DirectSale: React.FC = () => {
           )}
 
           {items.length > 0 && (
-            <div className="flex-1 max-h-[300px] overflow-y-auto border-t border-slate-100">
-               <table className="w-full text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
+            <div className="flex-1 max-h-[300px] overflow-y-auto">
+             <table className="w-full text-xs">
+                <thead className="bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
+                   <tr>
+                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">#</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px] w-1/3">Drug / Description</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">UOM</th>
+                      <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">Batch No.</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Unit MRP</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Tax</th>
+                      <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Subtotal</th>
+                      <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]"></th>
+                   </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                   {items.length === 0 ? (
                      <tr>
-                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">#</th>
-                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px] w-1/3">Drug / Description</th>
-                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">UOM</th>
-                        <th className="px-4 py-2 text-left font-bold text-slate-500 uppercase text-[10px]">Batch No.</th>
-                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]">Available</th>
-                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px] w-20">Qty</th>
-                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Unit MRP</th>
-                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Tax</th>
-                        <th className="px-4 py-2 text-right font-bold text-slate-500 uppercase text-[10px]">Subtotal</th>
-                        <th className="px-4 py-2 text-center font-bold text-slate-500 uppercase text-[10px]"></th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                     {items.map((item, idx) => (
-                     <tr key={idx} className="hover:bg-violet-50/10 transition-colors">
-                        <td className="px-4 py-3 font-bold text-slate-400">{idx + 1}</td>
-                        <td className="px-4 py-3">
-                           <div className="relative" ref={idx === activeSearchIndex ? itemSearchRef : null}>
-                              <div className="relative group">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-300 group-hover:text-violet-500 transition-colors" />
-                                <input 
-                                  type="text" 
-                                  className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-violet-500 outline-none"
-                                  placeholder="Search drug name or code…"
-                                  value={idx === activeSearchIndex ? itemQuery : item.itemName ? `${item.itemName} (${item.itemCode})` : ''}
-                                  onFocus={() => { setActiveSearchIndex(idx); setItemQuery(''); setShowItemDropdown(true); }}
-                                  onChange={e => { setItemQuery(e.target.value); setShowItemDropdown(true); }}
-                                />
-                              </div>
-                              {showItemDropdown && activeSearchIndex === idx && itemQuery.length >= 1 && (
-                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
-                                   {itemOptions.length === 0 ? (
-                                      <div className="p-3 text-center text-[10px] text-slate-400 italic">No matching drugs found</div>
-                                   ) : itemOptions.map(opt => (
-                                     <button 
-                                       key={opt.id}
-                                       onClick={() => handleSelectItem(idx, opt)}
-                                       className="w-full text-left px-3 py-2 hover:bg-violet-50 border-b border-slate-50 last:border-0"
-                                     >
-                                        <p className="text-xs font-bold text-slate-800">{opt.itemName}</p>
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded font-bold uppercase">{opt.itemCode}</span>
-                                          <span className="text-[9px] text-slate-300">·</span>
-                                          <span className="text-[9px] text-slate-400 uppercase font-medium">{opt.itemCategory}</span>
-                                          {opt.gtin && (
-                                            <>
-                                              <span className="text-[9px] text-slate-300">·</span>
-                                              <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold uppercase tracking-tight">GTIN: {opt.gtin}</span>
-                                            </>
-                                          )}
-                                        </div>
-                                     </button>
-                                   ))}
-                                </div>
-                              )}
+                        <td colSpan={10} className="py-20 text-center">
+                           <div className="flex flex-col items-center gap-2 text-slate-300">
+                             <Pill className="w-10 h-10 opacity-20" />
+                             <p className="font-medium text-xs">No drugs added. Select a store and click "Add Drug Row".</p>
                            </div>
                         </td>
-                        <td className="px-4 py-3">
-                           {(() => {
-                                const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
-                                const options: string[] = [];
-                                
-                                let base = (itemDef?.baseUom || '').trim().toUpperCase();
-                                let sales = (itemDef?.salesUom || '').trim().toUpperCase();
-                                
-                                // Sensible fallbacks if data is missing or mismatched
-                                if (!base) {
-                                    if (sales === 'STRIP') base = 'TABLET';
-                                    else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
-                                    else base = 'EACH';
-                                }
-                                if (!sales) {
-                                    sales = base;
-                                }
-                                if (base === sales && Number(itemDef?.salesConversionFactor || 1) > 1) {
-                                    if (sales === 'STRIP') base = 'TABLET';
-                                    else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
-                                    else base = 'EACH';
-                                }
-
-                                if (base) options.push(base);
-                                if (sales && sales !== base) options.push(sales);
-                                return (
-                                    <select
-                                        className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white font-bold text-slate-700"
-                                        value={item.unit || ''}
-                                        disabled={!item.itemId}
-                                        onChange={e => handleSelectUom(idx, e.target.value)}
-                                    >
-                                        {options.map(opt => (
-                                            <option key={opt} value={opt}>{opt}</option>
-                                        ))}
-                                    </select>
-                                );
-                           })()}
-                        </td>
-                        <td className="px-4 py-3">
-                           <select 
-                             className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white"
-                             value={item.batchNo}
-                             disabled={!item.itemId}
-                             onChange={e => handleSelectBatch(idx, e.target.value)}
-                           >
-                             <option value="">-- Batch --</option>
-                             {rowBatches[idx]?.map(b => (
-                               <option key={b.batchNo} value={b.batchNo}>{b.batchNo} (MRP: {b.mrp})</option>
-                             ))}
-                           </select>
-                           {/* Location display */}
-                           {rowLocations[idx] ? (
-                             <div style={{ fontSize: 10, marginTop: 2, color: '#4c51bf', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
-                               <span>📍</span><span>{rowLocations[idx]}</span>
-                             </div>
-                           ) : item.batchNo ? (
-                             <div style={{ fontSize: 10, marginTop: 2, color: '#cbd5e0', fontStyle: 'italic' }}>📍 No location</div>
-                           ) : null}
-                        </td>
-                        <td className="px-4 py-3 text-center font-bold">
-                           {item.batchNo ? (
-                             (() => {
-                                 const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
-                                 const isSalesUom = item.unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
-                                 const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
-                                 const rawStock = rowBatches[idx]?.find(b => b.batchNo === item.batchNo)?.currentStock || 0;
-                                 const displayStock = Math.floor(rawStock / salesCF);
-                                 return (
-                                     <span className="text-violet-600 bg-violet-50 px-2 py-1 rounded text-[10px]">
-                                         {displayStock}
-                                     </span>
-                                 );
-                             })()
-                           ) : <span className="text-slate-200">-</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                           <input 
-                              type="number" 
-                              className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center font-bold outline-none focus:ring-1 focus:ring-violet-500"
-                              value={item.quantity}
-                              onChange={e => updateItemQty(idx, Number(e.target.value))}
-                              min="1"
-                           />
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-slate-600 italic">
-                           {item.unitPrice > 0 ? item.unitPrice.toFixed(decimals) : '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                           {(() => {
-                               const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
-                               const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
-                               if (tax && item.unitPrice > 0) {
-                                   const totalPrice = item.quantity * item.unitPrice;
-                                   const amt = totalPrice * tax.percentage / (100 + tax.percentage);
-                                   return (
-                                       <div className="flex flex-col">
-                                           <span className="text-violet-600 font-bold">{amt.toFixed(decimals)}</span>
-                                           <span className="text-[9px] text-slate-400 font-bold uppercase">({tax.percentage}%)</span>
-                                       </div>
-                                   );
-                               }
-                               return <span className="text-slate-200">0.00</span>;
-                           })()}
-                        </td>
-                        <td className="px-4 py-3 text-right font-black text-slate-800">
-                           {item.totalPrice > 0 ? item.totalPrice.toFixed(decimals) : '0.00'}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                           <button 
-                             onClick={() => removeItemRow(idx)}
-                             className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                           >
-                             <Trash2 className="w-4 h-4" />
-                           </button>
-                        </td>
                      </tr>
+                   ) : items.map((item, idx) => (
+                      <React.Fragment key={idx}>
+                        <tr className="hover:bg-violet-50/10 transition-colors">
+                           <td className="px-4 py-3 font-bold text-slate-400">{idx + 1}</td>
+                           <td className="px-4 py-3">
+                              <div className="relative" ref={idx === activeSearchIndex ? itemSearchRef : null}>
+                                 <div className="relative group">
+                                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-300 group-hover:text-violet-500 transition-colors" />
+                                   <input 
+                                     type="text" 
+                                     className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded-lg text-xs focus:ring-1 focus:ring-violet-500 outline-none"
+                                     placeholder="Search drug name or code…"
+                                     value={idx === activeSearchIndex ? itemQuery : item.itemName ? `${item.itemName} (${item.itemCode})` : ''}
+                                     onChange={e => {
+                                         setItemQuery(e.target.value);
+                                         setActiveSearchIndex(idx);
+                                         setShowItemDropdown(true);
+                                     }}
+                                     onFocus={() => {
+                                         setActiveSearchIndex(idx);
+                                         setItemQuery('');
+                                         setShowItemDropdown(true);
+                                     }}
+                                   />
+                                   {idx === activeSearchIndex && showItemDropdown && itemQuery.length > 0 && (
+                                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto">
+                                        {itemOptions.length === 0 ? (
+                                          <div className="p-4 text-center text-xs text-slate-400">No drugs found</div>
+                                        ) : itemOptions.map(option => (
+                                          <button
+                                            key={option.id}
+                                            type="button"
+                                            className="w-full text-left px-4 py-2.5 hover:bg-violet-50 border-b border-slate-50 last:border-0 transition-colors"
+                                            onClick={() => handleSelectItem(idx, option)}
+                                          >
+                                            <p className="text-xs font-bold text-slate-800">{option.itemName}</p>
+                                            <p className="text-[10px] text-slate-400 font-mono">{option.itemCode} • {option.salesUom || option.baseUom || 'EACH'}</p>
+                                          </button>
+                                        ))}
+                                     </div>
+                                   )}
+                                 </div>
+                              </div>
+                           </td>
+                           <td className="px-4 py-3">
+                              {(() => {
+                                   const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                                   const options: string[] = [];
+                                   
+                                   let base = (itemDef?.baseUom || '').trim().toUpperCase();
+                                   let sales = (itemDef?.salesUom || '').trim().toUpperCase();
+                                   
+                                   // Sensible fallbacks if data is missing or mismatched
+                                   if (!base) {
+                                       if (sales === 'STRIP') base = 'TABLET';
+                                       else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
+                                       else base = 'EACH';
+                                   }
+                                   if (!sales) {
+                                       sales = base;
+                                   }
+                                   if (base === sales && Number(itemDef?.salesConversionFactor || 1) > 1) {
+                                       if (sales === 'STRIP') base = 'TABLET';
+                                       else if (sales === 'BOX' || sales === 'PACK') base = 'EACH';
+                                       else base = 'EACH';
+                                   }
+   
+                                   if (base) options.push(base);
+                                   if (sales && sales !== base) options.push(sales);
+                                   return (
+                                       <select
+                                           className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white font-bold text-slate-700"
+                                           value={item.unit || ''}
+                                           disabled={!item.itemId}
+                                           onChange={e => handleSelectUom(idx, e.target.value)}
+                                       >
+                                           {options.map(opt => (
+                                               <option key={opt} value={opt}>{opt}</option>
+                                           ))}
+                                       </select>
+                                   );
+                              })()}
+                           </td>
+                           <td className="px-4 py-3">
+                              <select 
+                                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-violet-500 bg-white"
+                                value={item.batchNo}
+                                disabled={!item.itemId}
+                                onChange={e => handleSelectBatch(idx, e.target.value)}
+                              >
+                                <option value="">-- Batch --</option>
+                                {rowBatches[idx]?.map(b => (
+                                  <option key={b.batchNo} value={b.batchNo}>{b.batchNo} (MRP: {b.mrp})</option>
+                                ))}
+                              </select>
+                              {/* Location display */}
+                              {rowLocations[idx] ? (
+                                <div style={{ fontSize: 10, marginTop: 2, color: '#4c51bf', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                  <span>📍</span><span>{rowLocations[idx]}</span>
+                                </div>
+                              ) : item.batchNo ? (
+                                <div style={{ fontSize: 10, marginTop: 2, color: '#cbd5e0', fontStyle: 'italic' }}>📍 No location</div>
+                              ) : null}
+                           </td>
+                           <td className="px-4 py-3 text-center font-bold">
+                              {item.batchNo ? (
+                                (() => {
+                                    const itemDef = inventoryItems.find(inv => inv.id === item.itemId);
+                                    const isSalesUom = item.unit?.toUpperCase() === itemDef?.salesUom?.toUpperCase();
+                                    const salesCF = isSalesUom ? Number(itemDef?.salesConversionFactor || 1) : 1;
+                                    const rawStock = rowBatches[idx]?.find(b => b.batchNo === item.batchNo)?.currentStock || 0;
+                                    const displayStock = Math.floor(rawStock / salesCF);
+                                    return (
+                                        <span className="text-violet-600 bg-violet-50 px-2 py-1 rounded text-[10px]">
+                                            {displayStock}
+                                        </span>
+                                    );
+                                })()
+                              ) : <span className="text-slate-200">-</span>}
+                           </td>
+                           <td className="px-4 py-3">
+                              <input 
+                                 type="number" 
+                                 className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs text-center font-bold outline-none focus:ring-1 focus:ring-violet-500"
+                                 value={item.quantity}
+                                 onChange={e => updateItemQty(idx, Number(e.target.value))}
+                                 min="1"
+                              />
+                           </td>
+                           <td className="px-4 py-3 text-right font-medium text-slate-600 italic">
+                              {item.unitPrice > 0 ? item.unitPrice.toFixed(decimals) : '-'}
+                           </td>
+                           <td className="px-4 py-3 text-right">
+                              {(() => {
+                                  const mapping = itemTaxMappings.find(m => m.itemId === item.itemId);
+                                  const tax = mapping ? taxMasters.find(t => t.id === mapping.taxId && t.status === 'Active') : null;
+                                  if (tax && item.unitPrice > 0) {
+                                      const totalPrice = item.quantity * item.unitPrice;
+                                      const amt = totalPrice * tax.percentage / (100 + tax.percentage);
+                                      return (
+                                          <div className="flex flex-col">
+                                              <span className="text-violet-600 font-bold">{amt.toFixed(decimals)}</span>
+                                              <span className="text-[9px] text-slate-400 font-bold uppercase">({tax.percentage}%)</span>
+                                          </div>
+                                      );
+                                  }
+                                  return <span className="text-slate-200">0.00</span>;
+                              })()}
+                           </td>
+                           <td className="px-4 py-3 text-right font-black text-slate-800">
+                              {item.totalPrice > 0 ? item.totalPrice.toFixed(decimals) : '0.00'}
+                           </td>
+                           <td className="px-4 py-3 text-center">
+                              <button 
+                                onClick={() => removeItemRow(idx)}
+                                className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                           </td>
+                        </tr>
+                        
+                        {/* Alternates Sub-row */}
+                        {rowAlternates[idx] && rowAlternates[idx].length > 0 && (
+                          <tr>
+                            <td colSpan={10} className="px-4 py-2 bg-slate-50 border-t border-b border-slate-100">
+                              <div className="flex flex-col gap-2">
+                                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                                  <div className="flex items-center gap-2">
+                                    <span className="animate-bounce">🔄</span>
+                                    <span className="text-violet-600 font-extrabold">{rowAlternates[idx].length} generic alternates available</span>
+                                    <span>for {item.itemName}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const willExpand = !expandedRows[idx];
+                                      setExpandedRows(prev => ({ ...prev, [idx]: willExpand }));
+
+                                      if (willExpand) {
+                                        setEverExpandedRows(prev => ({ ...prev, [idx]: true }));
+                                      } else if (everExpandedRows[idx]) {
+                                        setSubstitutionAudit(prev => {
+                                          const existing = prev[idx];
+                                          if (!existing || existing.action === 'switched') return prev;
+                                          return { ...prev, [idx]: { ...existing, action: 'dismissed' } };
+                                        });
+                                      }
+                                    }}
+                                    className="text-violet-600 hover:text-violet-800 underline font-bold"
+                                  >
+                                    {expandedRows[idx] ? 'Hide' : 'Show Alternates'}
+                                  </button>
+                                </div>
+
+                                {expandedRows[idx] && (
+                                  <div className="grid grid-cols-1 gap-2 mt-1 bg-white p-3 rounded-lg border border-slate-200 shadow-sm max-w-2xl">
+                                    {rowAlternates[idx].map((alt) => (
+                                      <div key={alt.itemId} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
+                                        <div>
+                                          <p className="font-bold text-slate-800">{alt.itemName} <span className="text-[10px] text-slate-400 font-mono">({alt.itemCode})</span></p>
+                                          <p className="text-[10px] text-slate-400">{alt.dosageForm} · Available stock: <span className="font-bold text-slate-600">{alt.availableQty}</span></p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                          <div className="text-right">
+                                            <p className="font-extrabold text-slate-800">{formatCurrency(alt.mrp)}</p>
+                                            {alt.savings > 0 && (
+                                              <p className="text-[10px] text-emerald-600 font-bold">Save {formatCurrency(alt.savings)}</p>
+                                            )}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const matchedItem = inventoryItems.find(i => i.id === alt.itemId);
+                                              if (matchedItem) {
+                                                handleSelectItem(idx, matchedItem, true);
+
+                                                setSubstitutionAudit(prev => ({
+                                                  ...prev,
+                                                  [idx]: { ...prev[idx], action: 'switched', switchedToDrugId: alt.itemId }
+                                                }));
+
+                                                setRowAlternates(prev => {
+                                                  const next = { ...prev };
+                                                  delete next[idx];
+                                                  return next;
+                                                });
+
+                                                showToast('success', `Swapped to alternate: ${alt.itemName}`);
+                                              }
+                                            }}
+                                            className="px-2.5 py-1 bg-violet-600 hover:bg-violet-700 text-white rounded text-[10px] font-bold shadow-sm"
+                                          >
+                                            Use Alternate
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                    ))}
                 </tbody>
              </table>
